@@ -626,8 +626,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cli.set_reasoning_effort(reasoning_effort);
             cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
         }
-        CliAction::OpenAiServe { bind, model } => {
-            openai_server::serve_blocking(bind, model)?;
+        CliAction::OpenAiServe {
+            bind,
+            model,
+            allowed_tools,
+            permission_mode,
+        } => {
+            openai_server::serve_blocking(bind, model, allowed_tools, permission_mode)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
@@ -758,6 +763,8 @@ enum CliAction {
     OpenAiServe {
         bind: String,
         model: String,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -1345,7 +1352,13 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
         }
         "system-prompt" => parse_system_prompt_args(&rest[1..], model, output_format),
-        "openai-serve" => parse_openai_serve_args(&rest[1..], model, model_flag_raw.is_some()),
+        "openai-serve" => parse_openai_serve_args(
+            &rest[1..],
+            model,
+            model_flag_raw.is_some(),
+            allowed_tools,
+            permission_mode_override.unwrap_or(PermissionMode::ReadOnly),
+        ),
         "acp" => parse_acp_args(&rest[1..], output_format),
         "login" | "logout" => Err(removed_auth_surface_error(rest[0].as_str())),
         "init" => {
@@ -1674,6 +1687,8 @@ fn parse_openai_serve_args(
     args: &[String],
     model: String,
     model_was_explicit: bool,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
 ) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
     let mut index = 0;
@@ -1706,7 +1721,12 @@ fn parse_openai_serve_args(
     }
 
     let model = resolve_openai_serve_model(model, model_was_explicit)?;
-    Ok(CliAction::OpenAiServe { bind, model })
+    Ok(CliAction::OpenAiServe {
+        bind,
+        model,
+        allowed_tools,
+        permission_mode,
+    })
 }
 
 fn resolve_openai_serve_model(
