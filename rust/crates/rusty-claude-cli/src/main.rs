@@ -10014,8 +10014,26 @@ fn resolve_cli_auth_source_for_cwd() -> Result<AuthSource, api::ApiError> {
 }
 
 impl ApiClient for AnthropicRuntimeClient {
-    #[allow(clippy::too_many_lines)]
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        self.stream_with_optional_event_sink(request, None)
+    }
+
+    fn stream_with_event_sink(
+        &mut self,
+        request: ApiRequest,
+        event_sink: &mut dyn FnMut(&AssistantEvent),
+    ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        self.stream_with_optional_event_sink(request, Some(event_sink))
+    }
+}
+
+impl AnthropicRuntimeClient {
+    #[allow(clippy::too_many_lines)]
+    fn stream_with_optional_event_sink(
+        &mut self,
+        request: ApiRequest,
+        mut event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
+    ) -> Result<Vec<AssistantEvent>, RuntimeError> {
         if let Some(progress_reporter) = &self.progress_reporter {
             progress_reporter.mark_model_phase();
         }
@@ -10035,16 +10053,23 @@ impl ApiClient for AnthropicRuntimeClient {
         };
 
         self.runtime.block_on(async {
-            // When resuming after tool execution, apply a stall timeout on the
-            // first stream event.  If the model does not respond within the
-            // deadline we drop the stalled connection and re-send the request as
-            // a continuation nudge (one retry only).
             let max_attempts: usize = if is_post_tool { 2 } else { 1 };
 
             for attempt in 1..=max_attempts {
-                let result = self
-                    .consume_stream(&message_request, is_post_tool && attempt == 1)
-                    .await;
+                let result = match event_sink.as_mut() {
+                    Some(sink) => {
+                        self.consume_stream(
+                            &message_request,
+                            is_post_tool && attempt == 1,
+                            Some(&mut **sink),
+                        )
+                        .await
+                    }
+                    None => {
+                        self.consume_stream(&message_request, is_post_tool && attempt == 1, None)
+                            .await
+                    }
+                };
                 match result {
                     Ok(events) => return Ok(events),
                     Err(error)
@@ -10061,9 +10086,7 @@ impl ApiClient for AnthropicRuntimeClient {
             Err(RuntimeError::new("post-tool continuation nudge exhausted"))
         })
     }
-}
 
-impl AnthropicRuntimeClient {
     /// Consume a single streaming response, optionally applying a stall
     /// timeout on the first event for post-tool continuations.
     #[allow(clippy::too_many_lines)]
@@ -10071,6 +10094,7 @@ impl AnthropicRuntimeClient {
         &self,
         message_request: &MessageRequest,
         apply_stall_timeout: bool,
+        mut event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
     ) -> Result<Vec<AssistantEvent>, RuntimeError> {
         let mut stream = self
             .client
@@ -10161,7 +10185,11 @@ impl AnthropicRuntimeClient {
                                     .and_then(|()| out.flush())
                                     .map_err(|error| RuntimeError::new(error.to_string()))?;
                             }
-                            events.push(AssistantEvent::TextDelta(text));
+                            emit_assistant_event(
+                                &mut events,
+                                &mut event_sink,
+                                AssistantEvent::TextDelta(text),
+                            );
                         }
                     }
                     ContentBlockDelta::InputJsonDelta { partial_json } => {
@@ -10195,10 +10223,14 @@ impl AnthropicRuntimeClient {
                     }
                     // 把累积的 thinking 转成 AssistantEvent::Thinking（让 build_assistant_message 写入 session）
                     if let Some((thinking, signature)) = pending_thinking.take() {
-                        events.push(AssistantEvent::Thinking {
-                            thinking,
-                            signature,
-                        });
+                        emit_assistant_event(
+                            &mut events,
+                            &mut event_sink,
+                            AssistantEvent::Thinking {
+                                thinking,
+                                signature,
+                            },
+                        );
                     }
                     if let Some((id, name, input)) = pending_tool.take() {
                         if let Some(progress_reporter) = &self.progress_reporter {
@@ -10208,11 +10240,19 @@ impl AnthropicRuntimeClient {
                         writeln!(out, "\n{}", format_tool_call_start(&name, &input))
                             .and_then(|()| out.flush())
                             .map_err(|error| RuntimeError::new(error.to_string()))?;
-                        events.push(AssistantEvent::ToolUse { id, name, input });
+                        emit_assistant_event(
+                            &mut events,
+                            &mut event_sink,
+                            AssistantEvent::ToolUse { id, name, input },
+                        );
                     }
                 }
                 ApiStreamEvent::MessageDelta(delta) => {
-                    events.push(AssistantEvent::Usage(delta.usage.token_usage()));
+                    emit_assistant_event(
+                        &mut events,
+                        &mut event_sink,
+                        AssistantEvent::Usage(delta.usage.token_usage()),
+                    );
                 }
                 ApiStreamEvent::MessageStop(_) => {
                     saw_stop = true;
@@ -10221,7 +10261,7 @@ impl AnthropicRuntimeClient {
                             .and_then(|()| out.flush())
                             .map_err(|error| RuntimeError::new(error.to_string()))?;
                     }
-                    events.push(AssistantEvent::MessageStop);
+                    emit_assistant_event(&mut events, &mut event_sink, AssistantEvent::MessageStop);
                 }
             }
         }
@@ -10234,7 +10274,7 @@ impl AnthropicRuntimeClient {
                     || matches!(event, AssistantEvent::ToolUse { .. })
             })
         {
-            events.push(AssistantEvent::MessageStop);
+            emit_assistant_event(&mut events, &mut event_sink, AssistantEvent::MessageStop);
         }
 
         if events
@@ -10256,8 +10296,24 @@ impl AnthropicRuntimeClient {
             })?;
         let mut events = response_to_events(response, out)?;
         push_prompt_cache_record(&self.client, &mut events);
+        if let Some(sink) = event_sink.as_mut() {
+            for event in &events {
+                sink(event);
+            }
+        }
         Ok(events)
     }
+}
+
+fn emit_assistant_event(
+    events: &mut Vec<AssistantEvent>,
+    event_sink: &mut Option<&mut dyn FnMut(&AssistantEvent)>,
+    event: AssistantEvent,
+) {
+    if let Some(sink) = event_sink.as_mut() {
+        sink(&event);
+    }
+    events.push(event);
 }
 
 /// Returns `true` when the conversation ends with a tool-result message,
