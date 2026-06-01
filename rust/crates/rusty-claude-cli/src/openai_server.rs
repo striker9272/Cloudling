@@ -67,7 +67,7 @@ async fn models(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
         data: vec![ModelObject {
             id: state.model.clone(),
             object: "model",
-            owned_by: "claw-lab",
+            owned_by: "claw-openai-serve",
         }],
     })
 }

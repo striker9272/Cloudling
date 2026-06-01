@@ -1345,7 +1345,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
         }
         "system-prompt" => parse_system_prompt_args(&rest[1..], model, output_format),
-        "openai-serve" => parse_openai_serve_args(&rest[1..], model),
+        "openai-serve" => parse_openai_serve_args(&rest[1..], model, model_flag_raw.is_some()),
         "acp" => parse_acp_args(&rest[1..], output_format),
         "login" | "logout" => Err(removed_auth_surface_error(rest[0].as_str())),
         "init" => {
@@ -1670,7 +1670,11 @@ fn unexpected_diff_args_error(extra: &[String]) -> String {
     )
 }
 
-fn parse_openai_serve_args(args: &[String], model: String) -> Result<CliAction, String> {
+fn parse_openai_serve_args(
+    args: &[String],
+    model: String,
+    model_was_explicit: bool,
+) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
     let mut index = 0;
 
@@ -1678,7 +1682,7 @@ fn parse_openai_serve_args(args: &[String], model: String) -> Result<CliAction, 
         match args[index].as_str() {
             "--bind" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    "missing_flag_value: missing value for --bind.\nUsage: claw openai-serve [--bind 127.0.0.1:4097]".to_string()
+                    "missing_flag_value: missing value for --bind.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]".to_string()
                 })?;
                 bind = value.clone();
                 index += 2;
@@ -1689,19 +1693,47 @@ fn parse_openai_serve_args(args: &[String], model: String) -> Result<CliAction, 
             }
             "--help" | "-h" => {
                 return Err(
-                    "Usage: claw openai-serve [--bind 127.0.0.1:4097]\nStarts the experimental OpenAI-compatible HTTP server."
+                    "Usage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]\nStarts the experimental OpenAI-compatible HTTP server. If --model is omitted, OPENAI_MODEL is used."
                         .to_string(),
                 );
             }
             other => {
                 return Err(format!(
-                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw openai-serve [--bind 127.0.0.1:4097]"
+                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]"
                 ));
             }
         }
     }
 
+    let model = resolve_openai_serve_model(model, model_was_explicit)?;
     Ok(CliAction::OpenAiServe { bind, model })
+}
+
+fn resolve_openai_serve_model(
+    parsed_model: String,
+    model_was_explicit: bool,
+) -> Result<String, String> {
+    if model_was_explicit {
+        return Ok(parsed_model);
+    }
+
+    if let Ok(value) = env::var("OPENAI_MODEL") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            if trimmed.contains('/') {
+                validate_model_syntax(trimmed)?;
+                return Ok(resolve_model_alias_with_config(trimmed));
+            }
+            let resolved = format!("openai/{trimmed}");
+            validate_model_syntax(&resolved)?;
+            return Ok(resolved);
+        }
+    }
+
+    Err(
+        "missing_model: openai-serve requires an explicit OpenAI-compatible model.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097], or set OPENAI_MODEL=<model>"
+            .to_string(),
+    )
 }
 
 fn parse_acp_args(args: &[String], output_format: CliOutputFormat) -> Result<CliAction, String> {
