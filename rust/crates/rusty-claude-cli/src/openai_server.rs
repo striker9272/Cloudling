@@ -1,18 +1,24 @@
 use axum::{
     extract::State,
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
     routing::{get, post},
     Json, Router,
 };
-use runtime::PermissionMode;
+use runtime::{AssistantEvent, PermissionMode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    convert::Infallible,
     net::SocketAddr,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Clone)]
 struct OpenAiServerState {
@@ -83,6 +89,30 @@ struct ChatCompletionUsage {
     prompt_tokens: u32,
     completion_tokens: u32,
     total_tokens: u32,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionChunk {
+    id: String,
+    object: &'static str,
+    created: u64,
+    model: String,
+    choices: Vec<ChatCompletionChunkChoice>,
+}
+
+#[derive(Serialize)]
+struct ChatCompletionChunkChoice {
+    index: u32,
+    delta: ChatCompletionDelta,
+    finish_reason: Option<&'static str>,
+}
+
+#[derive(Default, Serialize)]
+struct ChatCompletionDelta {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    content: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -159,11 +189,7 @@ async fn chat_completions(
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
     if request.stream {
-        return error_response(
-            StatusCode::BAD_REQUEST,
-            "stream=true is reserved for the next SSE implementation step",
-            "not_implemented",
-        );
+        return stream_chat_completions(state, request);
     }
 
     let prompt = match messages_to_prompt(&request.messages) {
@@ -183,7 +209,6 @@ async fn chat_completions(
                 state_for_task.permission_mode,
             )
             .map_err(|error| error.to_string())?;
-
             session
                 .run_prompt_json(&prompt)
                 .map_err(|error| error.to_string())
@@ -194,11 +219,7 @@ async fn chat_completions(
     let engine_response = match result {
         Ok(Ok(response)) => response,
         Ok(Err(error)) => {
-            return error_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                &error.to_string(),
-                "engine_error",
-            )
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error, "engine_error")
         }
         Err(error) => {
             return error_response(
@@ -232,6 +253,163 @@ async fn chat_completions(
         },
     })
     .into_response()
+}
+
+fn stream_chat_completions(
+    state: Arc<OpenAiServerState>,
+    request: ChatCompletionRequest,
+) -> Response {
+    let prompt = match messages_to_prompt(&request.messages) {
+        Ok(prompt) => prompt,
+        Err(message) => {
+            return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
+        }
+    };
+
+    let response_model = request.model.unwrap_or_else(|| state.model.clone());
+    let backend_model = state.model.clone();
+    let allowed_tools = state.allowed_tools.clone();
+    let permission_mode = state.permission_mode;
+    let created = now_unix();
+    let id = format!("chatcmpl-{created}");
+
+    let (sender, receiver) = mpsc::unbounded_channel::<Result<Event, Infallible>>();
+    let stream = UnboundedReceiverStream::new(receiver);
+
+    tokio::task::spawn_blocking(move || {
+        let _ = sender.send(openai_sse_role_chunk(&id, created, &response_model));
+
+        let result = {
+            let mut session = match crate::engine::ClawEngineSession::new(
+                backend_model,
+                true,
+                allowed_tools,
+                permission_mode,
+            ) {
+                Ok(session) => session,
+                Err(error) => {
+                    let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+                    let _ = sender.send(openai_sse_done());
+                    return;
+                }
+            };
+
+            let mut event_sink = |event: &AssistantEvent| {
+                if let Some(chunk) =
+                    assistant_event_to_openai_sse_chunk(&id, created, &response_model, event)
+                {
+                    let _ = sender.send(chunk);
+                }
+            };
+
+            session.run_prompt_json_with_event_sink(&prompt, &mut event_sink)
+        };
+
+        if let Err(error) = result {
+            let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+        }
+
+        let _ = sender.send(openai_sse_done());
+    });
+
+    Sse::new(stream)
+        .keep_alive(KeepAlive::default())
+        .into_response()
+}
+
+fn assistant_event_to_openai_sse_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    event: &AssistantEvent,
+) -> Option<Result<Event, Infallible>> {
+    match event {
+        AssistantEvent::TextDelta(text) if !text.is_empty() => Some(openai_sse_chunk(
+            id,
+            created,
+            model,
+            Some(text.clone()),
+            None,
+        )),
+        AssistantEvent::MessageStop => {
+            Some(openai_sse_chunk(id, created, model, None, Some("stop")))
+        }
+        _ => None,
+    }
+}
+
+fn openai_sse_role_chunk(id: &str, created: u64, model: &str) -> Result<Event, Infallible> {
+    openai_sse_chunk_with_delta(
+        id,
+        created,
+        model,
+        ChatCompletionDelta {
+            role: Some("assistant"),
+            content: None,
+        },
+        None,
+    )
+}
+
+fn openai_sse_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    content: Option<String>,
+    finish_reason: Option<&'static str>,
+) -> Result<Event, Infallible> {
+    openai_sse_chunk_with_delta(
+        id,
+        created,
+        model,
+        ChatCompletionDelta {
+            role: None,
+            content,
+        },
+        finish_reason,
+    )
+}
+
+fn openai_sse_chunk_with_delta(
+    id: &str,
+    created: u64,
+    model: &str,
+    delta: ChatCompletionDelta,
+    finish_reason: Option<&'static str>,
+) -> Result<Event, Infallible> {
+    sse_json_event(&ChatCompletionChunk {
+        id: id.to_string(),
+        object: "chat.completion.chunk",
+        created,
+        model: model.to_string(),
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta,
+            finish_reason,
+        }],
+    })
+}
+
+fn openai_sse_error_chunk(message: &str) -> Result<Event, Infallible> {
+    sse_json_event(&ErrorEnvelope {
+        error: ErrorBody {
+            message: message.to_string(),
+            kind: "engine_error",
+        },
+    })
+}
+
+fn openai_sse_done() -> Result<Event, Infallible> {
+    Ok(Event::default().data("[DONE]"))
+}
+
+fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
+    let data = serde_json::to_string(value).unwrap_or_else(|error| {
+        format!(
+            r#"{{"error":{{"message":"failed to serialize SSE event: {error}","type":"serialization_error"}}}}"#
+        )
+    });
+    Ok(Event::default().data(data))
 }
 
 fn messages_to_prompt(messages: &[ChatMessage]) -> Result<String, String> {
