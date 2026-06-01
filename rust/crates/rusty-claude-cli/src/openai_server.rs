@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -187,13 +187,15 @@ async fn models(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
 
 async fn chat_completions(
     State(state): State<Arc<OpenAiServerState>>,
+    headers: HeaderMap,
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
+    let session_key = claw_session_key(&headers);
     if request.stream {
-        return stream_chat_completions(state, request);
+        return stream_chat_completions(state, request, session_key);
     }
 
-    let prompt = match messages_to_prompt(&request.messages) {
+    let prompt = match prompt_for_request(&request.messages, session_key.is_some()) {
         Ok(prompt) => prompt,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
@@ -201,13 +203,15 @@ async fn chat_completions(
     };
 
     let state_for_task = state.clone();
+    let session_key_for_task = session_key.clone();
     let result = tokio::task::spawn_blocking(
         move || -> Result<crate::engine::ClawEngineResponse, String> {
-            let mut session = crate::engine::ClawEngineSession::new(
+            let mut session = create_engine_session(
                 state_for_task.model.clone(),
                 true,
                 state_for_task.allowed_tools.clone(),
                 state_for_task.permission_mode,
+                session_key_for_task.as_deref(),
             )
             .map_err(|error| error.to_string())?;
             session
@@ -259,8 +263,9 @@ async fn chat_completions(
 fn stream_chat_completions(
     state: Arc<OpenAiServerState>,
     request: ChatCompletionRequest,
+    session_key: Option<String>,
 ) -> Response {
-    let prompt = match messages_to_prompt(&request.messages) {
+    let prompt = match prompt_for_request(&request.messages, session_key.is_some()) {
         Ok(prompt) => prompt,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
@@ -281,11 +286,12 @@ fn stream_chat_completions(
         let _ = sender.send(openai_sse_role_chunk(&id, created, &response_model));
 
         let result = {
-            let mut session = match crate::engine::ClawEngineSession::new(
+            let mut session = match create_engine_session(
                 backend_model,
                 true,
                 allowed_tools,
                 permission_mode,
+                session_key.as_deref(),
             ) {
                 Ok(session) => session,
                 Err(error) => {
@@ -332,6 +338,39 @@ fn stream_chat_completions(
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+fn claw_session_key(headers: &HeaderMap) -> Option<String> {
+    headers
+        .get("x-claw-session-key")
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.chars().take(256).collect())
+}
+
+fn create_engine_session(
+    model: String,
+    enable_tools: bool,
+    allowed_tools: Option<crate::AllowedToolSet>,
+    permission_mode: PermissionMode,
+    session_key: Option<&str>,
+) -> Result<crate::engine::ClawEngineSession, Box<dyn std::error::Error>> {
+    match session_key {
+        Some(key) => crate::engine::ClawEngineSession::resume_or_create_for_key(
+            key,
+            model,
+            enable_tools,
+            allowed_tools,
+            permission_mode,
+        ),
+        None => crate::engine::ClawEngineSession::new(
+            model,
+            enable_tools,
+            allowed_tools,
+            permission_mode,
+        ),
+    }
 }
 
 fn assistant_event_to_openai_sse_chunk(
@@ -494,6 +533,44 @@ mod tests {
     use super::*;
 
     #[test]
+    fn claw_session_key_reads_trimmed_header_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-claw-session-key", "  chat-abc  ".parse().unwrap());
+
+        assert_eq!(claw_session_key(&headers).as_deref(), Some("chat-abc"));
+    }
+
+    #[test]
+    fn persistent_prompt_uses_only_latest_user_message() {
+        let messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: Value::String("system prompt".to_string()),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Value::String("first".to_string()),
+            },
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: Value::String("old answer".to_string()),
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Value::String("second".to_string()),
+            },
+        ];
+
+        assert_eq!(
+            prompt_for_request(&messages, true).expect("persistent prompt"),
+            "second"
+        );
+        assert!(prompt_for_request(&messages, false)
+            .expect("full prompt")
+            .contains("user: first"));
+    }
+
+    #[test]
     fn openwebui_tool_details_escapes_attributes_and_output() {
         let rendered = openwebui_tool_details(
             "call_1",
@@ -520,6 +597,29 @@ fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
         )
     });
     Ok(Event::default().data(data))
+}
+
+fn prompt_for_request(
+    messages: &[ChatMessage],
+    persistent_session: bool,
+) -> Result<String, String> {
+    if persistent_session {
+        latest_user_message_to_prompt(messages)
+    } else {
+        messages_to_prompt(messages)
+    }
+}
+
+fn latest_user_message_to_prompt(messages: &[ChatMessage]) -> Result<String, String> {
+    let Some(message) = messages
+        .iter()
+        .rev()
+        .find(|message| message.role.trim().eq_ignore_ascii_case("user"))
+    else {
+        return Err("persistent sessions require at least one user message".to_string());
+    };
+
+    content_to_text(&message.content)
 }
 
 fn messages_to_prompt(messages: &[ChatMessage]) -> Result<String, String> {
