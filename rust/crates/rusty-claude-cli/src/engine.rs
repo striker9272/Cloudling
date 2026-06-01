@@ -119,6 +119,29 @@ impl ClawEngineResponse {
     }
 }
 
+/// Execute one prompt through the existing CLI runtime state and return the
+/// reusable engine response.
+///
+/// This is intentionally a bridge step inside Rust, not an external subprocess
+/// bridge. It keeps CLI behavior stable while moving prompt execution out of
+/// `main.rs`. The next extraction step can replace `LiveCli` with a standalone
+/// `ClawEngine` constructor for HTTP/server callers.
+pub(crate) fn run_cli_prompt_json(
+    cli: &mut crate::LiveCli,
+    input: &str,
+) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+    let (mut runtime, hook_abort_monitor) = cli.prepare_turn_runtime(false)?;
+    let mut permission_prompter = crate::CliPermissionPrompter::new(cli.permission_mode);
+    let result = runtime.run_turn(input, Some(&mut permission_prompter));
+    hook_abort_monitor.stop();
+
+    let summary = result?;
+    cli.replace_runtime(runtime)?;
+    cli.persist_session()?;
+
+    Ok(ClawEngineResponse::from_turn_summary(&cli.model, &summary))
+}
+
 #[must_use]
 pub fn final_assistant_text(summary: &TurnSummary) -> String {
     summary
