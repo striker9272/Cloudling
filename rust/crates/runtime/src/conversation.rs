@@ -38,6 +38,12 @@ pub enum AssistantEvent {
         name: String,
         input: String,
     },
+    ToolResult {
+        tool_use_id: String,
+        tool_name: String,
+        output: String,
+        is_error: bool,
+    },
     Usage(TokenUsage),
     PromptCache(PromptCacheEvent),
     MessageStop,
@@ -531,6 +537,22 @@ where
                     .push_message(result_message.clone())
                     .map_err(|error| RuntimeError::new(error.to_string()))?;
                 self.record_tool_finished(iterations, &result_message);
+                if let Some(sink) = event_sink.as_mut() {
+                    if let Some(ContentBlock::ToolResult {
+                        tool_use_id,
+                        tool_name,
+                        output,
+                        is_error,
+                    }) = result_message.blocks.first()
+                    {
+                        sink(&AssistantEvent::ToolResult {
+                            tool_use_id: tool_use_id.clone(),
+                            tool_name: tool_name.clone(),
+                            output: output.clone(),
+                            is_error: *is_error,
+                        });
+                    }
+                }
                 tool_results.push(result_message);
             }
         }
@@ -770,6 +792,11 @@ fn build_assistant_message(
                 flush_text_block(&mut text, &mut blocks);
                 blocks.push(ContentBlock::ToolUse { id, name, input });
             }
+            AssistantEvent::ToolResult { .. } => {
+                return Err(RuntimeError::new(
+                    "tool result events are runtime-only and cannot appear in assistant streams",
+                ));
+            }
             AssistantEvent::Usage(value) => usage = Some(value),
             AssistantEvent::PromptCache(event) => prompt_cache_events.push(event),
             AssistantEvent::MessageStop => {
@@ -1007,6 +1034,65 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn emits_tool_result_events_to_event_sink() {
+        let api_client = ScriptedApiClient { call_count: 0 };
+        let tool_executor = StaticToolExecutor::new().register("add", |_input| Ok("4".to_string()));
+        let permission_policy = PermissionPolicy::new(PermissionMode::WorkspaceWrite);
+        let system_prompt = SystemPromptBuilder::new()
+            .with_project_context(ProjectContext {
+                cwd: PathBuf::from("/tmp/project"),
+                current_date: "2026-03-31".to_string(),
+                git_status: None,
+                git_diff: None,
+                git_context: None,
+                instruction_files: Vec::new(),
+            })
+            .with_os("linux", "6.8")
+            .build();
+        let mut runtime = ConversationRuntime::new(
+            Session::new(),
+            api_client,
+            tool_executor,
+            permission_policy,
+            system_prompt,
+        );
+
+        let mut events = Vec::new();
+        {
+            let mut event_sink = |event: &AssistantEvent| events.push(event.clone());
+            let summary = runtime
+                .run_turn_with_event_sink(
+                    "what is 2 + 2?",
+                    Some(&mut PromptAllowOnce),
+                    Some(&mut event_sink),
+                )
+                .expect("conversation loop should succeed");
+
+            assert_eq!(summary.tool_results.len(), 1);
+        }
+
+        let observed_tool_use_id = events.iter().find_map(|event| match event {
+            AssistantEvent::ToolUse { id, name, .. } if name == "add" => Some(id.clone()),
+            _ => None,
+        });
+        let observed_tool_use_id =
+            observed_tool_use_id.expect("expected add tool use event before tool result");
+
+        assert!(events.iter().any(|event| matches!(
+            event,
+            AssistantEvent::ToolResult {
+                tool_use_id,
+                tool_name,
+                output,
+                is_error,
+            } if tool_use_id == &observed_tool_use_id
+                && tool_name == "add"
+                && output == "4"
+                && !is_error
+        )));
     }
 
     #[test]
