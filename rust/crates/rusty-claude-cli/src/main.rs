@@ -18,6 +18,7 @@ mod input;
 mod render;
 
 mod engine;
+mod openai_server;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -625,6 +626,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             cli.set_reasoning_effort(reasoning_effort);
             cli.run_turn_with_output(&effective_prompt, output_format, compact)?;
         }
+        CliAction::OpenAiServe { bind, model } => {
+            openai_server::serve_blocking(bind, model)?;
+        }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
         CliAction::State { output_format } => run_worker_state(output_format)?,
@@ -750,6 +754,10 @@ enum CliAction {
         base_commit: Option<String>,
         reasoning_effort: Option<String>,
         allow_broad_cwd: bool,
+    },
+    OpenAiServe {
+        bind: String,
+        model: String,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -1337,6 +1345,7 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             }
         }
         "system-prompt" => parse_system_prompt_args(&rest[1..], model, output_format),
+        "openai-serve" => parse_openai_serve_args(&rest[1..], model),
         "acp" => parse_acp_args(&rest[1..], output_format),
         "login" | "logout" => Err(removed_auth_surface_error(rest[0].as_str())),
         "init" => {
@@ -1659,6 +1668,40 @@ fn unexpected_diff_args_error(extra: &[String]) -> String {
         "unexpected extra arguments after `claw diff`: {}\nUsage: claw diff",
         extra.join(" ")
     )
+}
+
+fn parse_openai_serve_args(args: &[String], model: String) -> Result<CliAction, String> {
+    let mut bind = "127.0.0.1:4097".to_string();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--bind" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "missing_flag_value: missing value for --bind.\nUsage: claw openai-serve [--bind 127.0.0.1:4097]".to_string()
+                })?;
+                bind = value.clone();
+                index += 2;
+            }
+            flag if flag.starts_with("--bind=") => {
+                bind = flag[7..].to_string();
+                index += 1;
+            }
+            "--help" | "-h" => {
+                return Err(
+                    "Usage: claw openai-serve [--bind 127.0.0.1:4097]\nStarts the experimental OpenAI-compatible HTTP server."
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(format!(
+                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw openai-serve [--bind 127.0.0.1:4097]"
+                ));
+            }
+        }
+    }
+
+    Ok(CliAction::OpenAiServe { bind, model })
 }
 
 fn parse_acp_args(args: &[String], output_format: CliOutputFormat) -> Result<CliAction, String> {
