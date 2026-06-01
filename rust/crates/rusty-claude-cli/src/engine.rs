@@ -1,4 +1,4 @@
-use runtime::{ContentBlock, TurnSummary};
+use runtime::{ContentBlock, PermissionMode, TurnSummary};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -119,27 +119,84 @@ impl ClawEngineResponse {
     }
 }
 
-/// Execute one prompt through the existing CLI runtime state and return the
-/// reusable engine response.
+/// Minimal host contract needed by the reusable prompt engine.
 ///
-/// This is intentionally a bridge step inside Rust, not an external subprocess
-/// bridge. It keeps CLI behavior stable while moving prompt execution out of
-/// `main.rs`. The next extraction step can replace `LiveCli` with a standalone
-/// `ClawEngine` constructor for HTTP/server callers.
-pub(crate) fn run_cli_prompt_json(
-    cli: &mut crate::LiveCli,
+/// The first implementation is `LiveCli`, but the important part is that the
+/// prompt loop below no longer needs to know about the whole terminal UI object.
+/// A future OpenAI-compatible HTTP server can provide another host that prepares
+/// the same runtime without REPL banners, spinners, or terminal-only behavior.
+trait EngineHost {
+    fn model(&self) -> &str;
+    fn permission_mode(&self) -> PermissionMode;
+    fn prepare_engine_runtime(
+        &self,
+        emit_output: bool,
+    ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>>;
+    fn replace_engine_runtime(
+        &mut self,
+        runtime: crate::BuiltRuntime,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+    fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>>;
+}
+
+impl EngineHost for crate::LiveCli {
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn permission_mode(&self) -> PermissionMode {
+        self.permission_mode
+    }
+
+    fn prepare_engine_runtime(
+        &self,
+        emit_output: bool,
+    ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>> {
+        self.prepare_turn_runtime(emit_output)
+    }
+
+    fn replace_engine_runtime(
+        &mut self,
+        runtime: crate::BuiltRuntime,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.replace_runtime(runtime)
+    }
+
+    fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.persist_session()
+    }
+}
+
+fn run_prompt_with_host<H: EngineHost>(
+    host: &mut H,
     input: &str,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    let (mut runtime, hook_abort_monitor) = cli.prepare_turn_runtime(false)?;
-    let mut permission_prompter = crate::CliPermissionPrompter::new(cli.permission_mode);
+    let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
+    let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
     let result = runtime.run_turn(input, Some(&mut permission_prompter));
     hook_abort_monitor.stop();
 
     let summary = result?;
-    cli.replace_runtime(runtime)?;
-    cli.persist_session()?;
+    host.replace_engine_runtime(runtime)?;
+    host.persist_engine_session()?;
 
-    Ok(ClawEngineResponse::from_turn_summary(&cli.model, &summary))
+    Ok(ClawEngineResponse::from_turn_summary(
+        host.model(),
+        &summary,
+    ))
+}
+
+/// Execute one prompt through the existing CLI runtime state and return the
+/// reusable engine response.
+///
+/// This remains the CLI-facing wrapper, while the prompt execution itself now
+/// goes through `EngineHost`. That keeps the CLI behavior stable and prepares
+/// the same engine path for a future HTTP/OpenAI-compatible host.
+pub(crate) fn run_cli_prompt_json(
+    cli: &mut crate::LiveCli,
+    input: &str,
+) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+    run_prompt_with_host(cli, input)
 }
 
 #[must_use]
