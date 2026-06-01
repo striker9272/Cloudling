@@ -186,6 +186,108 @@ fn run_prompt_with_host<H: EngineHost>(
     ))
 }
 
+/// Standalone engine host for non-REPL callers.
+///
+/// This is the first server-ready host shape. It creates the same runtime stack
+/// as `LiveCli`, but does not carry prompt history, startup banners, line editor
+/// state, or other terminal-only UI concerns.
+pub(crate) struct ClawEngineSession {
+    model: String,
+    allowed_tools: Option<crate::AllowedToolSet>,
+    permission_mode: PermissionMode,
+    system_prompt: Vec<String>,
+    runtime: crate::BuiltRuntime,
+    session: crate::SessionHandle,
+}
+
+impl ClawEngineSession {
+    pub(crate) fn new(
+        model: String,
+        enable_tools: bool,
+        allowed_tools: Option<crate::AllowedToolSet>,
+        permission_mode: PermissionMode,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let system_prompt = crate::build_system_prompt(&model)?;
+        let session_state = crate::new_cli_session()?;
+        let session = crate::create_managed_session_handle(&session_state.session_id)?;
+        let runtime = crate::build_runtime(
+            session_state.with_persistence_path(session.path.clone()),
+            &session.id,
+            model.clone(),
+            system_prompt.clone(),
+            enable_tools,
+            false,
+            allowed_tools.clone(),
+            permission_mode,
+            None,
+        )?;
+
+        let host = Self {
+            model,
+            allowed_tools,
+            permission_mode,
+            system_prompt,
+            runtime,
+            session,
+        };
+        host.persist_engine_session()?;
+        Ok(host)
+    }
+
+    pub(crate) fn run_prompt_json(
+        &mut self,
+        input: &str,
+    ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+        run_prompt_with_host(self, input)
+    }
+}
+
+impl EngineHost for ClawEngineSession {
+    fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn permission_mode(&self) -> PermissionMode {
+        self.permission_mode
+    }
+
+    fn prepare_engine_runtime(
+        &self,
+        emit_output: bool,
+    ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>> {
+        let hook_abort_signal = runtime::HookAbortSignal::new();
+        let runtime = crate::build_runtime(
+            self.runtime.session().clone(),
+            &self.session.id,
+            self.model.clone(),
+            self.system_prompt.clone(),
+            true,
+            emit_output,
+            self.allowed_tools.clone(),
+            self.permission_mode,
+            None,
+        )?
+        .with_hook_abort_signal(hook_abort_signal.clone());
+        let hook_abort_monitor = crate::HookAbortMonitor::spawn(hook_abort_signal);
+
+        Ok((runtime, hook_abort_monitor))
+    }
+
+    fn replace_engine_runtime(
+        &mut self,
+        runtime: crate::BuiltRuntime,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        self.runtime.shutdown_plugins()?;
+        self.runtime = runtime;
+        Ok(())
+    }
+
+    fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>> {
+        self.runtime.session().save_to_path(&self.session.path)?;
+        Ok(())
+    }
+}
+
 /// Execute one prompt through the existing CLI runtime state and return the
 /// reusable engine response.
 ///
