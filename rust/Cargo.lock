@@ -2257,6 +2257,7 @@ dependencies = [
  "serde_json",
  "syntect",
  "tokio",
+ "tokio-stream",
  "tools",
 ]
 
@@ -2745,6 +2746,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
