@@ -17,6 +17,7 @@ mod init;
 mod input;
 mod render;
 
+mod engine;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -5919,33 +5920,9 @@ impl LiveCli {
         let summary = result?;
         self.replace_runtime(runtime)?;
         self.persist_session()?;
-        println!(
-            "{}",
-            json!({
-                "message": final_assistant_text(&summary),
-                "model": self.model,
-                "iterations": summary.iterations,
-                "auto_compaction": summary.auto_compaction.map(|event| json!({
-                    "removed_messages": event.removed_message_count,
-                    "notice": format_auto_compaction_notice(event.removed_message_count),
-                })),
-                "tool_uses": collect_tool_uses(&summary),
-                "tool_results": collect_tool_results(&summary),
-                "prompt_cache_events": collect_prompt_cache_events(&summary),
-                "usage": {
-                    "input_tokens": summary.usage.input_tokens,
-                    "output_tokens": summary.usage.output_tokens,
-                    "cache_creation_input_tokens": summary.usage.cache_creation_input_tokens,
-                    "cache_read_input_tokens": summary.usage.cache_read_input_tokens,
-                },
-                "estimated_cost": format_usd(
-                    summary.usage.estimate_cost_usd_with_pricing(
-                        pricing_for_model(&self.model)
-                            .unwrap_or_else(runtime::ModelPricing::default_sonnet_tier)
-                    ).total_cost_usd()
-                )
-            })
-        );
+
+        let response = engine::ClawEngineResponse::from_turn_summary(&self.model, &summary);
+        println!("{}", serde_json::to_string(&response)?);
         Ok(())
     }
 
