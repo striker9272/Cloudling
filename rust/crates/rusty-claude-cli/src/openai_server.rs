@@ -12,6 +12,7 @@ use runtime::{AssistantEvent, PermissionMode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
+    collections::HashMap,
     convert::Infallible,
     net::SocketAddr,
     sync::Arc,
@@ -294,10 +295,15 @@ fn stream_chat_completions(
                 }
             };
 
+            let mut tool_inputs = HashMap::<String, String>::new();
             let mut event_sink = |event: &AssistantEvent| {
-                if let Some(chunk) =
-                    assistant_event_to_openai_sse_chunk(&id, created, &response_model, event)
-                {
+                if let Some(chunk) = assistant_event_to_openai_sse_chunk(
+                    &id,
+                    created,
+                    &response_model,
+                    event,
+                    &mut tool_inputs,
+                ) {
                     let _ = sender.send(chunk);
                 }
             };
@@ -305,8 +311,19 @@ fn stream_chat_completions(
             session.run_prompt_json_with_event_sink(&prompt, &mut event_sink)
         };
 
-        if let Err(error) = result {
-            let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+        match result {
+            Ok(_) => {
+                let _ = sender.send(openai_sse_chunk(
+                    &id,
+                    created,
+                    &response_model,
+                    None,
+                    Some("stop"),
+                ));
+            }
+            Err(error) => {
+                let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+            }
         }
 
         let _ = sender.send(openai_sse_done());
@@ -322,6 +339,7 @@ fn assistant_event_to_openai_sse_chunk(
     created: u64,
     model: &str,
     event: &AssistantEvent,
+    tool_inputs: &mut HashMap<String, String>,
 ) -> Option<Result<Event, Infallible>> {
     match event {
         AssistantEvent::TextDelta(text) if !text.is_empty() => Some(openai_sse_chunk(
@@ -331,11 +349,79 @@ fn assistant_event_to_openai_sse_chunk(
             Some(text.clone()),
             None,
         )),
-        AssistantEvent::MessageStop => {
-            Some(openai_sse_chunk(id, created, model, None, Some("stop")))
+        AssistantEvent::ToolUse {
+            id: tool_use_id,
+            input,
+            ..
+        } => {
+            tool_inputs.insert(tool_use_id.clone(), input.clone());
+            None
         }
+        AssistantEvent::ToolResult {
+            tool_use_id,
+            tool_name,
+            output,
+            is_error,
+        } => {
+            let arguments = tool_inputs
+                .get(tool_use_id)
+                .map(String::as_str)
+                .unwrap_or("{}");
+            Some(openai_sse_chunk(
+                id,
+                created,
+                model,
+                Some(openwebui_tool_details(
+                    tool_use_id,
+                    tool_name,
+                    arguments,
+                    output,
+                    *is_error,
+                )),
+                None,
+            ))
+        }
+        AssistantEvent::MessageStop => None,
         _ => None,
     }
+}
+
+fn openwebui_tool_details(
+    tool_use_id: &str,
+    tool_name: &str,
+    arguments: &str,
+    output: &str,
+    is_error: bool,
+) -> String {
+    let summary = if is_error {
+        "Tool Failed"
+    } else {
+        "Tool Executed"
+    };
+    let output_json = serde_json::to_string(output)
+        .unwrap_or_else(|error| format!("failed to serialize tool output: {error}"));
+
+    format!(
+        "\n<details type=\"tool_calls\" done=\"true\" id=\"{}\" name=\"{}\" arguments=\"{}\">\n<summary>{}</summary>\n{}\n</details>\n",
+        escape_html_attr(tool_use_id),
+        escape_html_attr(tool_name),
+        escape_html_attr(arguments),
+        summary,
+        escape_html_text(&output_json),
+    )
+}
+
+fn escape_html_attr(value: &str) -> String {
+    escape_html_text(value)
+        .replace('\'', "&#39;")
+        .replace('"', "&quot;")
+}
+
+fn escape_html_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn openai_sse_role_chunk(id: &str, created: u64, model: &str) -> Result<Event, Infallible> {
@@ -401,6 +487,30 @@ fn openai_sse_error_chunk(message: &str) -> Result<Event, Infallible> {
 
 fn openai_sse_done() -> Result<Event, Infallible> {
     Ok(Event::default().data("[DONE]"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openwebui_tool_details_escapes_attributes_and_output() {
+        let rendered = openwebui_tool_details(
+            "call_1",
+            "bash",
+            r#"{"cmd":"printf \"<ok>&\""}"#,
+            "line <ok> & done",
+            false,
+        );
+
+        assert!(rendered.contains(r#"<details type="tool_calls" done="true""#));
+        assert!(rendered.contains(r#"id="call_1""#));
+        assert!(rendered.contains(r#"name="bash""#));
+        assert!(rendered.contains("&quot;cmd&quot;"));
+        assert!(rendered.contains("&lt;ok&gt;&amp;"));
+        assert!(rendered.contains("<summary>Tool Executed</summary>"));
+        assert!(rendered.contains(r#""line &lt;ok&gt; &amp; done""#));
+    }
 }
 
 fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
