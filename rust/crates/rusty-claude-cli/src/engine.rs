@@ -1,4 +1,4 @@
-use runtime::{ContentBlock, PermissionMode, TurnSummary};
+use runtime::{AssistantEvent, ContentBlock, PermissionMode, TurnSummary};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -171,9 +171,24 @@ fn run_prompt_with_host<H: EngineHost>(
     host: &mut H,
     input: &str,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+    run_prompt_with_host_and_event_sink(host, input, None)
+}
+
+fn run_prompt_with_host_and_event_sink<H: EngineHost>(
+    host: &mut H,
+    input: &str,
+    event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
+) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
     let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
     let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
-    let result = runtime.run_turn(input, Some(&mut permission_prompter));
+
+    let result = match event_sink {
+        Some(sink) => {
+            runtime.run_turn_with_event_sink(input, Some(&mut permission_prompter), Some(sink))
+        }
+        None => runtime.run_turn(input, Some(&mut permission_prompter)),
+    };
+
     hook_abort_monitor.stop();
 
     let summary = result?;
@@ -239,6 +254,14 @@ impl ClawEngineSession {
         input: &str,
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
         run_prompt_with_host(self, input)
+    }
+
+    pub(crate) fn run_prompt_json_with_event_sink(
+        &mut self,
+        input: &str,
+        event_sink: &mut dyn FnMut(&AssistantEvent),
+    ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+        run_prompt_with_host_and_event_sink(self, input, Some(event_sink))
     }
 }
 
