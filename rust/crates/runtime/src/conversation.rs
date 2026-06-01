@@ -56,6 +56,18 @@ pub struct PromptCacheEvent {
 /// Minimal streaming API contract required by [`ConversationRuntime`].
 pub trait ApiClient {
     fn stream(&mut self, request: ApiRequest) -> Result<Vec<AssistantEvent>, RuntimeError>;
+
+    fn stream_with_event_sink(
+        &mut self,
+        request: ApiRequest,
+        event_sink: &mut dyn FnMut(&AssistantEvent),
+    ) -> Result<Vec<AssistantEvent>, RuntimeError> {
+        let events = self.stream(request)?;
+        for event in &events {
+            event_sink(event);
+        }
+        Ok(events)
+    }
 }
 
 /// Trait implemented by tool dispatchers that execute model-requested tools.
@@ -314,11 +326,20 @@ where
         }
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn run_turn(
         &mut self,
         user_input: impl Into<String>,
+        prompter: Option<&mut dyn PermissionPrompter>,
+    ) -> Result<TurnSummary, RuntimeError> {
+        self.run_turn_with_event_sink(user_input, prompter, None)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    pub fn run_turn_with_event_sink(
+        &mut self,
+        user_input: impl Into<String>,
         mut prompter: Option<&mut dyn PermissionPrompter>,
+        mut event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
     ) -> Result<TurnSummary, RuntimeError> {
         let user_input = user_input.into();
 
@@ -358,7 +379,11 @@ where
                 system_prompt: self.system_prompt.clone(),
                 messages: self.session.messages.clone(),
             };
-            let events = match self.api_client.stream(request) {
+            let stream_result = match event_sink.as_mut() {
+                Some(sink) => self.api_client.stream_with_event_sink(request, &mut **sink),
+                None => self.api_client.stream(request),
+            };
+            let events = match stream_result {
                 Ok(events) => events,
                 Err(error) => {
                     self.record_turn_failed(iterations, &error);
