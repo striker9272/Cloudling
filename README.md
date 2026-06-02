@@ -1,7 +1,7 @@
-# Claw Code
+# Claw Lab
 
 <p align="center">
-  <a href="https://github.com/ultraworkers/claw-code">ultraworkers/claw-code</a>
+  <a href="https://github.com/striker9272/claw-lab">striker9272/claw-lab</a>
   ·
   <a href="./USAGE.md">Usage</a>
   ·
@@ -14,26 +14,51 @@
   <a href="./CONTRIBUTING.md">Contributing</a>
   ·
   <a href="./SECURITY.md">Security</a>
-  ·
-  <a href="https://discord.gg/5TUQKqFWd">UltraWorkers Discord</a>
 </p>
 
 <p align="center">
-  <a href="https://star-history.com/#ultraworkers/claw-code&Date">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" />
-      <img alt="Star history for ultraworkers/claw-code" src="https://api.star-history.com/svg?repos=ultraworkers/claw-code&type=Date" width="600" />
-    </picture>
-  </a>
+  <img src="assets/claw-hero.jpeg" alt="Claw Lab" width="300" />
 </p>
 
-<p align="center">
-  <img src="assets/claw-hero.jpeg" alt="Claw Code" width="300" />
-</p>
+Claw Lab is an experimental fork of Claw Code focused on running the Rust `claw` agent through a local/OpenAI-compatible stack and Open WebUI.
 
-Claw Code is the public Rust implementation of the `claw` CLI agent harness.
-The canonical implementation lives in [`rust/`](./rust), and the current source of truth for this repository is **ultraworkers/claw-code**.
+The canonical implementation lives in [`rust/`](./rust). This fork tracks the upstream Claw Code direction while adding local-agent/server work needed for a home-lab deployment.
+
+## Claw Lab fork focus
+
+Current fork additions include:
+
+* OpenAI-compatible server work for `/v1/chat/completions`.
+* Real streaming support for OpenAI-style SSE responses.
+* Open WebUI tool-result rendering for Claw tool calls.
+* Ephemeral OpenAI sessions by default, so Open WebUI owns chat history through `messages[]`.
+* Optional persistent sessions through an explicit valid `X-Claw-Session-Key`.
+* Built-in `WebSearch` JSON `results[]` parsing with snippets, while preserving DuckDuckGo/generic HTML fallback.
+* Portable quiet deploy helper for safely rebuilding and installing the OpenAI server binary.
+
+### OpenAI server deploy helper
+
+For an already configured OpenAI-compatible Claw service:
+
+```bash
+cd rust
+
+scripts/deploy-openai-server.sh \
+  --runtime-bin /path/to/claw \
+  --service your-claw-openai.service \
+  --health-url http://127.0.0.1:4097/health
+```
+
+The deploy helper prints compact staged checks, writes full logs to `/tmp/claw-deploy-openai-*.log`, backs up the previous runtime binary, installs atomically through `.new`, optionally restarts a systemd service, checks health, scans the journal, and prints a rollback command.
+
+On my combsrv host I use a local wrapper outside the repository:
+
+```bash
+claw-lab-deploy-openai
+```
+
+The wrapper only supplies local paths, service name, and health URL. The portable deploy logic lives in [`rust/scripts/deploy-openai-server.sh`](./rust/scripts/deploy-openai-server.sh).
+
 
 > [!IMPORTANT]
 > Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows. For file submission/navigation questions, see [Navigation and file context](./docs/navigation-file-context.md). For local OpenAI-compatible models and offline skill installs, see [Local OpenAI-compatible providers and skills setup](./docs/local-openai-compatible-providers.md). Windows users can jump to the PowerShell-first [Windows install and release quickstart](./docs/windows-install-release.md). Make `claw doctor` your first health check after building, use [`rust/README.md`](./rust/README.md) for crate-level details, read [`PARITY.md`](./PARITY.md) for the current Rust-port checkpoint, and see [`docs/container.md`](./docs/container.md) for the container-first workflow.
@@ -57,12 +82,12 @@ The canonical implementation lives in [`rust/`](./rust), and the current source 
 > ```bash
 > cargo install agent-code   # upstream binary — installs 'agent.exe' (Windows) / 'agent' (Unix), NOT 'agent-code'
 > ```
-> This repo (`ultraworkers/claw-code`) is **build-from-source only** — follow the steps below.
+This repo (`striker9272/claw-lab`) is **build-from-source only** — follow the steps below.
 
 ```bash
 # 1. Clone and build
-git clone https://github.com/ultraworkers/claw-code
-cd claw-code/rust
+git clone https://github.com/striker9272/claw-lab
+cd claw-lab/rust
 cargo build --workspace
 
 # 2. Set your API key (Anthropic API key — not a Claude subscription)
@@ -90,8 +115,8 @@ export ANTHROPIC_API_KEY="sk-ant-..."
    If this fails, reopen your terminal or run the PATH setup from the Rust installer output, then retry.
 3. **Clone and build** (works in PowerShell, Git Bash, or WSL):
    ```powershell
-   git clone https://github.com/ultraworkers/claw-code
-   cd claw-code/rust
+   git clone https://github.com/striker9272/claw-lab
+   cd claw-lab/rust
    cargo build --workspace
    ```
 4. **Run** (PowerShell — note `.exe` and backslash):
