@@ -3183,6 +3183,8 @@ enum WebSearchResultItem {
 struct SearchHit {
     title: String,
     url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippet: Option<String>,
 }
 
 fn execute_web_fetch(input: &WebFetchInput) -> Result<WebFetchOutput, String> {
@@ -3229,11 +3231,15 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
         .map_err(|error| error.to_string())?;
 
     let final_url = response.url().clone();
-    let html = response.text().map_err(|error| error.to_string())?;
-    let mut hits = extract_search_hits(&html);
+    let body = response.text().map_err(|error| error.to_string())?;
+    let mut hits = extract_search_hits_from_json(&body);
+
+    if hits.is_empty() {
+        hits = extract_search_hits(&body);
+    }
 
     if hits.is_empty() && final_url.host_str().is_some() {
-        hits = extract_search_hits_from_generic_links(&html);
+        hits = extract_search_hits_from_generic_links(&body);
     }
 
     if let Some(allowed) = input.allowed_domains.as_ref() {
@@ -3251,7 +3257,7 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
     } else {
         let rendered_hits = hits
             .iter()
-            .map(|hit| format!("- [{}]({})", hit.title, hit.url))
+            .map(render_search_hit_for_summary)
             .collect::<Vec<_>>()
             .join("\n");
         format!(
@@ -3419,6 +3425,58 @@ fn preview_text(input: &str, max_chars: usize) -> String {
     format!("{}…", shortened.trim_end())
 }
 
+fn render_search_hit_for_summary(hit: &SearchHit) -> String {
+    match hit
+        .snippet
+        .as_ref()
+        .filter(|snippet| !snippet.trim().is_empty())
+    {
+        Some(snippet) => format!(
+            "- [{}]({}) — {}",
+            hit.title,
+            hit.url,
+            preview_text(&collapse_whitespace(snippet), 240)
+        ),
+        None => format!("- [{}]({})", hit.title, hit.url),
+    }
+}
+
+fn extract_search_hits_from_json(body: &str) -> Vec<SearchHit> {
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return Vec::new();
+    };
+
+    let Some(results) = value.get("results").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    results
+        .iter()
+        .filter_map(|item| {
+            let title = item.get("title").and_then(Value::as_str)?.trim();
+            let url = item.get("url").and_then(Value::as_str)?.trim();
+
+            if title.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+                return None;
+            }
+
+            let snippet = item
+                .get("content")
+                .or_else(|| item.get("snippet"))
+                .or_else(|| item.get("description"))
+                .and_then(Value::as_str)
+                .map(collapse_whitespace)
+                .filter(|value| !value.trim().is_empty());
+
+            Some(SearchHit {
+                title: title.to_string(),
+                url: url.to_string(),
+                snippet,
+            })
+        })
+        .collect()
+}
+
 fn extract_search_hits(html: &str) -> Vec<SearchHit> {
     let mut hits = Vec::new();
     let mut remaining = html;
@@ -3448,6 +3506,7 @@ fn extract_search_hits(html: &str) -> Vec<SearchHit> {
             hits.push(SearchHit {
                 title: title.trim().to_string(),
                 url: decoded_url,
+                snippet: None,
             });
         }
         remaining = &after_tag[end_anchor_idx + 4..];
@@ -3490,6 +3549,7 @@ fn extract_search_hits_from_generic_links(html: &str) -> Vec<SearchHit> {
             hits.push(SearchHit {
                 title: title.trim().to_string(),
                 url: decoded_url,
+                snippet: None,
             });
         }
         remaining = &after_tag[end_anchor_idx + 4..];
@@ -7615,6 +7675,72 @@ mod tests {
         )
         .expect_err("invalid URL should fail");
         assert!(error.contains("relative URL without a base") || error.contains("invalid"));
+    }
+
+    #[test]
+    fn web_search_parses_json_results_with_snippets() {
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let server = TestServer::spawn(Arc::new(|request_line: &str| {
+            assert!(request_line.contains("GET /json?format=json&q=rust+json+search "));
+            HttpResponse::html(
+                200,
+                "OK",
+                r#"
+                {
+                  "query": "rust json search",
+                  "results": [
+                    {
+                      "title": "Rust Programming Language",
+                      "url": "https://www.rust-lang.org/",
+                      "content": "Rust is a language empowering everyone to build reliable and efficient software.",
+                      "engine": "duckduckgo",
+                      "category": "general"
+                    },
+                    {
+                      "title": "Blocked",
+                      "url": "https://example.com/blocked",
+                      "content": "This result should be filtered out."
+                    }
+                  ]
+                }
+                "#,
+            )
+        }));
+
+        std::env::set_var(
+            "CLAWD_WEB_SEARCH_BASE_URL",
+            format!("http://{}/json?format=json", server.addr()),
+        );
+        let result = execute_tool(
+            "WebSearch",
+            &json!({
+                "query": "rust json search",
+                "allowed_domains": ["rust-lang.org"],
+                "blocked_domains": ["example.com"]
+            }),
+        )
+        .expect("WebSearch JSON parsing should succeed");
+        std::env::remove_var("CLAWD_WEB_SEARCH_BASE_URL");
+
+        let output: serde_json::Value = serde_json::from_str(&result).expect("valid json");
+        let rendered_output = serde_json::to_string(&output).expect("json output should serialize");
+        assert!(rendered_output.contains("reliable and efficient software"));
+
+        let results = output["results"].as_array().expect("results array");
+        let search_result = results
+            .iter()
+            .find(|item| item.get("content").is_some())
+            .expect("search result block present");
+        let content = search_result["content"].as_array().expect("content array");
+        assert_eq!(content.len(), 1);
+        assert_eq!(content[0]["title"], "Rust Programming Language");
+        assert_eq!(content[0]["url"], "https://www.rust-lang.org/");
+        assert_eq!(
+            content[0]["snippet"],
+            "Rust is a language empowering everyone to build reliable and efficient software."
+        );
     }
 
     #[test]
