@@ -344,9 +344,18 @@ fn claw_session_key(headers: &HeaderMap) -> Option<String> {
     headers
         .get("x-claw-session-key")
         .and_then(|value| value.to_str().ok())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.chars().take(256).collect())
+        .and_then(normalize_session_key)
+}
+
+fn normalize_session_key(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if trimmed.contains("{{") || trimmed.contains("}}") {
+        return None;
+    }
+    Some(trimmed.chars().take(256).collect())
 }
 
 fn create_engine_session(
@@ -364,7 +373,7 @@ fn create_engine_session(
             allowed_tools,
             permission_mode,
         ),
-        None => crate::engine::ClawEngineSession::new(
+        None => crate::engine::ClawEngineSession::new_ephemeral(
             model,
             enable_tools,
             allowed_tools,
@@ -538,6 +547,14 @@ mod tests {
         headers.insert("x-claw-session-key", "  chat-abc  ".parse().unwrap());
 
         assert_eq!(claw_session_key(&headers).as_deref(), Some("chat-abc"));
+    }
+
+    #[test]
+    fn claw_session_key_ignores_unresolved_template_value() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-claw-session-key", "{{CHAT_ID}}".parse().unwrap());
+
+        assert_eq!(claw_session_key(&headers), None);
     }
 
     #[test]
