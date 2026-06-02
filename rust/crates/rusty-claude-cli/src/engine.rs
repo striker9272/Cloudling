@@ -213,6 +213,7 @@ pub(crate) struct ClawEngineSession {
     system_prompt: Vec<String>,
     runtime: crate::BuiltRuntime,
     session: crate::SessionHandle,
+    persist_session: bool,
 }
 
 impl ClawEngineSession {
@@ -244,9 +245,42 @@ impl ClawEngineSession {
             system_prompt,
             runtime,
             session,
+            persist_session: true,
         };
         host.persist_engine_session()?;
         Ok(host)
+    }
+
+    pub(crate) fn new_ephemeral(
+        model: String,
+        enable_tools: bool,
+        allowed_tools: Option<crate::AllowedToolSet>,
+        permission_mode: PermissionMode,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let system_prompt = crate::build_system_prompt(&model)?;
+        let session_state = crate::new_cli_session()?;
+        let session = crate::create_managed_session_handle(&session_state.session_id)?;
+        let runtime = crate::build_runtime(
+            session_state,
+            &session.id,
+            model.clone(),
+            system_prompt.clone(),
+            enable_tools,
+            false,
+            allowed_tools.clone(),
+            permission_mode,
+            None,
+        )?;
+
+        Ok(Self {
+            model,
+            allowed_tools,
+            permission_mode,
+            system_prompt,
+            runtime,
+            session,
+            persist_session: false,
+        })
     }
 
     pub(crate) fn resume_or_create_for_key(
@@ -298,6 +332,7 @@ impl ClawEngineSession {
             system_prompt,
             runtime,
             session,
+            persist_session: true,
         };
         host.persist_engine_session()?;
         Ok(host)
@@ -381,7 +416,9 @@ impl EngineHost for ClawEngineSession {
     }
 
     fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.runtime.session().save_to_path(&self.session.path)?;
+        if self.persist_session {
+            self.runtime.session().save_to_path(&self.session.path)?;
+        }
         Ok(())
     }
 }
