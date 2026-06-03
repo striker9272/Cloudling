@@ -34,7 +34,11 @@ Current fork additions include:
 * Ephemeral OpenAI sessions by default, so Open WebUI owns chat history through `messages[]`.
 * Optional persistent sessions through an explicit valid `X-Claw-Session-Key`.
 * Built-in `WebSearch` JSON `results[]` parsing with snippets, while preserving DuckDuckGo/generic HTML fallback.
+* Stable served/backend model split: Open WebUI can see a durable model id such as `claw-lab-agent`, while the provider/backend model remains internal.
+* Neutral OpenAI service workdir support, so the live OWUI-facing agent does not automatically start inside the Claw source tree.
 * Portable quiet deploy helper for safely rebuilding and installing the OpenAI server binary.
+* Portable OpenAI service installer for generating the systemd unit, env file, wrapper, neutral workdir, and sandbox layout.
+
 
 ### OpenAI server deploy helper
 
@@ -64,6 +68,42 @@ The wrapper only supplies local paths, service name, and health URL. The portabl
 > Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows. For file submission/navigation questions, see [Navigation and file context](./docs/navigation-file-context.md). For local OpenAI-compatible models and offline skill installs, see [Local OpenAI-compatible providers and skills setup](./docs/local-openai-compatible-providers.md). Windows users can jump to the PowerShell-first [Windows install and release quickstart](./docs/windows-install-release.md). Make `claw doctor` your first health check after building, use [`rust/README.md`](./rust/README.md) for crate-level details, read [`PARITY.md`](./PARITY.md) for the current Rust-port checkpoint, and see [`docs/container.md`](./docs/container.md) for the container-first workflow.
 >
 > **ACP / Zed status:** `claw-code` does not ship an ACP/Zed daemon or JSON-RPC entrypoint yet. Run `claw acp` (or `claw --acp`) for the current status instead of guessing from source layout; `claw acp serve` is currently a discoverability alias only, returns status with exit code 0, and real ACP support remains tracked separately in `ROADMAP.md`. For the public JSON contract, see [`docs/g011-acp-json-rpc-status-contract.md`](./docs/g011-acp-json-rpc-status-contract.md).
+
+### OpenAI service installer
+
+For a fresh OpenAI-compatible Claw service, use the portable installer:
+
+```bash
+cd rust
+
+scripts/install-openai-service.sh \
+  --service claw-openai.service \
+  --user claw \
+  --runtime-bin /opt/claw/bin/claw \
+  --wrapper /usr/local/bin/claw-openai-serve \
+  --env-file /etc/claw/openai.env \
+  --workdir /var/lib/claw/work \
+  --sandbox-dir /var/lib/claw/sandbox \
+  --tmpdir /var/lib/claw/sandbox/tmp \
+  --bind 127.0.0.1:4097 \
+  --base-url http://127.0.0.1:8000/v1 \
+  --backend-model claw-external-api \
+  --served-model-id claw-agent \
+  --permission-mode read-only \
+  --enable \
+  --restart
+```
+
+The installer writes the environment file, wrapper script, and systemd unit. It keeps the live OpenAI service in a neutral workdir instead of the source repository, which prevents ordinary Open WebUI chats from automatically loading repository-local `CLAUDE.md`, git status, recent commits, and project settings.
+
+The model names have separate roles:
+
+```text
+--served-model-id  model id exposed to Open WebUI, /health, and /v1/models
+--backend-model    internal OpenAI-compatible provider/adaptor model id
+```
+
+Use `scripts/deploy-openai-server.sh` later when only the compiled runtime binary needs to be rebuilt and replaced.
 
 ## Current repository shape
 
@@ -135,7 +175,7 @@ After running `cargo build --workspace`, the `claw` binary is built but **not** 
 
 ### Binary location
 
-After `cargo build --workspace` in `claw-code/rust/`:
+After `cargo build --workspace` in `claw-lab/rust/`:
 
 **Debug build (default, faster compile):**
 - **macOS/Linux:** `rust/target/debug/claw`
