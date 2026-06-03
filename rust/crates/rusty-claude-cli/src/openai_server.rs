@@ -23,7 +23,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 #[derive(Clone)]
 struct OpenAiServerState {
-    model: String,
+    backend_model: String,
+    served_model_id: String,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
 }
@@ -148,8 +149,11 @@ async fn serve(
     permission_mode: PermissionMode,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = bind.parse()?;
+    let served_model_id =
+        served_model_id_from_value(std::env::var("CLAW_SERVED_MODEL_ID").ok(), &model);
     let state = Arc::new(OpenAiServerState {
-        model,
+        backend_model: model,
+        served_model_id,
         allowed_tools,
         permission_mode,
     });
@@ -170,7 +174,7 @@ async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
     Json(HealthResponse {
         ok: true,
         service: "claw-openai-serve",
-        model: state.model.clone(),
+        model: state.served_model_id.clone(),
     })
 }
 
@@ -178,11 +182,18 @@ async fn models(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
     Json(ModelListResponse {
         object: "list",
         data: vec![ModelObject {
-            id: state.model.clone(),
+            id: state.served_model_id.clone(),
             object: "model",
             owned_by: "claw-openai-serve",
         }],
     })
+}
+
+fn served_model_id_from_value(value: Option<String>, backend_model: &str) -> String {
+    value
+        .map(|model| model.trim().to_string())
+        .filter(|model| !model.is_empty())
+        .unwrap_or_else(|| backend_model.to_string())
 }
 
 async fn chat_completions(
@@ -207,7 +218,7 @@ async fn chat_completions(
     let result = tokio::task::spawn_blocking(
         move || -> Result<crate::engine::ClawEngineResponse, String> {
             let mut session = create_engine_session(
-                state_for_task.model.clone(),
+                state_for_task.backend_model.clone(),
                 true,
                 state_for_task.allowed_tools.clone(),
                 state_for_task.permission_mode,
@@ -242,7 +253,9 @@ async fn chat_completions(
         id: format!("chatcmpl-{created}"),
         object: "chat.completion",
         created,
-        model: request.model.unwrap_or_else(|| state.model.clone()),
+        model: request
+            .model
+            .unwrap_or_else(|| state.served_model_id.clone()),
         choices: vec![ChatCompletionChoice {
             index: 0,
             message: ChatCompletionMessage {
@@ -272,8 +285,10 @@ fn stream_chat_completions(
         }
     };
 
-    let response_model = request.model.unwrap_or_else(|| state.model.clone());
-    let backend_model = state.model.clone();
+    let response_model = request
+        .model
+        .unwrap_or_else(|| state.served_model_id.clone());
+    let backend_model = state.backend_model.clone();
     let allowed_tools = state.allowed_tools.clone();
     let permission_mode = state.permission_mode;
     let created = now_unix();
