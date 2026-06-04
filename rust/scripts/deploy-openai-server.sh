@@ -127,7 +127,7 @@ cd "$REPO_ROOT" || {
 }
 
 TS="$(date +%Y%m%d-%H%M%S)"
-LOG_FILE="${LOG_DIR%/}/claw-deploy-openai-${TS}.log"
+LOG_FILE="${LOG_DIR%/}/clab-deploy-openai-${TS}.log"
 BACKUP_PATH=""
 STEP=0
 FAILED=0
@@ -234,13 +234,13 @@ print_rollback() {
 build_test_commands() {
   case "$TEST_PROFILE" in
     smoke)
-      TEST_CMDS=("cargo test -p rusty-claude-cli --no-run" "${TEST_CMDS[@]}")
+      TEST_CMDS=("cargo test -p clab-cli --no-run" "${TEST_CMDS[@]}")
       ;;
     websearch)
       TEST_CMDS=("cargo test -p tools web_search -- --nocapture" "${TEST_CMDS[@]}")
       ;;
     full)
-      TEST_CMDS=("cargo test -p rusty-claude-cli" "${TEST_CMDS[@]}")
+      TEST_CMDS=("cargo test -p clab-cli" "${TEST_CMDS[@]}")
       ;;
     none)
       ;;
@@ -353,9 +353,9 @@ else
   say "[--] tests skipped"
 fi
 
-run_logged "release build" "cargo build --release -p rusty-claude-cli"
+run_logged "release build" "cargo build --release -p clab-cli"
 
-SOURCE_BIN="$REPO_ROOT/target/release/claw"
+SOURCE_BIN="$REPO_ROOT/target/release/clab"
 run_logged "built binary version" "$(q "$SOURCE_BIN") --version | sed -n '1,20p'"
 
 suffix="$TS"

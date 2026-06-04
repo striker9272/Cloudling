@@ -9,12 +9,12 @@ WORKDIR /repo/rust
 # Sanity check toolchain version (helps debug CI/Docker Desktop issues).
 RUN rustc --version && cargo --version
 # Build the service with qdrant support enabled (works even if you don't use qdrant).
-RUN cargo build -p claw-rag-service --release --features qdrant-index
+RUN cargo build -p clab-rag-service --release --features qdrant-index
 
 FROM debian:bookworm-slim
 
 WORKDIR /app
-COPY --from=builder /repo/rust/target/release/claw-rag-service /app/claw-rag-service
+COPY --from=builder /repo/rust/target/release/clab-rag-service /app/clab-rag-service
 
 EXPOSE 8787
-ENTRYPOINT ["/app/claw-rag-service"]
+ENTRYPOINT ["/app/clab-rag-service"]

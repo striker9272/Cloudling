@@ -1,5 +1,5 @@
 [package]
-name = "claw-rag-service"
+name = "clab-rag-service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

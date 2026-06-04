@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use clap::ValueEnum;
-use claw_analog::{
+use clab_analog::{
     load_analog_toml, load_profile_hint, resolve_analog_options, AnalogDoctorOverrides,
     AnalogFileConfig, OutputFormat, PermissionMode, Preset, StreamOverride, NDJSON_FORMAT_VERSION,
     NDJSON_SCHEMA,

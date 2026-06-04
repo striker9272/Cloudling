@@ -20,7 +20,7 @@
   <img src="assets/claw-hero.jpeg" alt="Claw Lab" width="300" />
 </p>
 
-Claw Lab is an experimental fork of Claw Code focused on running the Rust `claw` agent through a local/OpenAI-compatible stack and Open WebUI.
+Claw Lab is an experimental fork of Claw Code focused on running the Rust `clab` agent through a local/OpenAI-compatible stack and Open WebUI.
 
 The canonical implementation lives in [`rust/`](./rust). This fork tracks the upstream Claw Code direction while adding local-agent/server work needed for a home-lab deployment.
 
@@ -48,12 +48,12 @@ For an already configured OpenAI-compatible Claw service:
 cd rust
 
 scripts/deploy-openai-server.sh \
-  --runtime-bin /path/to/claw \
+  --runtime-bin /path/to/clab \
   --service your-claw-openai.service \
   --health-url http://127.0.0.1:4097/health
 ```
 
-The deploy helper prints compact staged checks, writes full logs to `/tmp/claw-deploy-openai-*.log`, backs up the previous runtime binary, installs atomically through `.new`, optionally restarts a systemd service, checks health, scans the journal, and prints a rollback command.
+The deploy helper prints compact staged checks, writes full logs to `/tmp/clab-deploy-openai-*.log`, backs up the previous runtime binary, installs atomically through `.new`, optionally restarts a systemd service, checks health, scans the journal, and prints a rollback command.
 
 On my combsrv host I use a local wrapper outside the repository:
 
@@ -65,9 +65,9 @@ The wrapper only supplies local paths, service name, and health URL. The portabl
 
 
 > [!IMPORTANT]
-> Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows. For file submission/navigation questions, see [Navigation and file context](./docs/navigation-file-context.md). For local OpenAI-compatible models and offline skill installs, see [Local OpenAI-compatible providers and skills setup](./docs/local-openai-compatible-providers.md). Windows users can jump to the PowerShell-first [Windows install and release quickstart](./docs/windows-install-release.md). Make `claw doctor` your first health check after building, use [`rust/README.md`](./rust/README.md) for crate-level details, read [`PARITY.md`](./PARITY.md) for the current Rust-port checkpoint, and see [`docs/container.md`](./docs/container.md) for the container-first workflow.
+> Start with [`USAGE.md`](./USAGE.md) for build, auth, CLI, session, and parity-harness workflows. For file submission/navigation questions, see [Navigation and file context](./docs/navigation-file-context.md). For local OpenAI-compatible models and offline skill installs, see [Local OpenAI-compatible providers and skills setup](./docs/local-openai-compatible-providers.md). Windows users can jump to the PowerShell-first [Windows install and release quickstart](./docs/windows-install-release.md). Make `clab doctor` your first health check after building, use [`rust/README.md`](./rust/README.md) for crate-level details, read [`PARITY.md`](./PARITY.md) for the current Rust-port checkpoint, and see [`docs/container.md`](./docs/container.md) for the container-first workflow.
 >
-> **ACP / Zed status:** `claw-code` does not ship an ACP/Zed daemon or JSON-RPC entrypoint yet. Run `claw acp` (or `claw --acp`) for the current status instead of guessing from source layout; `claw acp serve` is currently a discoverability alias only, returns status with exit code 0, and real ACP support remains tracked separately in `ROADMAP.md`. For the public JSON contract, see [`docs/g011-acp-json-rpc-status-contract.md`](./docs/g011-acp-json-rpc-status-contract.md).
+> **ACP / Zed status:** `claw-code` does not ship an ACP/Zed daemon or JSON-RPC entrypoint yet. Run `clab acp` (or `clab --acp`) for the current status instead of guessing from source layout; `clab acp serve` is currently a discoverability alias only, returns status with exit code 0, and real ACP support remains tracked separately in `ROADMAP.md`. For the public JSON contract, see [`docs/g011-acp-json-rpc-status-contract.md`](./docs/g011-acp-json-rpc-status-contract.md).
 
 ### OpenAI service installer
 
@@ -79,12 +79,12 @@ cd rust
 scripts/install-openai-service.sh \
   --service claw-openai.service \
   --user claw \
-  --runtime-bin /opt/claw/bin/claw \
+  --runtime-bin /opt/clab/bin/clab \
   --wrapper /usr/local/bin/claw-openai-serve \
-  --env-file /etc/claw/openai.env \
-  --workdir /var/lib/claw/work \
-  --sandbox-dir /var/lib/claw/sandbox \
-  --tmpdir /var/lib/claw/sandbox/tmp \
+  --env-file /etc/clab/openai.env \
+  --workdir /var/lib/clab/work \
+  --sandbox-dir /var/lib/clab/sandbox \
+  --tmpdir /var/lib/clab/sandbox/tmp \
   --bind 127.0.0.1:4097 \
   --base-url http://127.0.0.1:8000/v1 \
   --backend-model claw-external-api \
@@ -107,7 +107,7 @@ Use `scripts/deploy-openai-server.sh` later when only the compiled runtime binar
 
 ## Current repository shape
 
-- **`rust/`** — canonical Rust workspace and the `claw` CLI binary
+- **`rust/`** — canonical Rust workspace and the `clab` CLI binary
 - **`USAGE.md`** — task-oriented usage guide for the current product surface
 - **`PARITY.md`** — Rust-port parity status and migration notes
 - **`ROADMAP.md`** — active roadmap and cleanup backlog
@@ -118,7 +118,7 @@ Use `scripts/deploy-openai-server.sh` later when only the compiled runtime binar
 
 > [!NOTE]
 > [!WARNING]
-> **`cargo install claw-code` installs the wrong thing.** The `claw-code` crate on crates.io is a deprecated stub that places `claw-code-deprecated.exe` — not `claw`. Running it only prints `"claw-code has been renamed to agent-code"`. **Do not use `cargo install claw-code`.** Either build from source (this repo) or install the upstream binary:
+> **`cargo install claw-code` installs the wrong thing.** The `claw-code` crate on crates.io is a deprecated stub that places `claw-code-deprecated.exe` — not `clab`. Running it only prints `"claw-code has been renamed to agent-code"`. **Do not use `cargo install claw-code`.** Either build from source (this repo) or install the upstream binary:
 > ```bash
 > cargo install agent-code   # upstream binary — installs 'agent.exe' (Windows) / 'agent' (Unix), NOT 'agent-code'
 > ```
@@ -134,14 +134,14 @@ cargo build --workspace
 export ANTHROPIC_API_KEY="sk-ant-..."
 
 # 3. Verify everything is wired correctly
-./target/debug/claw doctor
+./target/debug/clab doctor
 
 # 4. Run a prompt
-./target/debug/claw prompt "say hello"
+./target/debug/clab prompt "say hello"
 ```
 
 > [!NOTE]
-> **Windows (PowerShell):** the binary is `claw.exe`, not `claw`. Use `.\target\debug\claw.exe` or run `cargo run -- prompt "say hello"` to skip the path lookup.
+> **Windows (PowerShell):** the binary is `clab.exe`, not `clab`. Use `.\target\debug\clab.exe` or run `cargo run -- prompt "say hello"` to skip the path lookup.
 
 ### Windows setup
 
@@ -162,7 +162,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 4. **Run** (PowerShell — note `.exe` and backslash):
    ```powershell
    $env:ANTHROPIC_API_KEY = "sk-ant-..."
-   .\target\debug\claw.exe prompt "say hello"
+   .\target\debug\clab.exe prompt "say hello"
    ```
 
 For release ZIPs, PATH setup, provider switching, and notification smoke checks, see [`docs/windows-install-release.md`](./docs/windows-install-release.md).
@@ -171,19 +171,19 @@ For release ZIPs, PATH setup, provider switching, and notification smoke checks,
 
 ## Post-build: locate the binary and verify
 
-After running `cargo build --workspace`, the `claw` binary is built but **not** automatically installed to your system. Here's where to find it and how to verify the build succeeded.
+After running `cargo build --workspace`, the `clab` binary is built but **not** automatically installed to your system. Here's where to find it and how to verify the build succeeded.
 
 ### Binary location
 
 After `cargo build --workspace` in `claw-lab/rust/`:
 
 **Debug build (default, faster compile):**
-- **macOS/Linux:** `rust/target/debug/claw`
-- **Windows:** `rust/target/debug/claw.exe`
+- **macOS/Linux:** `rust/target/debug/clab`
+- **Windows:** `rust/target/debug/clab.exe`
 
 **Release build (optimized, slower compile):**
-- **macOS/Linux:** `rust/target/release/claw`
-- **Windows:** `rust/target/release/claw.exe`
+- **macOS/Linux:** `rust/target/release/clab`
+- **Windows:** `rust/target/release/clab.exe`
 
 If you ran `cargo build` without `--release`, the binary is in the `debug/` folder.
 
@@ -193,12 +193,12 @@ Test the binary directly using its path:
 
 ```bash
 # macOS/Linux (debug build)
-./rust/target/debug/claw --help
-./rust/target/debug/claw doctor
+./rust/target/debug/clab --help
+./rust/target/debug/clab doctor
 
 # Windows PowerShell (debug build)
-.\rust\target\debug\claw.exe --help
-.\rust\target\debug\claw.exe doctor
+.\rust\target\debug\clab.exe --help
+.\rust\target\debug\clab.exe doctor
 ```
 
 PowerShell smoke commands that do not require live credentials:
@@ -207,25 +207,25 @@ PowerShell smoke commands that do not require live credentials:
 $env:CLAW_CONFIG_HOME = Join-Path $env:TEMP "claw config home"
 New-Item -ItemType Directory -Force -Path $env:CLAW_CONFIG_HOME | Out-Null
 Remove-Item Env:\ANTHROPIC_API_KEY, Env:\ANTHROPIC_AUTH_TOKEN, Env:\OPENAI_API_KEY -ErrorAction SilentlyContinue
-.\rust\target\debug\claw.exe help
-.\rust\target\debug\claw.exe status
-.\rust\target\debug\claw.exe config env
-.\rust\target\debug\claw.exe doctor
+.\rust\target\debug\clab.exe help
+.\rust\target\debug\clab.exe status
+.\rust\target\debug\clab.exe config env
+.\rust\target\debug\clab.exe doctor
 ```
 
-If these commands succeed, the build is working. `claw doctor` is your first health check — it validates your API key, model access, and tool configuration.
+If these commands succeed, the build is working. `clab doctor` is your first health check — it validates your API key, model access, and tool configuration.
 
 ### Optional: Add to PATH
 
-If you want to run `claw` from any directory without the full path, choose one of these approaches:
+If you want to run `clab` from any directory without the full path, choose one of these approaches:
 
 **Option 1: Symlink (macOS/Linux)**
 ```bash
-ln -s $(pwd)/rust/target/debug/claw /usr/local/bin/claw
+ln -s $(pwd)/rust/target/debug/clab /usr/local/bin/clab
 ```
 Then reload your shell and test:
 ```bash
-claw --help
+clab --help
 ```
 
 **Option 2: Use `cargo install` (all platforms)**
@@ -236,7 +236,7 @@ Build and install to Cargo's default location (`~/.cargo/bin/`, which is usually
 cargo install --path . --force
 
 # Then from anywhere
-claw --help
+clab --help
 ```
 
 **Option 3: Update shell profile (bash/zsh)**
@@ -249,17 +249,17 @@ export PATH="$(pwd)/rust/target/debug:$PATH"
 Reload your shell:
 ```bash
 source ~/.bashrc  # or source ~/.zshrc
-claw --help
+clab --help
 ```
 
 ### Troubleshooting
 
-- **"command not found: claw"** — The binary is in `rust/target/debug/claw`, but it's not on your PATH. Use the full path `./rust/target/debug/claw` or symlink/install as above.
-- **"permission denied"** — On macOS/Linux, you may need `chmod +x rust/target/debug/claw` if the executable bit isn't set (rare).
+- **"command not found: clab"** — The binary is in `rust/target/debug/clab`, but it's not on your PATH. Use the full path `./rust/target/debug/clab` or symlink/install as above.
+- **"permission denied"** — On macOS/Linux, you may need `chmod +x rust/target/debug/clab` if the executable bit isn't set (rare).
 - **Debug vs. release** — If the build is slow, you're in debug mode (default). Add `--release` to `cargo build` for faster runtime, but the build itself will take 5–10 minutes.
 
 > [!NOTE]
-> **Auth:** claw requires an **API key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) — Claude subscription login is not a supported auth path.
+> **Auth:** clab requires an **API key** (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, etc.) — Claude subscription login is not a supported auth path.
 
 Run the workspace test suite after verifying the binary works:
 
@@ -272,28 +272,4 @@ cargo test --workspace
 
 - [`USAGE.md`](./USAGE.md) — quick commands, auth, sessions, config, parity harness
 - [`docs/navigation-file-context.md`](./docs/navigation-file-context.md) — terminal navigation, scrollback, `@path` file context, attachments, and secret-safety guidance
-- [`docs/local-openai-compatible-providers.md`](./docs/local-openai-compatible-providers.md) — Ollama/llama.cpp/vLLM setup, Claw multi-provider positioning, and local skills install checks
-- [`docs/windows-install-release.md`](./docs/windows-install-release.md) — PowerShell-first install, release artifact, provider switching, and Windows/WSL notification smoke paths
-- [`rust/README.md`](./rust/README.md) — crate map, CLI surface, features, workspace layout
-- [`PARITY.md`](./PARITY.md) — parity status for the Rust port
-- [`rust/MOCK_PARITY_HARNESS.md`](./rust/MOCK_PARITY_HARNESS.md) — deterministic mock-service harness details
-- [`ROADMAP.md`](./ROADMAP.md) — active roadmap and open cleanup work
-- [`docs/g004-events-reports-contract.md`](./docs/g004-events-reports-contract.md) — Stream 2 lane event/report contract guidance for consumers
-- [`PHILOSOPHY.md`](./PHILOSOPHY.md) — why the project exists and how it is operated
-- [`CONTRIBUTING.md`](./CONTRIBUTING.md), [`SECURITY.md`](./SECURITY.md), [`SUPPORT.md`](./SUPPORT.md), and [`CODE_OF_CONDUCT.md`](./CODE_OF_CONDUCT.md) — contribution, vulnerability-reporting, support, and community policies
-- [`LICENSE`](./LICENSE) — MIT license for this repository
-
-## Ecosystem
-
-Claw Code is built in the open alongside the broader UltraWorkers toolchain:
-
-- [clawhip](https://github.com/Yeachan-Heo/clawhip)
-- [oh-my-openagent](https://github.com/code-yeongyu/oh-my-openagent)
-- [oh-my-claudecode](https://github.com/Yeachan-Heo/oh-my-claudecode)
-- [oh-my-codex](https://github.com/Yeachan-Heo/oh-my-codex)
-- [UltraWorkers Discord](https://discord.gg/5TUQKqFWd)
-
-## Ownership / affiliation disclaimer
-
-- This repository does **not** claim ownership of the original Claude Code source material.
-- This repository is **not affiliated with, endorsed by, or maintained by Anthropic**.
+- [`docs/local-openai-compatible-providers.md`](./docs/local-openai-compatible-providers.md) — Ollama/llama.cpp/vLLM setup, Claw multi-provider positioning, and local
