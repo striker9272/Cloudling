@@ -7,7 +7,7 @@ This guide covers two common offline/local workflows:
 
 ## Claw is not Claude-only
 
-Claw Code is a Claude-Code-shaped workflow/runtime, not a Claude-only product. It supports Anthropic directly and can target OpenAI-compatible, provider-routed, and local models depending on configuration. Non-Claude providers are supported honestly: they may require stricter tool-call and response-shape compatibility, and some slash/tool workflows can be rougher than first-party Anthropic/OpenAI paths. Provider-specific identity leaks are bugs, not intended product positioning.
+Claw Lab is a Claude-Code-shaped workflow/runtime, not a Claude-only product. It supports Anthropic directly and can target OpenAI-compatible, provider-routed, and local models depending on configuration. Non-Claude providers are supported honestly: they may require stricter tool-call and response-shape compatibility, and some slash/tool workflows can be rougher than first-party Anthropic/OpenAI paths. Provider-specific identity leaks are bugs, not intended product positioning.
 
 If you need the most polished daily-driver experience for a specific non-Claude model today, compare that provider’s native tools. If you need runtime/provider hackability, Claw’s OpenAI-compatible route is the intended extension path.
 
@@ -18,7 +18,7 @@ Set `OPENAI_BASE_URL` to the server’s `/v1` endpoint and set `OPENAI_API_KEY` 
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
 export OPENAI_API_KEY="local-dev-token"
-claw --model "qwen3:latest" prompt "Reply exactly HELLO_WORLD_123"
+clab --model "qwen3:latest" prompt "Reply exactly HELLO_WORLD_123"
 ```
 
 Routing notes:
@@ -59,7 +59,7 @@ In another shell:
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
 export OPENAI_API_KEY="local-dev-token"
-claw --model "qwen3:latest" prompt "Reply exactly HELLO_WORLD_123"
+clab --model "qwen3:latest" prompt "Reply exactly HELLO_WORLD_123"
 ```
 
 If Ollama is running without auth and your build accepts authless local OpenAI-compatible servers, `unset OPENAI_API_KEY` is also acceptable. Use a placeholder token rather than a real cloud API key for local testing.
@@ -77,7 +77,7 @@ Then smoke-test through Claw:
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:8080/v1"
 export OPENAI_API_KEY="local-dev-token"
-claw --model "qwen2.5-coder" prompt "Reply exactly HELLO_WORLD_123"
+clab --model "qwen2.5-coder" prompt "Reply exactly HELLO_WORLD_123"
 ```
 
 ## vLLM or another OpenAI-compatible server
@@ -93,7 +93,7 @@ Then route Claw to it:
 ```bash
 export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
 export OPENAI_API_KEY="local-dev-token"
-claw --model "Qwen/Qwen2.5-Coder-7B-Instruct" prompt "Reply exactly HELLO_WORLD_123"
+clab --model "Qwen/Qwen2.5-Coder-7B-Instruct" prompt "Reply exactly HELLO_WORLD_123"
 ```
 
 ## Local skills install from disk
@@ -129,15 +129,15 @@ Install a skill from a local path in the interactive REPL:
 Or inspect skills from the direct CLI surface:
 
 ```bash
-claw skills --output-format json
+clab skills --output-format json
 ```
 
 Offline install checklist:
 
 - Install the specific skill directory, not only the repository root, unless that repository root itself contains `SKILL.md`.
 - Keep the frontmatter `name` aligned with the directory name users will type.
-- After installing, run `/skills list` or `claw skills --output-format json` to confirm the discovered name and source path.
-- If a skill invocation fails with an HTTP/provider error, the skill may have installed correctly but the current model/provider call failed. Run `claw doctor`, verify provider credentials, and try a simple prompt smoke test before reinstalling the skill.
+- After installing, run `/skills list` or `clab skills --output-format json` to confirm the discovered name and source path.
+- If a skill invocation fails with an HTTP/provider error, the skill may have installed correctly but the current model/provider call failed. Run `clab doctor`, verify provider credentials, and try a simple prompt smoke test before reinstalling the skill.
 
 ## Troubleshooting
 
@@ -146,5 +146,5 @@ Offline install checklist:
 | Claw still asks for Anthropic credentials | Use an explicit OpenAI-compatible model route or remove unrelated Anthropic env vars during local smoke tests. |
 | `model not found` from local server | Use the exact model ID exposed by Ollama/llama.cpp/vLLM. |
 | Plain prompt works but tools fail | Confirm the model/server supports OpenAI-compatible tool calls and response shapes. |
-| Skill says installed but `/skills <name>` fails | Check `/skills list` for the discovered name and source; verify provider credentials separately with `claw doctor`. |
+| Skill says installed but `/skills <name>` fails | Check `/skills list` for the discovered name and source; verify provider credentials separately with `clab doctor`. |
 | A local docs/log file contains secrets | Redact it before using `@path` file context or attaching it to an issue. |

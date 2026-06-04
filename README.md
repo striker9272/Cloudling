@@ -9,10 +9,6 @@
   ·
   <a href="./rust/README.md">Rust workspace</a>
   ·
-  <a href="./ROADMAP.md">Roadmap</a>
-  ·
-  <a href="./CONTRIBUTING.md">Contributing</a>
-  ·
   <a href="./SECURITY.md">Security</a>
 </p>
 
@@ -121,7 +117,6 @@ scripts/deploy-openai-server.sh \
 
 - **`rust/`** — Rust-воркспейс и бинарник `clab` (CLI + сервер); каноническая реализация
 - **`USAGE.md`** — сборка, авторизация, CLI, сессии, провайдеры
-- **`ROADMAP.md`** / **`PHILOSOPHY.md`** — направление и замысел дизайна
 - **`docs/`** — Windows, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры
 - **`src/` + `tests/`** — вспомогательный референс/аудит-воркспейс; не основная среда выполнения
 
@@ -232,7 +227,6 @@ scripts/deploy-openai-server.sh \
 
 - **`rust/`** — the Rust workspace and the `clab` CLI + server binary (the canonical implementation)
 - **`USAGE.md`** — build, auth, CLI, sessions, providers
-- **`ROADMAP.md`** / **`PHILOSOPHY.md`** — direction and design intent
 - **`docs/`** — Windows install, local OpenAI-compatible providers, file-context, containers
 - **`src/` + `tests/`** — companion reference/audit workspace; not the primary runtime
 

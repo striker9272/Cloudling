@@ -22,22 +22,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 REQUIRED_POLICY_FILES = [
     "LICENSE",
-    "CONTRIBUTING.md",
     "SECURITY.md",
-    "SUPPORT.md",
-    "CODE_OF_CONDUCT.md",
 ]
 
 MARKDOWN_ROOTS = [
     ROOT / "README.md",
     ROOT / "USAGE.md",
-    ROOT / "PARITY.md",
-    ROOT / "PHILOSOPHY.md",
-    ROOT / "ROADMAP.md",
-    ROOT / "CONTRIBUTING.md",
     ROOT / "SECURITY.md",
-    ROOT / "SUPPORT.md",
-    ROOT / "CODE_OF_CONDUCT.md",
     ROOT / "docs",
     ROOT / "rust" / "README.md",
     ROOT / "rust" / "USAGE.md",
