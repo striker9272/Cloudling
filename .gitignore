@@ -12,3 +12,6 @@ archive/
 status-help.txt
 # Legacy Python port session scratch artifacts
 .port_sessions/
+# Personal notes / scratch (not for the repo)
+NOTES_*.md
+/notes/
