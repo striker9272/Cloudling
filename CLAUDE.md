@@ -1,21 +1,64 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude when working in this repository. Collaboration rules live in
+the project Instructions (set in the app); this file documents the **codebase**.
 
-## Detected stack
-- Languages: Rust.
-- Frameworks: none detected from the supported starter markers.
+## What this is
 
-## Verification
-- Run Rust verification from repo root: `scripts/fmt.sh --check`; for formatting use `scripts/fmt.sh`. Run Rust clippy/tests from `rust/`: `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`
-- `src/` and `tests/` are both present; update both surfaces together when behavior changes.
+Claw Lab is an agentic layer between a model backend and a chat frontend. It wraps
+any OpenAI-compatible backend (Ollama, llama.cpp, vLLM, cloud) with built-in tools,
+web search, and an agent workflow, and serves the result as an OpenAI-compatible
+endpoint (`/v1/chat/completions`) that Open WebUI and other clients see as a single
+model. Built for self-hosted home-lab use.
 
-## Repository shape
-- `rust/` contains the Rust workspace and active CLI/runtime implementation.
-- `src/` contains source files that should stay consistent with generated guidance and tests.
-- `tests/` contains validation surfaces that should be reviewed alongside code changes.
+Fork of [Claw Code](https://github.com/ultraworkers/claw-code) (UltraWorkers, MIT).
+The agent core comes from upstream; the OpenAI-serving layer, Open WebUI integration,
+and deploy tooling are Claw Lab's.
 
-## Working agreement
-- Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.
-- Keep shared defaults in `.claude.json`; reserve `.claude/settings.local.json` for machine-local overrides.
-- Do not overwrite existing `CLAUDE.md` content automatically; update it intentionally when repo workflows change.
+## Stack & repository shape
+
+- Language: Rust. The workspace lives in `rust/` (members under `rust/crates/*`).
+- Binary: **`clab`** (defined in crate `clab-cli`). Other notable crates: `clab-analog`,
+  `clab-rag-service`.
+- `USAGE.md` — task-oriented usage guide. `docs/` — Windows, local providers, containers,
+  model compatibility, RAG/web-ui, navigation/file-context.
+- `src/` + `tests/` — companion reference/audit workspace, not the primary runtime.
+
+## Build, verify, test
+
+Run from `rust/` (combsrv has cargo 1.96; the local sandbox does not):
+
+```bash
+cargo build --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Formatting from repo root: `scripts/fmt.sh --check` (or `scripts/fmt.sh` to apply).
+
+## Deploy (combsrv)
+
+The live service is `claw-lab-openai.service`, started via the wrapper
+`/usr/local/bin/claw-lab-openai-serve`, which runs the `clab` binary in a neutral
+workdir. Rebuild + install + restart with:
+
+```bash
+sudo claw-lab-deploy-openai     # wraps rust/scripts/deploy-openai-server.sh
+```
+
+combsrv has no passwordless sudo, so privileged deploy/restart steps are run by
+Alexander, not from an automated session. The runtime binary path keeps the filename
+`claw` for now (internal plumbing); the source/build product is `clab`.
+
+## Conventions
+
+- **Branding:** the project, binary, and crates are `clab` / `clab-*`. When renaming,
+  do NOT touch plumbing: the config dir `.claw/`, env vars `CLAW_*`, or config files
+  like `.claw-analog.toml`. Keep all `claw-code` / "Claw Code" references that credit
+  the **upstream** project (MIT attribution requirement — `LICENSE` must stay intact).
+- **Language:** code, commits, and public docs in English; conversation with Alexander
+  in Russian.
+- **CI:** GitHub Actions (`.github/workflows/rust-ci.yml`) runs doc checks, fmt, clippy,
+  tests, build. Keep `rust/` source and `tests/` in sync when behavior changes.
+- Prefer small, reviewable changes. Reserve machine-local overrides for
+  `.claude/settings.local.json`; keep shared defaults in `.claude.json`.
