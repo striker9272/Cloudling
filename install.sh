@@ -2,7 +2,7 @@
 # Claw Code installer
 #
 # Detects the host OS, verifies the Rust toolchain (rustc + cargo),
-# builds the `claw` binary from the `rust/` workspace, and runs a
+# builds the `clab` binary from the `rust/` workspace, and runs a
 # post-install verification step. Supports Linux, macOS, and WSL.
 #
 # Usage:
@@ -163,9 +163,9 @@ ${COLOR_DIM}---------------${COLOR_RESET}
        cd rust && cargo clean && cargo build --workspace
      If the failure mentions ring/openssl, double check step 2.
 
-  ${COLOR_BOLD}6. 'claw' not found after install${COLOR_RESET}
+  ${COLOR_BOLD}6. 'clab' not found after install${COLOR_RESET}
      The binary lives at:
-       rust/target/${BUILD_PROFILE}/claw
+       rust/target/${BUILD_PROFILE}/clab
      Add it to your PATH or invoke it with the full path.
 
 EOF
@@ -305,7 +305,7 @@ fi
 # Step 4: build the workspace
 # ---------------------------------------------------------------------------
 
-step "Building the claw workspace (${BUILD_PROFILE})"
+step "Building the clab workspace (${BUILD_PROFILE})"
 
 CARGO_FLAGS=("build" "--workspace")
 if [ "${BUILD_PROFILE}" = "release" ]; then
@@ -320,7 +320,7 @@ info "this may take a few minutes on the first build"
     CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}" cargo "${CARGO_FLAGS[@]}"
 )
 
-CLAW_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/claw"
+CLAW_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/clab"
 
 if [ ! -x "${CLAW_BIN}" ]; then
     error "Expected binary not found at ${CLAW_BIN}"
@@ -339,20 +339,20 @@ step "Verifying the installed binary"
 if [ "${SKIP_VERIFY}" = "1" ]; then
     warn "verification skipped (--no-verify or CLAW_SKIP_VERIFY=1)"
 else
-    info "running: claw --version"
+    info "running: clab --version"
     if VERSION_OUT="$("${CLAW_BIN}" --version 2>&1)"; then
-        ok "claw --version -> ${VERSION_OUT}"
+        ok "clab --version -> ${VERSION_OUT}"
     else
-        error "claw --version failed:"
+        error "clab --version failed:"
         printf '%s\n' "${VERSION_OUT}" 1>&2
         exit 1
     fi
 
-    info "running: claw --help (smoke test)"
+    info "running: clab --help (smoke test)"
     if "${CLAW_BIN}" --help >/dev/null 2>&1; then
-        ok "claw --help responded"
+        ok "clab --help responded"
     else
-        error "claw --help failed"
+        error "clab --help failed"
         exit 1
     fi
 fi

@@ -1,4 +1,4 @@
-//! Binary wrapper for `claw_analog::run` — see `how_to_run.md` in repo root.
+//! Binary wrapper for `clab_analog::run` — see `how_to_run.md` in repo root.
 
 mod agents;
 mod config_cmd;
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
-use claw_analog::{
+use clab_analog::{
     load_analog_toml, load_profile_hint, permission_mode_from_toml_str, print_tools_dry_run,
     resolve_analog_profile_path, resolve_rag_base_url, AnalogConfig, AnalogFileConfig,
     AnalogLanguage, OutputFormat, PermissionMode, Preset, ANALOG_DEFAULT_MODEL,
@@ -71,7 +71,7 @@ impl From<PresetCli> for Preset {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "claw-analog",
+    name = "clab-analog",
     version,
     about = "Lean tool-agent loop (read/list/grep/write) on claw-code `api` providers"
 )]
@@ -85,7 +85,7 @@ struct RootCli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Verify credentials, `cargo check -p claw-analog` (or `--release-build`), config merge preview, optional `--tcp-ping`.
+    /// Verify credentials, `cargo check -p clab-analog` (or `--release-build`), config merge preview, optional `--tcp-ping`.
     Doctor(doctor::DoctorCli),
     Config {
         #[command(subcommand)]
@@ -200,7 +200,7 @@ fn load_file_config(path: &Path) -> AnalogFileConfig {
         Ok(c) => c,
         Err(e) => {
             eprintln!(
-                "[claw-analog] warning: failed to read {}: {e}",
+                "[clab-analog] warning: failed to read {}: {e}",
                 path.display()
             );
             AnalogFileConfig::default()
@@ -240,17 +240,17 @@ fn merge_language(cli: Option<LangArg>, file: Option<&str>) -> AnalogLanguage {
 fn merge_preset(cli: Option<PresetCli>, file: Option<&str>, prompt: &str) -> Preset {
     if let Some(p) = cli {
         return match p {
-            PresetCli::Auto => claw_analog::infer_preset_from_prompt(prompt),
+            PresetCli::Auto => clab_analog::infer_preset_from_prompt(prompt),
             other => Preset::from(other),
         };
     }
     if file.is_some_and(|s| s.trim().eq_ignore_ascii_case("auto")) {
-        return claw_analog::infer_preset_from_prompt(prompt);
+        return clab_analog::infer_preset_from_prompt(prompt);
     }
     if let Some(s) = file.and_then(Preset::from_toml_str) {
         return s;
     }
-    claw_analog::infer_preset_from_prompt(prompt)
+    clab_analog::infer_preset_from_prompt(prompt)
 }
 
 fn merge_permission(
@@ -416,7 +416,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 ShellKind::Powershell => Shell::PowerShell,
             };
             let mut cmd = RootCli::command();
-            generate(shell, &mut cmd, "claw-analog", &mut std::io::stdout());
+            generate(shell, &mut cmd, "clab-analog", &mut std::io::stdout());
             return Ok(());
         }
         None => {}
@@ -509,7 +509,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let output_format = config.output_format;
 
     let mut out = std::io::stdout();
-    if let Err(e) = claw_analog::run(config, &mut out).await {
+    if let Err(e) = clab_analog::run(config, &mut out).await {
         if matches!(output_format, OutputFormat::Json) {
             println!(
                 "{}",

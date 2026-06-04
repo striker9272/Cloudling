@@ -1,4 +1,4 @@
-//! `claw-rag-service` — HTTP API + `ingest` subcommand.
+//! `clab-rag-service` — HTTP API + `ingest` subcommand.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -11,13 +11,13 @@ use axum::{
     Json, Router,
 };
 use clap::{Parser, Subcommand};
-use claw_rag_service::{
+use clab_rag_service::{
     chunk_count, open_db, query_index, run_ingest, EmbedConfig, QueryRequest, QueryResponse,
 };
 
 #[derive(Parser)]
 #[command(
-    name = "claw-rag-service",
+    name = "clab-rag-service",
     about = "Workspace RAG index + HTTP query API"
 )]
 struct Cli {
@@ -124,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .unwrap_or(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST));
     let addr = std::net::SocketAddr::from((host, port));
     eprintln!(
-        "claw-rag-service db={} listen=http://{addr}",
+        "clab-rag-service db={} listen=http://{addr}",
         state.db_path.display()
     );
     let listener = tokio::net::TcpListener::bind(addr).await?;

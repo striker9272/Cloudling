@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dogfood-build.sh — Build claw from current checkout and verify provenance.
+# dogfood-build.sh — Build clab from current checkout and verify provenance.
 #
 # Injects GIT_SHA at build time so version JSON is non-null.
 # Suppresses Cargo compile noise on stderr.
@@ -33,10 +33,10 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUST_DIR="$REPO_ROOT/rust"
-BINARY="$RUST_DIR/target/debug/claw"
+BINARY="$RUST_DIR/target/debug/clab"
 EXPECTED_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 
-echo "▶ Building claw from $REPO_ROOT" >&2
+echo "▶ Building clab from $REPO_ROOT" >&2
 echo "  Commit: $(git -C "$REPO_ROOT" log --oneline -1)" >&2
 
 # Inject GIT_SHA so version JSON returns a non-null sha.
@@ -44,12 +44,12 @@ echo "  Commit: $(git -C "$REPO_ROOT" log --oneline -1)" >&2
 # on build failure cargo exits non-zero and set -e aborts.
 if ! GIT_SHA="$EXPECTED_SHA" cargo build \
         --manifest-path "$RUST_DIR/Cargo.toml" \
-        -p rusty-claude-cli -q 2>/dev/null; then
+        -p clab-cli -q 2>/dev/null; then
     # Re-run with visible output so the user sees the error
     echo "✗ Build failed — rerunning with output:" >&2
     GIT_SHA="$EXPECTED_SHA" cargo build \
         --manifest-path "$RUST_DIR/Cargo.toml" \
-        -p rusty-claude-cli 2>&1 | sed 's/^/  /' >&2
+        -p clab-cli 2>&1 | sed 's/^/  /' >&2
     exit 1
 fi
 
