@@ -41,7 +41,7 @@ pub fn run_setup_wizard() -> Result<(), Box<dyn std::error::Error>> {
     let current = load_current_provider_config();
 
     println!();
-    println!("  \x1b[1mClaw Code Setup Wizard\x1b[0m");
+    println!("  \x1b[1mClaw Lab Setup Wizard\x1b[0m");
     println!("  Configure your provider, API key, and model.");
     println!("  Press Enter to keep current value.\n");
 
