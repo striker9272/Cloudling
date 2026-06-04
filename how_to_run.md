@@ -1,6 +1,6 @@
-# claw-analog — как запускать и как это устроено
+# clab-analog — как запускать и как это устроено
 
-Минимальный агент поверх того же стека API, что и основной CLI [`claw`](rust/README.md): провайдеры Anthropic / OpenAI‑совместимые / xAI выбираются по модели и переменным окружения (см. [USAGE.md](USAGE.md)).
+Минимальный агент поверх того же стека API, что и основной CLI [`clab`](rust/README.md): провайдеры Anthropic / OpenAI‑совместимые / xAI выбираются по модели и переменным окружения (см. [USAGE.md](USAGE.md)).
 
 Дальше в примерах **рабочий каталог** — папка **`claw-code-main\rust`** (внутри клона репозитория). Если приглашение PowerShell уже `…\claw-code-main\rust>`, **не** выполняйте второй раз `cd rust` (иначе будет `rust\rust` и ошибка пути).
 
@@ -13,34 +13,34 @@
 
 ```powershell
 cd D:\path\to\claw-code-main\rust
-cargo build -p claw-analog
-cargo run -p claw-analog -- --help
+cargo build -p clab-analog
+cargo run -p clab-analog -- --help
 ```
 
 ### Диагностика (`doctor`)
 
-Подкоманда **`claw-analog doctor`** (у неё свой `--help`, отдельно от основного режима):
+Подкоманда **`clab-analog doctor`** (у неё свой `--help`, отдельно от основного режима):
 
 - **превью конфигурации** — итог после слияния **`.claw-analog.toml`** (путь `<workspace>/.claw-analog.toml` или **`--config`**) и **тех же флагов**, что у основного run: **`--model`**, **`--permission`**, **`--preset`**, **`--output-format`**, **`--stream`**, **`--no-stream`**, **`--no-runtime-enforcer`**, **`--accept-danger-non-interactive`**, плюс **`--profile`** для отображения пути к профилю. Печатаются контракт NDJSON (`schema`, `format_version`), эффективные поля и строки **provenance** (что победило: CLI, TOML или default);
 - статус типовых переменных (**без** значений: только `set` / `unset` и длина строки);
-- поиск workspace вверх от cwd (или **`--manifest-dir`**) и по умолчанию **`cargo check -p claw-analog`** (только компиляция, **не** перезаписывает `target\debug\claw-analog.exe` — иначе на Windows при `cargo run … doctor` часто «Отказано в доступе» при вложенном `cargo build`);
-- **`--release-build`** — **`cargo build --release -p claw-analog`** (бинарь в `target\release\`, не конфликтует с запущенным debug‑exe);
+- поиск workspace вверх от cwd (или **`--manifest-dir`**) и по умолчанию **`cargo check -p clab-analog`** (только компиляция, **не** перезаписывает `target\debug\clab-analog.exe` — иначе на Windows при `cargo run … doctor` часто «Отказано в доступе» при вложенном `cargo build`);
+- **`--release-build`** — **`cargo build --release -p clab-analog`** (бинарь в `target\release\`, не конфликтует с запущенным debug‑exe);
 - **`--no-build`** — пропустить cargo;
 - **`--tcp-ping`** (алиас **`--mock`**) — TCP **`connect`** к хосту:порту из **`ANTHROPIC_BASE_URL`** (или к дефолтному `https://api.anthropic.com`); не проверяет HTTP/TLS и тело ответа.
 
 Примеры (из каталога `…\claw-code-main\rust`):
 
 ```powershell
-cargo run -p claw-analog -- doctor
-cargo run -p claw-analog -- doctor --no-build
-cargo run -p claw-analog -- doctor --tcp-ping
-cargo run -p claw-analog -- doctor -w D:\path\to\repo --preset implement
-cargo run -p claw-analog -- doctor --release-build
+cargo run -p clab-analog -- doctor
+cargo run -p clab-analog -- doctor --no-build
+cargo run -p clab-analog -- doctor --tcp-ping
+cargo run -p clab-analog -- doctor -w D:\path\to\repo --preset implement
+cargo run -p clab-analog -- doctor --release-build
 ```
 
 ### Проверка конфигурации без API (`config validate`)
 
-Подкоманда **`claw-analog config validate`**:
+Подкоманда **`clab-analog config validate`**:
 
 - парсит **`.claw-analog.toml`** (по умолчанию `<workspace>/.claw-analog.toml`, переопределение **`--config`**) и выводит краткий **merge preview** (как у `doctor`, но **только TOML + defaults**, без флагов основного run);
 - проверяет **`profile.toml`**: тот же порядок, что у run (`--profile`, поле `profile` в TOML, иначе дефолтный `~/.claw-analog/profile.toml` при наличии файла);
@@ -49,8 +49,8 @@ cargo run -p claw-analog -- doctor --release-build
 **`--strict`** — ошибка (код выхода 1), если файла конфигурации нет или профиль не читается.
 
 ```powershell
-cargo run -p claw-analog -- config validate -w D:\path\to\repo
-cargo run -p claw-analog -- config validate --strict -w .
+cargo run -p clab-analog -- config validate -w D:\path\to\repo
+cargo run -p clab-analog -- config validate --strict -w .
 ```
 
 ### Дополнение оболочки (`complete`)
@@ -58,7 +58,7 @@ cargo run -p claw-analog -- config validate --strict -w .
 Скрипт автодополнения в **stdout** (перенаправьте в файл из документации вашей оболочки):
 
 ```powershell
-cargo run -p claw-analog -- complete powershell >> $PROFILE
+cargo run -p clab-analog -- complete powershell >> $PROFILE
 # bash:zsh:fish — см. вывод `complete --help`
 ```
 
@@ -70,25 +70,25 @@ cargo run -p claw-analog -- complete powershell >> $PROFILE
 
 ```powershell
 # из ...\claw-code-main\rust
-cargo run -p claw-analog -- -w D:\path\to\repo "Кратко опиши структуру rust/crates"
+cargo run -p clab-analog -- -w D:\path\to\repo "Кратко опиши структуру rust/crates"
 ```
 
 С **живым выводом** (SSE через `stream_message`):
 
 ```powershell
-cargo run -p claw-analog -- --stream -w . "Объясни claw-analog в двух предложениях"
+cargo run -p clab-analog -- --stream -w . "Объясни clab-analog в двух предложениях"
 ```
 
 Разрешить **запись файлов** в workspace:
 
 ```powershell
-cargo run -p claw-analog -- --permission workspace-write -w . "Добавь комментарий в начало crates/claw-analog/Cargo.toml"
+cargo run -p clab-analog -- --permission workspace-write -w . "Добавь комментарий в начало crates/clab-analog/Cargo.toml"
 ```
 
 Отключить проверку через **`runtime::PermissionEnforcer`** (только своя тюрьма путей; не рекомендуется):
 
 ```powershell
-cargo run -p claw-analog -- --no-runtime-enforcer -w . "…"
+cargo run -p clab-analog -- --no-runtime-enforcer -w . "…"
 ```
 
 Полезные лимиты (CLI **перекрывает** значения из `.claw-analog.toml`, см. ниже):
@@ -140,7 +140,7 @@ glob_max_depth = 32
 
 **RAG (`retrieve_context`):** если заданы **`RAG_BASE_URL`** (per-env) или непустой **`rag_base_url`** в `.claw-analog.toml`, в набор инструментов добавляется **`retrieve_context`** (семантический поиск по уже проиндексированному воркспейсу). Значение — корень HTTP сервиса, без суффикса `/v1` (запрос идёт на `{base}/v1/query`). Таймаут и верхняя граница **`top_k`** задаются **`rag_timeout_secs`** и **`rag_top_k_max`** (по умолчанию 30 с и 32; «жёсткий» потолок 256). Индексация по-прежнему отдельной командой **`claw-rag-service`**, см. [`docs/rag-web-ui.md`](docs/rag-web-ui.md).
 
-**`permission`** (как у полного `claw`, те же строки в TOML):
+**`permission`** (как у полного `clab`, те же строки в TOML):
 
 | Значение | Инструмент `write_file` | Неинтерактив (stdin не TTY) |
 |----------|-------------------------|------------------------------|
@@ -183,7 +183,7 @@ line = "Короткая подсказка стиля (одна строка в
 | `list_dir` | read-only+ | Список каталога (не рекурсивно) |
 | `glob_workspace` | read-only+ | Список **путей файлов** под `-w`: аргументы `pattern` (glob относительно `root`, слэши `/`), опционально `root` (по умолчанию `.`), `max_paths` (урезается лимитом CLI). В шаблоне нельзя `..`. |
 | `grep_workspace` | read-only+ | Та же **литеральная** подстрока по строкам, что и раньше; ровно один из селекторов: `path`, массив `paths` или `glob` (+ опционально `glob_root`). Общий бюджет строк — `max_lines` и `--grep-max-lines`. В нескольких файлах формат строк: `относительный/путь:номер_строки:содержимое`. |
-| `grep_search` | read-only+ | Тот же обработчик, что у `grep_workspace` (совместимость промптов с полным `claw`). |
+| `grep_search` | read-only+ | Тот же обработчик, что у `grep_workspace` (совместимость промптов с полным `clab`). |
 | `git_diff` | read-only+ | `git diff` (без цвета) внутри репозитория в `-w`. Опционально `cached` (staged), `rev_range`, `context_lines`, `paths`. Вывод ограничен `--max-read-bytes`. |
 | `git_log` | read-only+ | `git log` (без цвета) внутри репозитория в `-w`. Опционально `max_count` (по умолчанию 20), `rev_range`, `paths`. Вывод ограничен `--max-read-bytes`. |
 | `retrieve_context` | read-only+ | Только если задан **`RAG_BASE_URL`** или **`rag_base_url`** в TOML: HTTP **`POST {base}/v1/query`** к `claw-rag-service`, ответ — пути и сниппеты чанков (лимиты см. выше). |
@@ -197,7 +197,7 @@ line = "Короткая подсказка стиля (одна строка в
 4. **Цикл агента**: запрос к провайдеру → если `stop_reason == tool_use`, выполняются вызовы, результаты уходят в историю как `tool_result` → следующий раунд.
 5. **Стриминг**: при `--stream` текст ассистента печатается по мере прихода дельт; история для следующего раунда собирается из SSE так же, как в полном пайплайне (индексы блоков + JSON tool input). Отключить стриминг при настройке из файла можно флагом **`--no-stream`**.
 
-Логи вида `[claw-analog] ...` пишутся в **stderr**. В режиме **rich** ответ модели — обычный текст в **stdout**; в режиме **json** в **stdout** идёт только **NDJSON** (см. ниже).
+Логи вида `[clab-analog] ...` пишутся в **stderr**. В режиме **rich** ответ модели — обычный текст в **stdout**; в режиме **json** в **stdout** идёт только **NDJSON** (см. ниже).
 
 ## Вывод JSON (CI и внешние агенты)
 
@@ -207,7 +207,7 @@ line = "Короткая подсказка стиля (одна строка в
 
 | `type` | Когда |
 |--------|--------|
-| `run_start` | Старт прогона: **`schema`** (`claw-analog-ndjson`), **`format_version`**, далее `workspace`, `model`, `stream`, `permission`, опционально `preset`, `session`, опционально `session_save`, булево **`rag_enabled`** (есть ли база для `retrieve_context`) |
+| `run_start` | Старт прогона: **`schema`** (`clab-analog-ndjson`), **`format_version`**, далее `workspace`, `model`, `stream`, `permission`, опционально `preset`, `session`, опционально `session_save`, булево **`rag_enabled`** (есть ли база для `retrieve_context`) |
 | `turn_start` | Начало раунда с моделью (`turn`) |
 | `assistant_text_delta` | Только при `--stream`: фрагмент текста ассистента |
 | `assistant_turn` | Итог раунда: `stop_reason`, `usage`, полный `text`, массив `tool_calls` |
@@ -220,7 +220,7 @@ line = "Короткая подсказка стиля (одна строка в
 ```powershell
 # из ...\claw-code-main\rust
 $env:ANTHROPIC_API_KEY = "sk-ant-..."
-cargo run -p claw-analog -- --output-format json -w . "Summarize rust/README.md" 2>$null | ForEach-Object { $_ | ConvertFrom-Json | Select-Object -ExpandProperty type }
+cargo run -p clab-analog -- --output-format json -w . "Summarize rust/README.md" 2>$null | ForEach-Object { $_ | ConvertFrom-Json | Select-Object -ExpandProperty type }
 ```
 
 С **`--stream`** в stdout сначала идут события `assistant_text_delta`, затем для того же раунда — одна строка `assistant_turn` с полным собранным `text` (удобно для воспроизводимых логов).
@@ -237,16 +237,16 @@ cargo run -p claw-analog -- --output-format json -w . "Summarize rust/README.md"
 
 ```powershell
 # из ...\claw-code-main\rust
-cargo test -p claw-analog
+cargo test -p clab-analog
 ```
 
-В **GitHub Actions** отдельный job **`claw-analog (test + clippy -p)`** гоняет `cargo test -p claw-analog` и `cargo clippy -p claw-analog --no-deps` (в дополнение к полному `cargo test` / `clippy` по workspace).
+В **GitHub Actions** отдельный job **`clab-analog (test + clippy -p)`** гоняет `cargo test -p clab-analog` и `cargo clippy -p clab-analog --no-deps` (в дополнение к полному `cargo test` / `clippy` по workspace).
 
-При параллельном запуске тестов переменные окружения Anthropic изолированы **mutex**‑ом только для mock‑сценария; при сбоях можно запустить `cargo test -p claw-analog -- --test-threads=1`.
+При параллельном запуске тестов переменные окружения Anthropic изолированы **mutex**‑ом только для mock‑сценария; при сбоях можно запустить `cargo test -p clab-analog -- --test-threads=1`.
 
 ## Отдельно: `claw-rag-service` (RAG)
 
-Индексация воркспейса и HTTP API живут в **`cargo run -p claw-rag-service`** (`ingest` + `serve`). После `serve` откройте **`http://127.0.0.1:8787/`** — лёгкий UI (stats + поиск). К `claw-analog` подключается через **`RAG_BASE_URL`** / `retrieve_context`. Подробности и env: [`docs/rag-web-ui.md`](docs/rag-web-ui.md).
+Индексация воркспейса и HTTP API живут в **`cargo run -p claw-rag-service`** (`ingest` + `serve`). После `serve` откройте **`http://127.0.0.1:8787/`** — лёгкий UI (stats + поиск). К `clab-analog` подключается через **`RAG_BASE_URL`** / `retrieve_context`. Подробности и env: [`docs/rag-web-ui.md`](docs/rag-web-ui.md).
 
 ### Ingest (один или несколько репозиториев)
 
@@ -353,16 +353,16 @@ docker compose run --rm rag-ingest ingest --workspace "/workspaces/main"
 
 По умолчанию `rag-ingest` пишет индекс в общий volume, так что `rag-serve` сразу увидит чанки.
 
-### Подключение к `claw-analog`
+### Подключение к `clab-analog`
 
 ```powershell
 $env:RAG_BASE_URL = "http://127.0.0.1:8787"
-cargo run -p claw-analog -- -w "D:\v\kria\s6" "Найди где реализован ingest в RAG сервисе"
+cargo run -p clab-analog -- -w "D:\v\kria\s6" "Найди где реализован ingest в RAG сервисе"
 ```
 
 ## Auto‑TDD (автопроверки после `write_file`/`edit_file`)
 
-В полном `claw` (и в других потребителях `runtime`) можно включить автозапуск линтера/тестов после успешных write-инструментов через `.claw/settings.json`:
+В полном `clab` (и в других потребителях `runtime`) можно включить автозапуск линтера/тестов после успешных write-инструментов через `.claw/settings.json`:
 
 ```json
 {
@@ -378,11 +378,11 @@ cargo run -p claw-analog -- -w "D:\v\kria\s6" "Найди где реализо�
 }
 ```
 
-## Отличия от полного `claw`
+## Отличия от полного `clab`
 
 - Узкий набор инструментов (нет bash/MCP/плагинов).
 - Проще аудировать и ограничивать по `--permission` и лимитам.
-- Основной продукт по-прежнему `cargo run -p rusty-claude-cli` → бинарь `claw`.
+- Основной продукт по-прежнему `cargo run -p rusty-claude-cli` → бинарь `clab`.
 
 ## Дальнейшая разработка
 

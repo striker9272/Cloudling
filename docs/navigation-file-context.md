@@ -1,6 +1,6 @@
 # Navigation and file context guide
 
-This guide answers the common “how do I browse output?” and “how do I submit a file?” questions for Claw Code. Claw is an agent CLI, not a full file manager: terminal navigation comes from your shell or terminal, while file context is passed explicitly in prompts.
+This guide answers the common “how do I browse output?” and “how do I submit a file?” questions for Claw Lab. Claw is an agent CLI, not a full file manager: terminal navigation comes from your shell or terminal, while file context is passed explicitly in prompts.
 
 ## Prompt and terminal navigation
 
@@ -12,7 +12,7 @@ Use your terminal’s normal controls for command history and long output:
 - If output is too large to scroll comfortably, redirect it to a file and give that file to Claw as context:
   ```bash
   cargo test --workspace 2>&1 | tee logs/test-output.txt
-  claw prompt "Use @logs/test-output.txt as context and summarize the failing tests."
+  clab prompt "Use @logs/test-output.txt as context and summarize the failing tests."
   ```
 
 Claw may provide slash commands that inspect workspace state, but those commands do not replace your terminal’s scrollback or shell history.
