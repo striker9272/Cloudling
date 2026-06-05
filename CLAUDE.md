@@ -36,6 +36,26 @@ cargo test --workspace
 
 Formatting from repo root: `scripts/fmt.sh --check` (or `scripts/fmt.sh` to apply).
 
+## Install & release
+
+`install.sh` (repo root) is the entry point for getting a working binary/service. It detects the
+OS, checks the Rust toolchain, and checks system build deps (C compiler, OpenSSL, pkg-config),
+offering to install missing ones via the host package manager (`y/n`, or `--install-deps` /
+`--no-install-deps`). Key flags: `--release`; `--prebuilt` (download a release asset instead of
+building — needs `gh` or `curl`, `--prebuilt-tag vX.Y.Z` to pin); `--setup-service` (after the
+binary is ready, place it and run the service wizard end-to-end; Linux only).
+
+The OpenAI service is set up by `rust/scripts/clab-setup.sh` (interactive wizard), which delegates
+to `rust/scripts/install-openai-service.sh` — the latter writes the env file (single source of
+truth), wrapper, and systemd unit, and can place a freshly built binary at the runtime path via
+`--runtime-bin-src`. For rebuild-and-swap of an existing service, use
+`rust/scripts/deploy-openai-server.sh`.
+
+Releases: pushing a tag `v*` triggers `.github/workflows/release.yml`, which builds and publishes
+assets named `claw-<os>-<arch>` (+ `.sha256`) — asset names keep the `claw-` prefix though the
+binary is `clab`. `install.sh --prebuilt` consumes these. Keep the tag in sync with the workspace
+version in `rust/Cargo.toml`.
+
 ## Deploy (combsrv)
 
 The live service is `claw-lab-openai.service`, started via the wrapper
