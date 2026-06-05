@@ -1445,7 +1445,7 @@ fn assert_non_empty_action(parsed: &Value, args: &[&str]) {
 }
 
 fn run_claw(current_dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_claw"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
     command.current_dir(current_dir).args(args);
     for (key, value) in envs {
         command.env(key, value);
@@ -1635,7 +1635,7 @@ fn diff_json_changed_file_count_deduplication_733() {
         .expect("git commit");
 
     // Clean state: changed_file_count must be 0
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
     let clean = Command::new(bin)
         .current_dir(&root)
         .args(["--output-format", "json", "diff"])
@@ -1686,7 +1686,7 @@ fn prompt_no_arg_json_error_kind_750() {
     use std::process::Command;
     let root = unique_temp_dir("prompt-no-arg");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     let output = Command::new(bin)
         .current_dir(&root)
@@ -1733,7 +1733,7 @@ fn flag_value_errors_have_error_kind_and_hint_756() {
     use std::process::Command;
     let root = unique_temp_dir("flag-value-errors");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     // Case 1: --reasoning-effort with invalid value
     let out = Command::new(bin)
@@ -1803,7 +1803,7 @@ fn short_p_flag_swallows_no_flags_755() {
     use std::process::Command;
     let root = unique_temp_dir("short-p-flags");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     // -p hello --output-format json: with no credentials, should fail with
     // missing_credentials (not missing_prompt), proving --output-format json was parsed.
@@ -1864,7 +1864,7 @@ fn short_p_flag_no_arg_json_error_kind_753() {
     use std::process::Command;
     let root = unique_temp_dir("short-p-no-arg");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     let output = Command::new(bin)
         .current_dir(&root)
@@ -1910,7 +1910,7 @@ fn bare_slash_command_hint_745() {
     use std::process::Command;
     let root = unique_temp_dir("bare-slash-hint");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     // issue and pr are non-resume-supported; commit is resume-supported.
     // All must emit non-null hint in their interactive_only error envelope.
@@ -1959,7 +1959,7 @@ fn config_unsupported_section_json_hint_741() {
     use std::process::Command;
     let root = unique_temp_dir("config-unsupported-section");
     fs::create_dir_all(&root).expect("temp dir");
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
 
     for section in &["list", "show", "bogus", "help"] {
         let output = Command::new(bin)
@@ -2009,7 +2009,7 @@ fn export_json_has_kind_702() {
 
     // Run without asserting exit code — may fail with no sessions or legacy sessions.
     use std::process::Command;
-    let bin = env!("CARGO_BIN_EXE_claw");
+    let bin = env!("CARGO_BIN_EXE_clab");
     let output = Command::new(bin)
         .current_dir(&root)
         .args(["--output-format", "json", "export"])
