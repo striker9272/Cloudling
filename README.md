@@ -67,6 +67,8 @@ cd claw-lab
 
 > Ручная сборка (`cd rust && cargo build --release -p clab-cli`) тоже работает, но **не проверяет зависимости** — используй её, только если окружение уже настроено.
 
+> Не хочешь ставить Rust? Скачай готовый бинарник из релиза: `./install.sh --prebuilt` (нужен `gh` или `curl`; для приватного репо — авторизованный `gh`). Конкретную версию — `--prebuilt-tag vX.Y.Z`.
+
 ### Запуск как сервиса
 
 Основной сценарий. Если ты ставил через `./install.sh --release`, он в конце сам предложит поднять сервис — ответь `y`, и установщик разложит бинарник и запустит мастер (путь «одной командой от нуля до сервиса»).
@@ -181,6 +183,8 @@ cd claw-lab
 The binary lands in `rust/target/release/clab` (`.exe` on Windows); the installer also runs `clab --version` for you. Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`clab doctor`, `clab prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
 
 > A manual build (`cd rust && cargo build --release -p clab-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
+
+> Don't want to install Rust? Download a prebuilt release binary: `./install.sh --prebuilt` (needs `gh` or `curl`; for a private repo, an authenticated `gh`). Pin a version with `--prebuilt-tag vX.Y.Z`.
 
 ### Run it as a service
 
