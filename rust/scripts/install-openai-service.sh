@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_NAME=""
-USER_NAME=""
+SERVICE_NAME="clab-openai.service"
+USER_NAME="$(id -un)"
 GROUP_NAME=""
-RUNTIME_BIN=""
-WRAPPER_PATH=""
-ENV_FILE=""
-WORKDIR=""
-SANDBOX_DIR=""
+RUNTIME_BIN="/opt/clab/bin/clab"
+WRAPPER_PATH="/usr/local/bin/clab-openai-serve"
+ENV_FILE="/etc/clab/openai.env"
+WORKDIR="/var/lib/clab/work"
+SANDBOX_DIR="/var/lib/clab/sandbox"
 TMPDIR_VALUE=""
 BIND="127.0.0.1:4097"
 OPENAI_BASE_URL=""
@@ -111,13 +111,6 @@ need() {
   [ -n "$value" ] || fail "missing $name"
 }
 
-need "--service" "$SERVICE_NAME"
-need "--user" "$USER_NAME"
-need "--runtime-bin" "$RUNTIME_BIN"
-need "--wrapper" "$WRAPPER_PATH"
-need "--env-file" "$ENV_FILE"
-need "--workdir" "$WORKDIR"
-need "--sandbox-dir" "$SANDBOX_DIR"
 need "--base-url" "$OPENAI_BASE_URL"
 need "--backend-model" "$BACKEND_MODEL"
 need "--served-model-id" "$SERVED_MODEL_ID"

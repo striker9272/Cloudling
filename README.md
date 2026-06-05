@@ -20,14 +20,11 @@
 
 **Claw Lab — агентная прослойка между твоей моделью и твоим чатом.** Подключаешь бэкенд (любой OpenAI-совместимый: Ollama, llama.cpp, vLLM, облако), указываешь куда отдавать — и в твоём чате появляется та же модель, но «с руками»: с инструментами, веб-поиском и нормальным агентным воркфлоу.
 
-```
-   твоя модель                    Claw Lab                      твой чат
- ┌─────────────────┐      ┌────────────────────────┐      ┌──────────────────┐
- │ Ollama          │      │ инструменты             │      │ Open WebUI       │
- │ llama.cpp       │  ──▶ │ веб-поиск               │  ──▶ │ или любой         │
- │ vLLM / облако   │      │ агентный воркфлоу       │      │ OpenAI-клиент    │
- └─────────────────┘      │ (отдаёт как OpenAI API) │      └──────────────────┘
-                          └────────────────────────┘
+```text
+  твоя модель            Claw Lab                       твой чат
+  Ollama · llama.cpp ─▶  инструменты · веб-поиск    ─▶  Open WebUI ·
+  vLLM · облако          агентный воркфлоу               любой OpenAI-клиент
+                         (наружу — как OpenAI API)
 ```
 
 ### Зачем это
@@ -45,7 +42,7 @@
 
 На выходе Claw Lab поднимает `/v1/chat/completions` со стримингом, который Open WebUI (или другой клиент) видит как одну модель. Всё остальное — инструменты, поиск, сессии — уже внутри.
 
-> **Статус:** проект экспериментальный, для домашнего сервера. Сейчас сервис настраивается установщиком (несколько флагов, см. ниже); запуск «одной строкой — только бэкенд и вывод» — в планах.
+> **Статус:** проект экспериментальный, для домашнего сервера. Сервис ставится одной командой (бэкенд + вывод) или интерактивным мастером — см. раздел «Запуск как сервиса» ниже.
 
 ### Что внутри
 
@@ -65,43 +62,43 @@ git clone https://github.com/striker9272/claw-lab
 cd claw-lab/rust
 cargo build --workspace
 
-export ANTHROPIC_API_KEY="sk-ant-..."   # или OpenAI-совместимый ключ (локальный или внешний)
-
-./target/debug/clab doctor              # проверка авторизации, моделей, инструментов
-./target/debug/clab prompt "say hello"
+./target/debug/clab --version    # собралось и запускается
 ```
 
-`clab doctor` — первая проверка работоспособности. Бинарник появится в `rust/target/debug/clab` (или в `release/` при `--release`; `.exe` на Windows). PATH, заметки по Windows/PowerShell, сессии, провайдеры и полный CLI — см. [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
-
-> **Авторизация:** `clab` требует API-ключ (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) — вход по подписке Claude не поддерживается.
+Бинарник появится в `rust/target/debug/clab` (или в `release/` при `--release`; `.exe` на Windows). Дальше настрой сервис — раздел «Запуск как сервиса» ниже (бэкенд и ключ задаются там, в одном месте). CLI-команды (`clab doctor`, `clab prompt`), провайдеры, сессии и заметки по Windows/PowerShell — в [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
 
 ### Запуск как сервиса
 
-Основной сценарий. Один раз установи сервис переносимым установщиком:
+Основной сценарий. Проще всего — интерактивный мастер: он спросит 4 вещи и настроит сервис сам:
+
+```bash
+cd rust
+bash scripts/clab-setup.sh
+```
+
+Либо одной командой, без вопросов:
 
 ```bash
 cd rust
 scripts/install-openai-service.sh \
-  --service clab-openai.service \
-  --runtime-bin /opt/clab/bin/clab \
-  --env-file /etc/clab/openai.env \
-  --workdir /var/lib/clab/work \
-  --bind 127.0.0.1:4097 \
   --base-url http://127.0.0.1:8000/v1 \
+  --backend-model <модель-бэкенда> \
   --served-model-id clab-agent \
-  --backend-model clab-external-api \
-  --permission-mode read-only \
   --enable --restart
 ```
 
-Здесь `--base-url`/`--backend-model` — это твой бэкенд (откуда брать модель), а `--bind`/`--served-model-id` — что увидит фронт. Установщик создаёт env-файл, wrapper и systemd-юнит и держит сервис в нейтральной директории. Направь Open WebUI на адрес из `--bind` и выбери served-модель.
+(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (имя сервиса, пользователь, пути `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`) подставляется по умолчанию и переопределяется флагами.
 
-Два id модели играют разные роли:
+Нужно всего четыре значения:
 
-```text
---served-model-id   id, видимый Open WebUI, /health и /v1/models
---backend-model     внутренний id модели OpenAI-совместимого провайдера
-```
+| Значение | Что это и где взять |
+|---|---|
+| **Backend URL** (`--base-url`) | Адрес твоего OpenAI-совместимого бэкенда. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, облако → URL провайдера. |
+| **Backend model** (`--backend-model`) | Имя модели, под которым её знает бэкенд. Из его списка моделей: `ollama list`, имя загруженной модели в vLLM/llama.cpp, или id облачной модели (напр. `gpt-4o-mini`). |
+| **API key** (`--api-key`) | Ключ доступа к бэкенду. Локальным (Ollama/llama.cpp) обычно не нужен — оставь пустым; облаку/удалённому — ключ провайдера. |
+| **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `clab-agent`). |
+
+После установки направь Open WebUI на адрес из `--bind` и выбери эту модель.
 
 Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
 
@@ -130,14 +127,11 @@ Claw Lab — форк проекта **[Claw Code](https://github.com/ultraworke
 
 **Claw Lab is an agentic layer between your model and your chat.** Connect a backend (any OpenAI-compatible one: Ollama, llama.cpp, vLLM, cloud), tell it where to serve — and the same model shows up in your chat, but *with hands*: tools, web search, and a real agentic workflow.
 
-```
-   your model                     Claw Lab                      your chat
- ┌─────────────────┐      ┌────────────────────────┐      ┌──────────────────┐
- │ Ollama          │      │ tools                   │      │ Open WebUI       │
- │ llama.cpp       │  ──▶ │ web search              │  ──▶ │ or any           │
- │ vLLM / cloud    │      │ agentic workflow        │      │ OpenAI client    │
- └─────────────────┘      │ (served as OpenAI API)  │      └──────────────────┘
-                          └────────────────────────┘
+```text
+  your model            Claw Lab                    your chat
+  Ollama · llama.cpp ─▶  tools · web search      ─▶  Open WebUI ·
+  vLLM · cloud           agentic workflow             any OpenAI client
+                         (served as OpenAI API)
 ```
 
 ### Why
@@ -155,7 +149,7 @@ By design you only need two things:
 
 Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or any client) sees as a single model. Everything else — tools, search, sessions — happens inside.
 
-> **Status:** experimental, built for a home server. Today the service is configured via an installer (a few flags, below); a one-command "just backend + output" launch is on the roadmap.
+> **Status:** experimental, built for a home server. The service installs with a single command (backend + output) or an interactive wizard — see "Run it as a service" below.
 
 ### What's inside
 
@@ -175,43 +169,43 @@ git clone https://github.com/striker9272/claw-lab
 cd claw-lab/rust
 cargo build --workspace
 
-export ANTHROPIC_API_KEY="sk-ant-..."   # or an OpenAI-compatible key (local or remote)
-
-./target/debug/clab doctor              # verify auth, models, tools
-./target/debug/clab prompt "say hello"
+./target/debug/clab --version    # built and runnable
 ```
 
-`clab doctor` is your first health check. The binary lands in `rust/target/debug/clab` (or `release/` with `--release`; `.exe` on Windows). For PATH, Windows/PowerShell notes, sessions, providers, and the full CLI, see [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
-
-> **Auth:** `clab` needs an API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) — a Claude subscription login is not a supported auth path.
+The binary lands in `rust/target/debug/clab` (or `release/` with `--release`; `.exe` on Windows). Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`clab doctor`, `clab prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
 
 ### Run it as a service
 
-The main use case. Install the service once with the portable installer:
+The main use case. Easiest is the interactive wizard — it asks 4 things and sets up the service for you:
+
+```bash
+cd rust
+bash scripts/clab-setup.sh
+```
+
+Or in one non-interactive command:
 
 ```bash
 cd rust
 scripts/install-openai-service.sh \
-  --service clab-openai.service \
-  --runtime-bin /opt/clab/bin/clab \
-  --env-file /etc/clab/openai.env \
-  --workdir /var/lib/clab/work \
-  --bind 127.0.0.1:4097 \
   --base-url http://127.0.0.1:8000/v1 \
+  --backend-model <backend-model> \
   --served-model-id clab-agent \
-  --backend-model clab-external-api \
-  --permission-mode read-only \
   --enable --restart
 ```
 
-Here `--base-url`/`--backend-model` is your backend (where the model comes from), and `--bind`/`--served-model-id` is what the frontend sees. The installer writes the env file, wrapper, and systemd unit, and keeps the service in a neutral workdir. Point Open WebUI at the bind address and select the served model.
+(if your backend needs a key, add `--api-key sk-...`). Everything else (service name, user, paths `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`) is defaulted and overridable via flags.
 
-The two model ids have separate roles:
+You only need four values:
 
-```text
---served-model-id   id exposed to Open WebUI, /health, and /v1/models
---backend-model     internal OpenAI-compatible provider model id
-```
+| Value | What it is / where to get it |
+|---|---|
+| **Backend URL** (`--base-url`) | Your OpenAI-compatible backend's address. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, cloud → the provider's URL. |
+| **Backend model** (`--backend-model`) | The model id your backend knows it by. From its model list: `ollama list`, the model you loaded in vLLM/llama.cpp, or a cloud model id (e.g. `gpt-4o-mini`). |
+| **API key** (`--api-key`) | Your backend's access key. Local backends (Ollama/llama.cpp) usually need none — leave blank; cloud/remote needs the provider's key. |
+| **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `clab-agent`). |
+
+After install, point Open WebUI at the bind address and select that model.
 
 When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
 
