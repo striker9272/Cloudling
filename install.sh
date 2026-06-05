@@ -77,11 +77,14 @@ Options:
   --release       Build the optimized release profile (slower, smaller binary).
   --debug         Build the debug profile (default, faster compile).
   --no-verify     Skip the post-install verification step.
+  --install-deps  Install any missing system packages without prompting.
+  --no-install-deps  Never install system packages; only report what is missing.
   -h, --help      Show this help text and exit.
 
 Environment overrides:
   CLAW_BUILD_PROFILE   debug | release
   CLAW_SKIP_VERIFY     set to 1 to skip verification
+  CLAW_INSTALL_DEPS    yes | no   (default: ask interactively)
 EOF
 }
 
@@ -91,6 +94,7 @@ EOF
 
 BUILD_PROFILE="${CLAW_BUILD_PROFILE:-debug}"
 SKIP_VERIFY="${CLAW_SKIP_VERIFY:-0}"
+INSTALL_DEPS="${CLAW_INSTALL_DEPS:-ask}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -102,6 +106,12 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-verify)
             SKIP_VERIFY="1"
+            ;;
+        --install-deps)
+            INSTALL_DEPS="yes"
+            ;;
+        --no-install-deps)
+            INSTALL_DEPS="no"
             ;;
         -h|--help)
             print_usage
@@ -258,47 +268,190 @@ ok "workspace at ${RUST_DIR}"
 
 step "Checking prerequisites"
 
-MISSING_PREREQS=0
+# The Rust toolchain is installed via rustup, not the OS package manager, so we
+# never auto-install it — we only point at rustup when it is missing.
+MISSING_RUST=0
 
 if require_cmd rustc; then
-    RUSTC_VERSION="$(rustc --version 2>/dev/null || echo 'unknown')"
-    ok "rustc found: ${RUSTC_VERSION}"
+    ok "rustc found: $(rustc --version 2>/dev/null || echo 'unknown')"
 else
     error "rustc not found in PATH"
-    MISSING_PREREQS=1
+    MISSING_RUST=1
 fi
 
 if require_cmd cargo; then
-    CARGO_VERSION="$(cargo --version 2>/dev/null || echo 'unknown')"
-    ok "cargo found: ${CARGO_VERSION}"
+    ok "cargo found: $(cargo --version 2>/dev/null || echo 'unknown')"
 else
     error "cargo not found in PATH"
-    MISSING_PREREQS=1
+    MISSING_RUST=1
+fi
+
+if [ "${MISSING_RUST}" -ne 0 ]; then
+    error "Install the Rust toolchain first (see troubleshooting below)."
+    exit 1
+fi
+
+# System build dependencies (C compiler/linker, pkg-config, OpenSSL headers, git)
+# come from the OS package manager, so we can detect and offer to install them.
+
+detect_pkg_mgr() {
+    PKG_MGR=""
+    if [ "${OS_FAMILY}" = "macos" ]; then
+        require_cmd brew && PKG_MGR="brew"
+        return
+    fi
+    if require_cmd apt-get; then PKG_MGR="apt"
+    elif require_cmd dnf; then PKG_MGR="dnf"
+    elif require_cmd pacman; then PKG_MGR="pacman"
+    elif require_cmd zypper; then PKG_MGR="zypper"
+    fi
+}
+
+# Map a generic dependency name to the package name for the detected manager.
+pkg_name_for() {
+    case "${PKG_MGR}:$1" in
+        apt:compiler) echo "build-essential" ;;
+        apt:pkg-config) echo "pkg-config" ;;
+        apt:openssl) echo "libssl-dev" ;;
+        apt:git) echo "git" ;;
+        dnf:compiler) echo "gcc" ;;
+        dnf:pkg-config) echo "pkgconf-pkg-config" ;;
+        dnf:openssl) echo "openssl-devel" ;;
+        dnf:git) echo "git" ;;
+        pacman:compiler) echo "base-devel" ;;
+        pacman:pkg-config) echo "pkgconf" ;;
+        pacman:openssl) echo "openssl" ;;
+        pacman:git) echo "git" ;;
+        zypper:compiler) echo "gcc" ;;
+        zypper:pkg-config) echo "pkg-config" ;;
+        zypper:openssl) echo "libopenssl-devel" ;;
+        zypper:git) echo "git" ;;
+        brew:pkg-config) echo "pkg-config" ;;
+        brew:openssl) echo "openssl@3" ;;
+        brew:git) echo "git" ;;
+        *) echo "" ;;
+    esac
+}
+
+install_cmd_prefix() {
+    case "${PKG_MGR}" in
+        apt) echo "sudo apt-get install -y" ;;
+        dnf) echo "sudo dnf install -y" ;;
+        pacman) echo "sudo pacman -S --needed --noconfirm" ;;
+        zypper) echo "sudo zypper install -y" ;;
+        brew) echo "brew install" ;;
+        *) echo "" ;;
+    esac
+}
+
+MISSING_DEPS=()
+
+if require_cmd cc || require_cmd gcc; then
+    ok "C compiler found"
+elif [ "${OS_FAMILY}" = "macos" ]; then
+    # The macOS compiler ships with the Xcode command line tools, which the
+    # package manager cannot install for us.
+    error "No C compiler found. Install the Xcode command line tools:"
+    error "  xcode-select --install"
+    exit 1
+else
+    warn "C compiler (cc/gcc) not found"
+    MISSING_DEPS+=("compiler")
+fi
+
+if require_cmd pkg-config; then
+    ok "pkg-config found"
+else
+    warn "pkg-config not found"
+    MISSING_DEPS+=("pkg-config")
+fi
+
+if require_cmd pkg-config && pkg-config --exists openssl 2>/dev/null; then
+    ok "OpenSSL development headers found"
+else
+    warn "OpenSSL development headers not found"
+    MISSING_DEPS+=("openssl")
 fi
 
 if require_cmd git; then
-    ok "git found:  $(git --version 2>/dev/null || echo 'unknown')"
+    ok "git found: $(git --version 2>/dev/null || echo 'unknown')"
 else
-    warn "git not found — some workflows (login, session export) may degrade"
+    warn "git not found"
+    MISSING_DEPS+=("git")
 fi
 
-if [ "${OS_FAMILY}" = "linux" ]; then
-    if require_cmd pkg-config; then
-        ok "pkg-config found"
-    else
-        warn "pkg-config not found — may be required for OpenSSL-linked crates"
+if [ "${#MISSING_DEPS[@]}" -gt 0 ]; then
+    detect_pkg_mgr
+
+    PKGS=()
+    for dep in "${MISSING_DEPS[@]}"; do
+        name="$(pkg_name_for "${dep}")"
+        if [ -n "${name}" ]; then
+            case " ${PKGS[*]} " in
+                *" ${name} "*) ;;
+                *) PKGS+=("${name}") ;;
+            esac
+        fi
+    done
+
+    INSTALL_PREFIX="$(install_cmd_prefix)"
+
+    if [ -z "${PKG_MGR}" ] || [ -z "${INSTALL_PREFIX}" ] || [ "${#PKGS[@]}" -eq 0 ]; then
+        error "Missing system dependencies: ${MISSING_DEPS[*]}"
+        error "No supported package manager detected — install them manually (see troubleshooting below)."
+        exit 1
     fi
-fi
 
-if [ "${OS_FAMILY}" = "macos" ]; then
-    if ! require_cmd cc && ! xcode-select -p >/dev/null 2>&1; then
-        warn "Xcode command line tools not detected — run: xcode-select --install"
+    INSTALL_CMD="${INSTALL_PREFIX} ${PKGS[*]}"
+
+    printf '\n'
+    warn "Missing system build dependencies: ${MISSING_DEPS[*]}"
+    info "They can be installed with:"
+    printf '    %s\n' "${INSTALL_CMD}"
+
+    DO_INSTALL=0
+    case "${INSTALL_DEPS}" in
+        yes)
+            DO_INSTALL=1
+            ;;
+        no)
+            error "Run the command above, then re-run this installer."
+            exit 1
+            ;;
+        *)
+            if [ -t 0 ]; then
+                printf '\n'
+                read -r -p "Install these packages now? [y/N]: " REPLY_INSTALL
+                case "${REPLY_INSTALL}" in
+                    y|Y|yes|YES) DO_INSTALL=1 ;;
+                    *) DO_INSTALL=0 ;;
+                esac
+            else
+                error "Non-interactive shell: re-run with --install-deps, or run the command above first."
+                exit 1
+            fi
+            ;;
+    esac
+
+    if [ "${DO_INSTALL}" -ne 1 ]; then
+        error "Cannot continue without the system dependencies above."
+        exit 1
     fi
-fi
 
-if [ "${MISSING_PREREQS}" -ne 0 ]; then
-    error "Missing required tools. See troubleshooting below."
-    exit 1
+    if [ "${PKG_MGR}" = "apt" ]; then
+        info "running: sudo apt-get update"
+        sudo apt-get update
+    fi
+
+    info "running: ${INSTALL_CMD}"
+    # shellcheck disable=SC2086
+    ${INSTALL_CMD}
+
+    if ! require_cmd cc && ! require_cmd gcc; then
+        error "C compiler still not found after install."
+        exit 1
+    fi
+    ok "system dependencies installed"
 fi
 
 # ---------------------------------------------------------------------------
