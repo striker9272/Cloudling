@@ -4,11 +4,11 @@ This guide covers the current Rust workspace under `rust/` and the `clab` CLI bi
 
 ## Quick-start health check
 
-Run this before prompts, sessions, or automation:
+Build once (the installer checks deps and offers to install missing system packages), then run the doctor:
 
 ```bash
+./install.sh            # from the repo root: checks deps, builds clab (debug)
 cd rust
-cargo build --workspace
 ./target/debug/clab
 # first command inside the REPL
 /doctor
@@ -26,12 +26,17 @@ cargo build --workspace
 
 ## Install / build the workspace
 
+From the repo root, `install.sh` checks your OS, the Rust toolchain, and system
+dependencies (C compiler, OpenSSL, pkg-config) — offering to install missing
+system packages — then builds the `clab` binary:
+
 ```bash
-cd rust
-cargo build --workspace
+./install.sh            # debug build (fast); add --release for an optimized binary
 ```
 
-The CLI binary is available at `rust/target/debug/clab` after a debug build (`rust\target\debug\clab.exe` on Windows). Make the doctor check above your first post-build step. For PowerShell-first install, release ZIP, PATH, provider-switching, and Windows/WSL notification examples, see [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+The CLI binary is available at `rust/target/debug/clab` after a debug build (`release/` with `--release`; `rust\target\debug\clab.exe` on Windows). Make the doctor check above your first post-build step. For PowerShell-first install, release ZIP, PATH, provider-switching, and Windows/WSL notification examples, see [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+
+> Manual build: `cd rust && cargo build --workspace` works too, but does not check dependencies.
 
 ## Quick start
 
