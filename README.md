@@ -69,13 +69,14 @@ cd claw-lab
 
 ### Запуск как сервиса
 
-Основной сценарий. Сервис запускает бинарник из фиксированного пути (по умолчанию `/opt/clab/bin/clab`), поэтому положи туда release-бинарник, собранный на «Быстром старте» (если ещё не собирал — сначала `./install.sh --release` из корня репо):
+Основной сценарий. Если ты ставил через `./install.sh --release`, он в конце сам предложит поднять сервис — ответь `y`, и установщик разложит бинарник и запустит мастер (путь «одной командой от нуля до сервиса»).
 
-```bash
-sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab
-```
+**Что нужно заранее:**
 
-Дальше проще всего — интерактивный мастер: он спросит 4 вещи и настроит сервис сам (а если бинарника на месте нет — подскажет команды выше):
+- запущенный OpenAI-совместимый бэкенд с моделью (Ollama / llama.cpp / vLLM / облако), доступный по сети;
+- Open WebUI (или любой OpenAI-клиент), который будет ходить в clab.
+
+Мастер можно запустить и отдельно (бинарник кладёт `install.sh`; при ручной сборке сначала положи его: `sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab`):
 
 ```bash
 cd rust
@@ -93,9 +94,9 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (имя сервиса, пользователь, пути `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`) подставляется по умолчанию и переопределяется флагами.
+(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (имя сервиса, пользователь, пути `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`, permission mode `read-only`) подставляется по умолчанию и переопределяется флагами.
 
-Нужно всего четыре значения:
+Мастер спрашивает:
 
 | Значение | Что это и где взять |
 |---|---|
@@ -103,8 +104,9 @@ scripts/install-openai-service.sh \
 | **Backend model** (`--backend-model`) | Имя модели, под которым её знает бэкенд. Из его списка моделей: `ollama list`, имя загруженной модели в vLLM/llama.cpp, или id облачной модели (напр. `gpt-4o-mini`). |
 | **API key** (`--api-key`) | Ключ доступа к бэкенду. Локальным (Ollama/llama.cpp) обычно не нужен — оставь пустым; облаку/удалённому — ключ провайдера. |
 | **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `clab-agent`). |
+| **Permission mode** (`--permission-mode`) | Что агенту можно: `read-only` (по умолч.) — только чтение; `workspace-write` — правка/запуск в рабочей папке; `danger-full-access` — полный доступ ко всей ФС (опасно для сервиса, открытого в чат). |
 
-После установки направь Open WebUI на адрес из `--bind` и выбери эту модель.
+**Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/clab/openai.env`) + рестарт сервиса.
 
 Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
 
@@ -182,13 +184,14 @@ The binary lands in `rust/target/release/clab` (`.exe` on Windows); the installe
 
 ### Run it as a service
 
-The main use case. The service runs a binary from a fixed path (default `/opt/clab/bin/clab`), so install the release binary you built in the quick start there (if you haven't built it yet, run `./install.sh --release` from the repo root first):
+The main use case. If you installed via `./install.sh --release`, it offers to set up the service at the end — answer `y` and the installer places the binary and runs the wizard (one command from nothing to a running service).
 
-```bash
-sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab
-```
+**Before you start, you need:**
 
-Then the easiest path is the interactive wizard — it asks 4 things and sets up the service for you (and prints the commands above if the binary isn't in place yet):
+- a running OpenAI-compatible backend with a model (Ollama / llama.cpp / vLLM / cloud), reachable over the network;
+- Open WebUI (or any OpenAI client) to talk to clab.
+
+You can also run the wizard separately (`install.sh` places the binary; for a manual build, place it first: `sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab`):
 
 ```bash
 cd rust
@@ -206,9 +209,9 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(if your backend needs a key, add `--api-key sk-...`). Everything else (service name, user, paths `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`) is defaulted and overridable via flags.
+(if your backend needs a key, add `--api-key sk-...`). Everything else (service name, user, paths `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`, permission mode `read-only`) is defaulted and overridable via flags.
 
-You only need four values:
+The wizard asks for:
 
 | Value | What it is / where to get it |
 |---|---|
@@ -216,8 +219,9 @@ You only need four values:
 | **Backend model** (`--backend-model`) | The model id your backend knows it by. From its model list: `ollama list`, the model you loaded in vLLM/llama.cpp, or a cloud model id (e.g. `gpt-4o-mini`). |
 | **API key** (`--api-key`) | Your backend's access key. Local backends (Ollama/llama.cpp) usually need none — leave blank; cloud/remote needs the provider's key. |
 | **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `clab-agent`). |
+| **Permission mode** (`--permission-mode`) | What the agent may do: `read-only` (default) — read only; `workspace-write` — edit/run inside the work dir; `danger-full-access` — full filesystem access (risky for a chat-exposed service). |
 
-After install, point Open WebUI at the bind address and select that model.
+**Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/clab/openai.env`) followed by a service restart.
 
 When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
 
