@@ -147,7 +147,9 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::ProviderClient;
+    use crate::providers::openai_compat::{OpenAiCompatClient, OpenAiCompatConfig};
     use crate::providers::{detect_provider_kind, resolve_model_alias, ProviderKind};
+    use crate::ApiError;
 
     /// Serializes every test in this module that mutates process-wide
     /// environment variables so concurrent test threads cannot observe
@@ -234,5 +236,33 @@ mod tests {
             }
             other => panic!("Expected ProviderClient::OpenAi for qwen-plus, got: {other:?}"),
         }
+    }
+
+    #[test]
+    fn openai_from_env_allows_missing_key_for_custom_base_url() {
+        // A local/gateway backend reached via a custom OPENAI_BASE_URL may be
+        // authless; from_env must build a keyless client instead of erroring.
+        let _lock = env_lock();
+        let _key = EnvVarGuard::set("OPENAI_API_KEY", None);
+        let _base = EnvVarGuard::set("OPENAI_BASE_URL", Some("http://127.0.0.1:8080/v1"));
+
+        let client = OpenAiCompatClient::from_env(OpenAiCompatConfig::openai())
+            .expect("a custom (local) base URL without a key should build");
+
+        assert_eq!(client.base_url(), "http://127.0.0.1:8080/v1");
+    }
+
+    #[test]
+    fn openai_from_env_requires_key_for_default_cloud_endpoint() {
+        // The default cloud endpoint still requires a key — keyless is only
+        // allowed when the operator points at their own base URL.
+        let _lock = env_lock();
+        let _key = EnvVarGuard::set("OPENAI_API_KEY", None);
+        let _base = EnvVarGuard::set("OPENAI_BASE_URL", None);
+
+        let error = OpenAiCompatClient::from_env(OpenAiCompatConfig::openai())
+            .expect_err("the default cloud endpoint without a key should fail");
+
+        assert!(matches!(error, ApiError::MissingCredentials { .. }));
     }
 }
