@@ -43,12 +43,16 @@ The live service is `claw-lab-openai.service`, started via the wrapper
 workdir. Rebuild + install + restart with:
 
 ```bash
-sudo claw-lab-deploy-openai     # wraps rust/scripts/deploy-openai-server.sh
+claw-lab-deploy-openai     # run as combiner, NOT with outer sudo
 ```
 
-combsrv has no passwordless sudo, so privileged deploy/restart steps are run by
-Alexander, not from an automated session. The runtime binary path keeps the filename
-`claw` for now (internal plumbing); the source/build product is `clab`.
+Run it **without** an outer `sudo`: the script builds/tests as the current user (cargo
+lives in combiner's `~/.cargo/bin`, not on root's PATH) and self-escalates with `sudo`
+only for the install/backup/restart steps, prompting for the password once at the
+"sudo preflight" step. Running it as `sudo claw-lab-deploy-openai` fails with
+`cargo: command not found`. combsrv has no passwordless sudo, so Alexander runs the
+deploy interactively. The runtime binary path keeps the filename `claw` for now
+(internal plumbing); the source/build product is `clab`.
 
 ## Conventions
 
