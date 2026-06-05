@@ -6,6 +6,7 @@ SERVICE_NAME=""
 HEALTH_URL=""
 TEST_PROFILE="smoke"
 ALLOW_DIRTY=0
+PULL=1
 DRY_RUN=0
 VERBOSE=0
 QUIET=0
@@ -27,6 +28,7 @@ Options:
   --test-profile NAME      smoke|websearch|full|none. Default: smoke.
   --test-cmd CMD           Extra test command. Can be repeated.
   --allow-dirty            Allow deploy from a dirty working tree.
+  --no-pull                Skip syncing the repo to origin (default: fast-forward to upstream).
   --dry-run                Show plan without changing anything.
   --verbose                Stream full command output to terminal and log.
   --quiet                  Print only compact status lines.
@@ -85,6 +87,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --allow-dirty)
       ALLOW_DIRTY=1
+      shift
+      ;;
+    --no-pull)
+      PULL=0
       shift
       ;;
     --dry-run)
@@ -319,6 +325,34 @@ fi
 
 if [ -n "$DIRTY_STATUS" ] && [ "$ALLOW_DIRTY" = "1" ]; then
   say "WARN: deploying dirty working tree"
+fi
+
+# Sync the checkout to origin so we always deploy current upstream (opt out with --no-pull).
+if [ "$PULL" = "1" ] && [ -n "$DIRTY_STATUS" ]; then
+  say "sync: working tree dirty; skipping pull"
+elif [ "$PULL" = "1" ]; then
+  upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || true)"
+  if [ -z "$upstream" ]; then
+    say "sync: no upstream tracking branch; skipping pull"
+  elif [ "$DRY_RUN" = "1" ]; then
+    say "sync: would fast-forward to $upstream (dry-run)"
+  else
+    git fetch -q "${upstream%%/*}" 2>/dev/null || say "sync: WARN: git fetch failed; deploying current checkout"
+    local_rev="$(git rev-parse @ 2>/dev/null || true)"
+    remote_rev="$(git rev-parse '@{u}' 2>/dev/null || true)"
+    base_rev="$(git merge-base @ '@{u}' 2>/dev/null || true)"
+    if [ -n "$remote_rev" ] && [ "$local_rev" = "$remote_rev" ]; then
+      say "sync: already up to date with $upstream"
+    elif [ -n "$base_rev" ] && [ "$local_rev" = "$base_rev" ]; then
+      if git merge --ff-only -q '@{u}' 2>/dev/null; then
+        say "sync: fast-forwarded to $(git rev-parse --short @) ($upstream)"
+      else
+        say "sync: WARN: fast-forward failed; deploying current checkout"
+      fi
+    else
+      say "sync: WARN: local branch diverged from $upstream; deploying current checkout"
+    fi
+  fi
 fi
 
 NEED_SUDO=0
