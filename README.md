@@ -55,26 +55,24 @@
 
 ### Быстрый старт
 
-Собери из исходников (репозиторий — только build-from-source):
+Репозиторий — только build-from-source. Установщик `install.sh` сам определит ОС, проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config), а если каких-то системных пакетов не хватает — покажет команду и предложит доустановить (`y/n`):
 
 ```bash
 git clone https://github.com/striker9272/claw-lab
-cd claw-lab/rust
-cargo build --workspace
-
-./target/debug/clab --version    # собралось и запускается
+cd claw-lab
+./install.sh --release
 ```
 
-Бинарник появится в `rust/target/debug/clab` (или в `release/` при `--release`; `.exe` на Windows). Дальше настрой сервис — раздел «Запуск как сервиса» ниже (бэкенд и ключ задаются там, в одном месте). CLI-команды (`clab doctor`, `clab prompt`), провайдеры, сессии и заметки по Windows/PowerShell — в [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
+Бинарник появится в `rust/target/release/clab` (`.exe` на Windows); установщик сам проверит `clab --version`. Дальше настрой сервис — раздел «Запуск как сервиса» ниже (бэкенд и ключ задаются там, в одном месте). CLI-команды (`clab doctor`, `clab prompt`), провайдеры, сессии и заметки по Windows/PowerShell — в [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
+
+> Ручная сборка (`cd rust && cargo build --release -p clab-cli`) тоже работает, но **не проверяет зависимости** — используй её, только если окружение уже настроено.
 
 ### Запуск как сервиса
 
-Основной сценарий. Сервис запускает бинарник из фиксированного пути (по умолчанию `/opt/clab/bin/clab`), поэтому сначала собери release-бинарник и положи его туда:
+Основной сценарий. Сервис запускает бинарник из фиксированного пути (по умолчанию `/opt/clab/bin/clab`), поэтому положи туда release-бинарник, собранный на «Быстром старте» (если ещё не собирал — сначала `./install.sh --release` из корня репо):
 
 ```bash
-cd rust
-cargo build --release -p clab-cli
-sudo install -D -m 755 target/release/clab /opt/clab/bin/clab
+sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab
 ```
 
 Дальше проще всего — интерактивный мастер: он спросит 4 вещи и настроит сервис сам (а если бинарника на месте нет — подскажет команды выше):
@@ -170,26 +168,24 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 
 ### Quick start
 
-Build from source (this repo is build-from-source only):
+This repo is build-from-source only. The `install.sh` installer detects your OS, checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config), and — if system packages are missing — shows the command and offers to install them (`y/n`):
 
 ```bash
 git clone https://github.com/striker9272/claw-lab
-cd claw-lab/rust
-cargo build --workspace
-
-./target/debug/clab --version    # built and runnable
+cd claw-lab
+./install.sh --release
 ```
 
-The binary lands in `rust/target/debug/clab` (or `release/` with `--release`; `.exe` on Windows). Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`clab doctor`, `clab prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
+The binary lands in `rust/target/release/clab` (`.exe` on Windows); the installer also runs `clab --version` for you. Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`clab doctor`, `clab prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
+
+> A manual build (`cd rust && cargo build --release -p clab-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
 
 ### Run it as a service
 
-The main use case. The service runs a binary from a fixed path (default `/opt/clab/bin/clab`), so first build a release binary and install it there:
+The main use case. The service runs a binary from a fixed path (default `/opt/clab/bin/clab`), so install the release binary you built in the quick start there (if you haven't built it yet, run `./install.sh --release` from the repo root first):
 
 ```bash
-cd rust
-cargo build --release -p clab-cli
-sudo install -D -m 755 target/release/clab /opt/clab/bin/clab
+sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab
 ```
 
 Then the easiest path is the interactive wizard — it asks 4 things and sets up the service for you (and prints the commands above if the binary isn't in place yet):
