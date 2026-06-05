@@ -24,6 +24,12 @@ fi
 DEFAULT_SERVED_ID="clab-agent"
 DEFAULT_BIND="127.0.0.1:4097"
 DEFAULT_RUNTIME_BIN="/opt/clab/bin/clab"
+DEFAULT_PERMISSION_MODE="read-only"
+
+# Optional: a freshly built binary to install at the runtime path. install.sh sets
+# this (via CLAB_RUNTIME_BIN_SRC) for end-to-end setup; when empty, the binary must
+# already be in place at the runtime path.
+RUNTIME_BIN_SRC="${CLAB_RUNTIME_BIN_SRC:-}"
 
 ask() {  # ask "Prompt" "default" -> echoes the answer (default if empty)
   local prompt="$1" def="${2:-}" reply
@@ -58,6 +64,7 @@ read -r -s -p "Backend API key (leave blank if your backend needs none): " API_K
 # Output (what the chat frontend sees)
 SERVED_ID="$(ask 'Served model id (shown to Open WebUI)' "$DEFAULT_SERVED_ID")"
 BIND="$(ask 'Bind address' "$DEFAULT_BIND")"
+PERMISSION_MODE="$(ask 'Permission mode (read-only | workspace-write | danger-full-access)' "$DEFAULT_PERMISSION_MODE")"
 
 read -r -p "Start now and enable on boot? [Y/n]: " START_REPLY
 START_REPLY="${START_REPLY:-Y}"
@@ -69,6 +76,8 @@ echo "  backend model:   $BACKEND_MODEL"
 echo "  api key:         $( [ -n "$API_KEY" ] && echo '(set)' || echo '(none)')"
 echo "  served model id: $SERVED_ID"
 echo "  bind:            $BIND"
+echo "  permission mode: $PERMISSION_MODE"
+[ -n "$RUNTIME_BIN_SRC" ] && echo "  install binary:  $RUNTIME_BIN_SRC -> $DEFAULT_RUNTIME_BIN"
 echo "  defaults:        service=clab-openai.service, user=$(id -un), bin=$DEFAULT_RUNTIME_BIN,"
 echo "                   env=/etc/clab/openai.env, workdir=/var/lib/clab/work"
 echo
@@ -78,7 +87,7 @@ case "${CONFIRM:-N}" in
   *) echo "aborted."; exit 0 ;;
 esac
 
-if [ ! -e "$DEFAULT_RUNTIME_BIN" ]; then
+if [ -z "$RUNTIME_BIN_SRC" ] && [ ! -e "$DEFAULT_RUNTIME_BIN" ]; then
   RUST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   echo
   echo "NOTE: runtime binary $DEFAULT_RUNTIME_BIN does not exist yet."
@@ -96,8 +105,10 @@ ARGS=(
   --backend-model "$BACKEND_MODEL"
   --served-model-id "$SERVED_ID"
   --bind "$BIND"
+  --permission-mode "$PERMISSION_MODE"
 )
 [ -n "$API_KEY" ] && ARGS+=(--api-key "$API_KEY")
+[ -n "$RUNTIME_BIN_SRC" ] && ARGS+=(--runtime-bin-src "$RUNTIME_BIN_SRC")
 case "$START_REPLY" in
   y|Y) ARGS+=(--enable --restart) ;;
 esac

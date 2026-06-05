@@ -42,7 +42,7 @@ else
 fi
 
 CURRENT_STEP=0
-TOTAL_STEPS=6
+TOTAL_STEPS=7
 
 step() {
     CURRENT_STEP=$((CURRENT_STEP + 1))
@@ -79,12 +79,15 @@ Options:
   --no-verify     Skip the post-install verification step.
   --install-deps  Install any missing system packages without prompting.
   --no-install-deps  Never install system packages; only report what is missing.
+  --setup-service Run the OpenAI service wizard after building (Linux only).
+  --no-setup-service  Do not run the service wizard; build only.
   -h, --help      Show this help text and exit.
 
 Environment overrides:
   CLAW_BUILD_PROFILE   debug | release
   CLAW_SKIP_VERIFY     set to 1 to skip verification
   CLAW_INSTALL_DEPS    yes | no   (default: ask interactively)
+  CLAW_SETUP_SERVICE   yes | no   (default: ask interactively, Linux only)
 EOF
 }
 
@@ -95,6 +98,7 @@ EOF
 BUILD_PROFILE="${CLAW_BUILD_PROFILE:-debug}"
 SKIP_VERIFY="${CLAW_SKIP_VERIFY:-0}"
 INSTALL_DEPS="${CLAW_INSTALL_DEPS:-ask}"
+SETUP_SERVICE="${CLAW_SETUP_SERVICE:-ask}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -112,6 +116,12 @@ while [ "$#" -gt 0 ]; do
             ;;
         --no-install-deps)
             INSTALL_DEPS="no"
+            ;;
+        --setup-service)
+            SETUP_SERVICE="yes"
+            ;;
+        --no-setup-service)
+            SETUP_SERVICE="no"
             ;;
         -h|--help)
             print_usage
@@ -511,7 +521,48 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Step 6: next steps
+# Step 6: optional OpenAI service setup
+# ---------------------------------------------------------------------------
+
+step "Setting up the OpenAI service (optional)"
+
+DO_SETUP=0
+SETUP_SCRIPT="${RUST_DIR}/scripts/clab-setup.sh"
+
+if [ "${OS_FAMILY}" != "linux" ]; then
+    info "service setup is Linux/systemd only — skipping on ${OS_FAMILY}"
+elif [ ! -f "${SETUP_SCRIPT}" ]; then
+    warn "service wizard not found at ${SETUP_SCRIPT} — skipping"
+else
+    case "${SETUP_SERVICE}" in
+        yes) DO_SETUP=1 ;;
+        no)  info "service setup skipped (--no-setup-service)" ;;
+        *)
+            if [ -t 0 ]; then
+                printf '\n'
+                read -r -p "Set up the OpenAI service now (systemd unit for Open WebUI)? [y/N]: " REPLY_SETUP
+                case "${REPLY_SETUP}" in
+                    y|Y|yes|YES) DO_SETUP=1 ;;
+                esac
+            else
+                info "non-interactive shell — skipping (use --setup-service to force)"
+            fi
+            ;;
+    esac
+fi
+
+if [ "${DO_SETUP}" = "1" ]; then
+    info "launching service wizard: scripts/clab-setup.sh"
+    # Hand the freshly built binary to the wizard so it gets installed at the
+    # runtime path without a manual copy step.
+    CLAB_RUNTIME_BIN_SRC="${CLAW_BIN}" bash "${SETUP_SCRIPT}"
+    ok "service setup finished"
+else
+    info "you can run it later with: bash ${SETUP_SCRIPT}"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 7: next steps
 # ---------------------------------------------------------------------------
 
 step "Next steps"

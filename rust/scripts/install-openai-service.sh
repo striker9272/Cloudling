@@ -5,6 +5,7 @@ SERVICE_NAME="clab-openai.service"
 USER_NAME="$(id -un)"
 GROUP_NAME=""
 RUNTIME_BIN="/opt/clab/bin/clab"
+RUNTIME_BIN_SRC=""
 WRAPPER_PATH="/usr/local/bin/clab-openai-serve"
 ENV_FILE="/etc/clab/openai.env"
 WORKDIR="/var/lib/clab/work"
@@ -40,6 +41,7 @@ Required:
 
 Options:
   --group GROUP               service group. Defaults to USER.
+  --runtime-bin-src PATH      install this binary to --runtime-bin before setup.
   --tmpdir PATH               TMPDIR. Defaults to SANDBOX_DIR/tmp.
   --bind ADDR                 bind address. Default: 127.0.0.1:4097.
   --permission-mode MODE      read-only|acceptEdits|bypassPermissions|danger-full-access, etc. Default: read-only.
@@ -53,7 +55,8 @@ Options:
 Design:
   - Installs systemd service + env + wrapper for OpenAI-compatible Claw server.
   - Uses a neutral workdir by default via --workdir.
-  - Does not build or replace the claw binary; use deploy-openai-server.sh for that.
+  - Does not build the binary; can install a prebuilt one via --runtime-bin-src,
+    otherwise use deploy-openai-server.sh to build and replace it.
   - Does not hardcode local host paths or model names.
 USAGE
 }
@@ -68,6 +71,8 @@ while [ "$#" -gt 0 ]; do
     --group=*) GROUP_NAME="${1#*=}"; shift ;;
     --runtime-bin) RUNTIME_BIN="${2:-}"; shift 2 ;;
     --runtime-bin=*) RUNTIME_BIN="${1#*=}"; shift ;;
+    --runtime-bin-src) RUNTIME_BIN_SRC="${2:-}"; shift 2 ;;
+    --runtime-bin-src=*) RUNTIME_BIN_SRC="${1#*=}"; shift ;;
     --wrapper) WRAPPER_PATH="${2:-}"; shift 2 ;;
     --wrapper=*) WRAPPER_PATH="${1#*=}"; shift ;;
     --env-file) ENV_FILE="${2:-}"; shift 2 ;;
@@ -119,6 +124,10 @@ case "$OPENAI_BASE_URL" in
   http://?*|https://?*) ;;
   *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
 esac
+
+if [ -n "$RUNTIME_BIN_SRC" ] && [ ! -f "$RUNTIME_BIN_SRC" ]; then
+  fail "--runtime-bin-src not found: $RUNTIME_BIN_SRC"
+fi
 
 if [ -z "$GROUP_NAME" ]; then
   GROUP_NAME="$USER_NAME"
@@ -245,6 +254,7 @@ echo "  service:      $SERVICE_NAME"
 echo "  unit:         $UNIT_PATH"
 echo "  user/group:   $USER_NAME:$GROUP_NAME"
 echo "  runtime-bin:  $RUNTIME_BIN"
+echo "  runtime-src:  ${RUNTIME_BIN_SRC:-<none>}"
 echo "  wrapper:      $WRAPPER_PATH"
 echo "  env-file:     $ENV_FILE"
 echo "  workdir:      $WORKDIR"
@@ -292,6 +302,13 @@ run "${SUDO[@]}" chmod 755 "$WORKDIR" "$SANDBOX_DIR" "$TMPDIR_VALUE"
 run "${SUDO[@]}" install -m 0640 -o root -g "$GROUP_NAME" "$TMP_ENV" "$ENV_FILE"
 run "${SUDO[@]}" install -m 0755 -o root -g root "$TMP_WRAPPER" "$WRAPPER_PATH"
 run "${SUDO[@]}" install -m 0644 -o root -g root "$TMP_UNIT" "$UNIT_PATH"
+
+if [ -n "$RUNTIME_BIN_SRC" ]; then
+  if [ -e "$RUNTIME_BIN" ]; then
+    run "${SUDO[@]}" cp -a "$RUNTIME_BIN" "$RUNTIME_BIN.bak-$TS"
+  fi
+  run "${SUDO[@]}" install -D -m 0755 "$RUNTIME_BIN_SRC" "$RUNTIME_BIN"
+fi
 
 run "${SUDO[@]}" systemctl daemon-reload
 
