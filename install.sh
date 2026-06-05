@@ -81,6 +81,8 @@ Options:
   --no-install-deps  Never install system packages; only report what is missing.
   --setup-service Run the OpenAI service wizard after building (Linux only).
   --no-setup-service  Do not run the service wizard; build only.
+  --prebuilt      Download a prebuilt release binary instead of building.
+  --prebuilt-tag TAG  Release tag to download (default: latest).
   -h, --help      Show this help text and exit.
 
 Environment overrides:
@@ -88,6 +90,8 @@ Environment overrides:
   CLAW_SKIP_VERIFY     set to 1 to skip verification
   CLAW_INSTALL_DEPS    yes | no   (default: ask interactively)
   CLAW_SETUP_SERVICE   yes | no   (default: ask interactively, Linux only)
+  CLAW_PREBUILT        set to 1 to download a prebuilt binary
+  CLAW_PREBUILT_TAG    release tag to download (default: latest)
 EOF
 }
 
@@ -99,6 +103,8 @@ BUILD_PROFILE="${CLAW_BUILD_PROFILE:-debug}"
 SKIP_VERIFY="${CLAW_SKIP_VERIFY:-0}"
 INSTALL_DEPS="${CLAW_INSTALL_DEPS:-ask}"
 SETUP_SERVICE="${CLAW_SETUP_SERVICE:-ask}"
+PREBUILT="${CLAW_PREBUILT:-0}"
+PREBUILT_TAG="${CLAW_PREBUILT_TAG:-}"
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -123,6 +129,16 @@ while [ "$#" -gt 0 ]; do
         --no-setup-service)
             SETUP_SERVICE="no"
             ;;
+        --prebuilt)
+            PREBUILT="1"
+            ;;
+        --prebuilt-tag)
+            shift
+            PREBUILT_TAG="${1:-}"
+            ;;
+        --prebuilt-tag=*)
+            PREBUILT_TAG="${1#*=}"
+            ;;
         -h|--help)
             print_usage
             exit 0
@@ -143,6 +159,11 @@ case "${BUILD_PROFILE}" in
         exit 2
         ;;
 esac
+
+# Release artifacts are built in release profile; align the binary path for --prebuilt.
+if [ "${PREBUILT}" = "1" ]; then
+    BUILD_PROFILE="release"
+fi
 
 # ---------------------------------------------------------------------------
 # Troubleshooting hints
@@ -199,6 +220,99 @@ trap 'rc=$?; if [ "$rc" -ne 0 ]; then error "installation failed (exit ${rc})"; 
 
 require_cmd() {
     command -v "$1" >/dev/null 2>&1
+}
+
+# --- prebuilt download helpers ---------------------------------------------
+
+# Map this host to the release artifact name from .github/workflows/release.yml
+# (claw-linux-x64, claw-macos-arm64). Echoes the name; returns 1 if unsupported.
+prebuilt_artifact_name() {
+    local os arch
+    case "${OS_FAMILY}" in
+        linux) os="linux" ;;
+        macos) os="macos" ;;
+        *) return 1 ;;
+    esac
+    case "${UNAME_M}" in
+        x86_64|amd64) arch="x64" ;;
+        arm64|aarch64) arch="arm64" ;;
+        *) return 1 ;;
+    esac
+    printf 'claw-%s-%s' "${os}" "${arch}"
+}
+
+# Derive owner/repo from the checkout's git remote so forks work without edits.
+prebuilt_repo_slug() {
+    local url
+    url="$(git -C "${SCRIPT_DIR}" config --get remote.origin.url 2>/dev/null)" || return 1
+    [ -n "${url}" ] || return 1
+    printf '%s' "${url}" | sed -E 's#^.*github\.com[:/]##; s#\.git$##'
+}
+
+# Verify $1 against the sibling <artifact>.sha256 file in its directory.
+verify_checksum() {
+    local file="$1" dir base
+    dir="$(dirname "${file}")"
+    base="$(basename "${file}")"
+    if require_cmd sha256sum; then
+        ( cd "${dir}" && sha256sum -c "${base}.sha256" ) >/dev/null 2>&1
+    elif require_cmd shasum; then
+        ( cd "${dir}" && shasum -a 256 -c "${base}.sha256" ) >/dev/null 2>&1
+    else
+        warn "no sha256sum/shasum available — skipping checksum verification"
+        return 0
+    fi
+}
+
+# Download the release artifact for this host into $1 (target binary path),
+# verifying its sha256. Prefers gh (handles private repos); falls back to curl
+# against the public release URL.
+download_prebuilt() {
+    local dest="$1" artifact slug tmp
+    artifact="$(prebuilt_artifact_name)" || {
+        error "no prebuilt artifact for ${OS_FAMILY}/${UNAME_M}; build from source instead"
+        exit 1
+    }
+    slug="$(prebuilt_repo_slug)" || {
+        error "could not determine the GitHub repo from the git remote; use a source build"
+        exit 1
+    }
+    tmp="$(mktemp -d)"
+
+    info "artifact:  ${artifact}"
+    info "repo:      ${slug}"
+    info "release:   ${PREBUILT_TAG:-latest}"
+
+    if require_cmd gh; then
+        info "downloading via gh"
+        local gh_args=(release download)
+        [ -n "${PREBUILT_TAG}" ] && gh_args+=("${PREBUILT_TAG}")
+        gh_args+=(--repo "${slug}" --dir "${tmp}" --clobber
+            --pattern "${artifact}" --pattern "${artifact}.sha256")
+        gh "${gh_args[@]}" || { error "gh release download failed"; exit 1; }
+    elif require_cmd curl; then
+        info "downloading via curl (public release)"
+        local rel
+        if [ -n "${PREBUILT_TAG}" ]; then rel="download/${PREBUILT_TAG}"; else rel="latest/download"; fi
+        local base="https://github.com/${slug}/releases/${rel}"
+        curl -fsSL -o "${tmp}/${artifact}" "${base}/${artifact}" \
+            && curl -fsSL -o "${tmp}/${artifact}.sha256" "${base}/${artifact}.sha256" \
+            || { error "curl download failed (private repo? install 'gh' and authenticate)"; exit 1; }
+    else
+        error "need 'gh' or 'curl' to download a prebuilt binary"
+        exit 1
+    fi
+
+    if verify_checksum "${tmp}/${artifact}"; then
+        ok "checksum verified"
+    else
+        error "checksum verification failed for ${artifact}"
+        exit 1
+    fi
+
+    mkdir -p "$(dirname "${dest}")"
+    install -m 0755 "${tmp}/${artifact}" "${dest}"
+    rm -rf "${tmp}"
 }
 
 # ---------------------------------------------------------------------------
@@ -277,6 +391,18 @@ ok "workspace at ${RUST_DIR}"
 # ---------------------------------------------------------------------------
 
 step "Checking prerequisites"
+
+if [ "${PREBUILT}" = "1" ]; then
+    # Prebuilt download needs a downloader, not a build toolchain.
+    if require_cmd gh; then
+        ok "gh found — will download a prebuilt binary (no build toolchain needed)"
+    elif require_cmd curl; then
+        ok "curl found — will download a prebuilt binary (no build toolchain needed)"
+    else
+        error "prebuilt install needs 'gh' or 'curl'. Install one, or omit --prebuilt to build from source."
+        exit 1
+    fi
+else
 
 # The Rust toolchain is installed via rustup, not the OS package manager, so we
 # never auto-install it — we only point at rustup when it is missing.
@@ -464,34 +590,40 @@ if [ "${#MISSING_DEPS[@]}" -gt 0 ]; then
     ok "system dependencies installed"
 fi
 
+fi  # end prerequisite checks (source build)
+
 # ---------------------------------------------------------------------------
-# Step 4: build the workspace
+# Step 4: obtain the clab binary (build from source or download prebuilt)
 # ---------------------------------------------------------------------------
-
-step "Building the clab workspace (${BUILD_PROFILE})"
-
-CARGO_FLAGS=("build" "--workspace")
-if [ "${BUILD_PROFILE}" = "release" ]; then
-    CARGO_FLAGS+=("--release")
-fi
-
-info "running: cargo ${CARGO_FLAGS[*]}"
-info "this may take a few minutes on the first build"
-
-(
-    cd "${RUST_DIR}"
-    CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}" cargo "${CARGO_FLAGS[@]}"
-)
 
 CLAW_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/clab"
 
+if [ "${PREBUILT}" = "1" ]; then
+    step "Downloading the prebuilt clab binary"
+    download_prebuilt "${CLAW_BIN}"
+else
+    step "Building the clab workspace (${BUILD_PROFILE})"
+
+    CARGO_FLAGS=("build" "--workspace")
+    if [ "${BUILD_PROFILE}" = "release" ]; then
+        CARGO_FLAGS+=("--release")
+    fi
+
+    info "running: cargo ${CARGO_FLAGS[*]}"
+    info "this may take a few minutes on the first build"
+
+    (
+        cd "${RUST_DIR}"
+        CARGO_TERM_COLOR="${CARGO_TERM_COLOR:-always}" cargo "${CARGO_FLAGS[@]}"
+    )
+fi
+
 if [ ! -x "${CLAW_BIN}" ]; then
     error "Expected binary not found at ${CLAW_BIN}"
-    error "The build reported success but the binary is missing — check cargo output above."
     exit 1
 fi
 
-ok "built ${CLAW_BIN}"
+ok "binary ready: ${CLAW_BIN}"
 
 # ---------------------------------------------------------------------------
 # Step 5: post-install verification
