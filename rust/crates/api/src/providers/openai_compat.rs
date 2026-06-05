@@ -131,11 +131,24 @@ impl OpenAiCompatClient {
     }
 
     pub fn from_env(config: OpenAiCompatConfig) -> Result<Self, ApiError> {
-        let Some(api_key) = read_env_non_empty(config.api_key_env)? else {
-            return Err(ApiError::missing_credentials(
-                config.provider_name,
-                config.credential_env_vars(),
-            ));
+        let api_key = match read_env_non_empty(config.api_key_env)? {
+            Some(key) => key,
+            None => {
+                // A custom (non-default) base URL points at a local or gateway
+                // server that may be authless. Only the provider's default cloud
+                // endpoint strictly requires a key, so allow a keyless client
+                // when the operator has pointed us at their own base URL.
+                let base_url = read_base_url(config);
+                if base_url.trim_end_matches('/')
+                    == config.default_base_url.trim_end_matches('/')
+                {
+                    return Err(ApiError::missing_credentials(
+                        config.provider_name,
+                        config.credential_env_vars(),
+                    ));
+                }
+                String::new()
+            }
         };
         Ok(Self::new(api_key, config))
     }
