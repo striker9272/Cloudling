@@ -9,8 +9,8 @@ This page is the PowerShell-first path for installing, verifying, and safely swi
 Use this when you are developing Claw Lab or testing a local checkout.
 
 ```powershell
-git clone https://github.com/ultraworkers/claw-code
-Set-Location .\claw-code\rust
+git clone https://github.com/striker9272/claw-lab
+Set-Location .\claw-lab\rust
 cargo build --workspace
 .\target\debug\clab.exe --help
 .\target\debug\clab.exe doctor
@@ -19,7 +19,7 @@ cargo build --workspace
 For an optimized local binary:
 
 ```powershell
-Set-Location .\claw-code\rust
+Set-Location .\claw-lab\rust
 cargo build --workspace --release
 .\target\release\clab.exe --help
 ```
@@ -68,8 +68,8 @@ wsl
 Then inside WSL:
 
 ```bash
-git clone https://github.com/ultraworkers/claw-code
-cd claw-code
+git clone https://github.com/striker9272/claw-lab
+cd claw-lab
 ./install.sh
 ```
 
@@ -78,7 +78,7 @@ cd claw-code
 Run these before using live prompts:
 
 ```powershell
-Set-Location .\claw-code\rust
+Set-Location .\claw-lab\rust
 .\target\debug\clab.exe --help
 .\target\debug\clab.exe doctor
 .\target\debug\clab.exe status --output-format json
@@ -169,7 +169,7 @@ Notification support is exposed through the `notifications` slash command in the
 Native PowerShell smoke path:
 
 ```powershell
-Set-Location .\claw-code\rust
+Set-Location .\claw-lab\rust
 .\target\debug\clab.exe
 # inside the REPL:
 /notifications
@@ -178,8 +178,8 @@ Set-Location .\claw-code\rust
 WSL smoke path:
 
 ```bash
-cd claw-code/rust
-./target/debug/claw
+cd claw-lab/rust
+./target/debug/clab
 # inside the REPL:
 /notifications
 ```
