@@ -115,6 +115,11 @@ need "--base-url" "$OPENAI_BASE_URL"
 need "--backend-model" "$BACKEND_MODEL"
 need "--served-model-id" "$SERVED_MODEL_ID"
 
+case "$OPENAI_BASE_URL" in
+  http://?*|https://?*) ;;
+  *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
+esac
+
 if [ -z "$GROUP_NAME" ]; then
   GROUP_NAME="$USER_NAME"
 fi

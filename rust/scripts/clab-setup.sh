@@ -41,8 +41,14 @@ echo "Press Enter to accept the [default]. You only need your backend + a served
 echo
 
 # Backend (where the model comes from)
-BASE_URL="$(ask 'Backend base URL (OpenAI-compatible, e.g. http://127.0.0.1:8000/v1)' '')"
-[ -n "$BASE_URL" ] || { echo "error: backend base URL is required" >&2; exit 2; }
+while :; do
+  BASE_URL="$(ask 'Backend base URL (OpenAI-compatible, e.g. http://127.0.0.1:8000/v1)' '')"
+  [ -n "$BASE_URL" ] || { echo "error: backend base URL is required" >&2; exit 2; }
+  case "$BASE_URL" in
+    http://?*|https://?*) break ;;
+    *) echo "  invalid: must start with http:// or https:// and include a host (e.g. http://127.0.0.1:8000/v1)" >&2 ;;
+  esac
+done
 
 BACKEND_MODEL="$(ask 'Backend model id (the model your backend serves)' '')"
 [ -n "$BACKEND_MODEL" ] || { echo "error: backend model id is required" >&2; exit 2; }
