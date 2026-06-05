@@ -69,7 +69,15 @@ cargo build --workspace
 
 ### Запуск как сервиса
 
-Основной сценарий. Проще всего — интерактивный мастер: он спросит 4 вещи и настроит сервис сам:
+Основной сценарий. Сервис запускает бинарник из фиксированного пути (по умолчанию `/opt/clab/bin/clab`), поэтому сначала собери release-бинарник и положи его туда:
+
+```bash
+cd rust
+cargo build --release -p clab-cli
+sudo install -D -m 755 target/release/clab /opt/clab/bin/clab
+```
+
+Дальше проще всего — интерактивный мастер: он спросит 4 вещи и настроит сервис сам (а если бинарника на месте нет — подскажет команды выше):
 
 ```bash
 cd rust
@@ -176,7 +184,15 @@ The binary lands in `rust/target/debug/clab` (or `release/` with `--release`; `.
 
 ### Run it as a service
 
-The main use case. Easiest is the interactive wizard — it asks 4 things and sets up the service for you:
+The main use case. The service runs a binary from a fixed path (default `/opt/clab/bin/clab`), so first build a release binary and install it there:
+
+```bash
+cd rust
+cargo build --release -p clab-cli
+sudo install -D -m 755 target/release/clab /opt/clab/bin/clab
+```
+
+Then the easiest path is the interactive wizard — it asks 4 things and sets up the service for you (and prints the commands above if the binary isn't in place yet):
 
 ```bash
 cd rust

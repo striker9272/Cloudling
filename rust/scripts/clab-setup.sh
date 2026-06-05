@@ -73,10 +73,16 @@ case "${CONFIRM:-N}" in
 esac
 
 if [ ! -e "$DEFAULT_RUNTIME_BIN" ]; then
+  RUST_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
   echo
   echo "NOTE: runtime binary $DEFAULT_RUNTIME_BIN does not exist yet."
-  echo "      Build/deploy it there first (see deploy-openai-server.sh), or pass a"
-  echo "      different path by running install-openai-service.sh --runtime-bin <path> directly."
+  echo "      The service runs this exact path, so build a release binary and install it"
+  echo "      there before starting the service:"
+  echo "        (cd \"$RUST_DIR\" && cargo build --release -p clab-cli)"
+  echo "        sudo install -D -m 755 \"$RUST_DIR/target/release/clab\" \"$DEFAULT_RUNTIME_BIN\""
+  echo "      Or use deploy-openai-server.sh --runtime-bin \"$DEFAULT_RUNTIME_BIN\" to build"
+  echo "      and install it atomically. To use a different location, run"
+  echo "      install-openai-service.sh --runtime-bin <path> directly."
 fi
 
 ARGS=(

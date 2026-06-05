@@ -9,12 +9,12 @@ Run this before prompts, sessions, or automation:
 ```bash
 cd rust
 cargo build --workspace
-./target/debug/claw
+./target/debug/clab
 # first command inside the REPL
 /doctor
 ```
 
-`/doctor` is the built-in setup and preflight diagnostic. Once you have a saved session, you can rerun it with `./target/debug/claw --resume latest /doctor`.
+`/doctor` is the built-in setup and preflight diagnostic. Once you have a saved session, you can rerun it with `./target/debug/clab --resume latest /doctor`.
 
 ## Prerequisites
 
@@ -31,7 +31,7 @@ cd rust
 cargo build --workspace
 ```
 
-The CLI binary is available at `rust/target/debug/claw` after a debug build (`rust\target\debug\clab.exe` on Windows). Make the doctor check above your first post-build step. For PowerShell-first install, release ZIP, PATH, provider-switching, and Windows/WSL notification examples, see [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+The CLI binary is available at `rust/target/debug/clab` after a debug build (`rust\target\debug\clab.exe` on Windows). Make the doctor check above your first post-build step. For PowerShell-first install, release ZIP, PATH, provider-switching, and Windows/WSL notification examples, see [`docs/windows-install-release.md`](./docs/windows-install-release.md).
 
 ## Quick start
 
@@ -39,7 +39,7 @@ The CLI binary is available at `rust/target/debug/claw` after a debug build (`ru
 
 ```bash
 cd rust
-./target/debug/claw
+./target/debug/clab
 /doctor
 ```
 
@@ -47,7 +47,7 @@ Or run doctor directly with JSON output for scripting:
 
 ```bash
 cd rust
-./target/debug/claw doctor --output-format json
+./target/debug/clab doctor --output-format json
 ```
 
 **Note:** Diagnostic verbs (`doctor`, `status`, `sandbox`, `version`) support `--output-format json` for machine-readable output. Invalid suffix arguments (e.g., `--json`) are now rejected at parse time rather than falling through to prompt dispatch.
@@ -58,14 +58,14 @@ Set up a new repository with `.claw` config, `.claw.json`, `.gitignore` entries,
 
 ```bash
 cd /path/to/your/repo
-./target/debug/claw init
+./target/debug/clab init
 ```
 
 Text mode (human-readable) shows artifact creation summary with project path and next steps. Idempotent — running multiple times in the same repo marks already-created files as "skipped".
 
 JSON mode for scripting:
 ```bash
-./target/debug/claw init --output-format json
+./target/debug/clab init --output-format json
 ```
 
 Returns structured output with `project_path`, `created[]`, `updated[]`, `skipped[]` arrays (one per artifact), and `artifacts[]` carrying each file's `name` and machine-stable `status` tag. The legacy `message` field preserves backward compatibility.
@@ -76,28 +76,28 @@ Returns structured output with `project_path`, `created[]`, `updated[]`, `skippe
 
 ```bash
 cd rust
-./target/debug/claw
+./target/debug/clab
 ```
 
 ### One-shot prompt
 
 ```bash
 cd rust
-./target/debug/claw prompt "summarize this repository"
+./target/debug/clab prompt "summarize this repository"
 ```
 
 ### Shorthand prompt mode
 
 ```bash
 cd rust
-./target/debug/claw "explain rust/crates/runtime/src/lib.rs"
+./target/debug/clab "explain rust/crates/runtime/src/lib.rs"
 ```
 
 ### JSON output for scripting
 
 ```bash
 cd rust
-./target/debug/claw --output-format json prompt "status"
+./target/debug/clab --output-format json prompt "status"
 ```
 
 ### Inspect worker state
@@ -108,12 +108,12 @@ Prerequisite: You must run `clab` (interactive REPL) or `clab prompt <text>` at 
 
 ```bash
 cd rust
-./target/debug/claw state
+./target/debug/clab state
 ```
 
 JSON mode:
 ```bash
-./target/debug/claw state --output-format json
+./target/debug/clab state --output-format json
 ```
 
 If you run `clab state` before any worker has executed, you will see a helpful error:
@@ -183,10 +183,10 @@ Output: A list of suspicious patterns with explanations (e.g., "unchecked unwrap
 
 ```bash
 cd rust
-./target/debug/claw --model sonnet prompt "review this diff"
-./target/debug/claw --permission-mode read-only prompt "summarize Cargo.toml"
-./target/debug/claw --permission-mode workspace-write prompt "update README.md"
-./target/debug/claw --allowedTools read,glob "inspect the runtime crate"
+./target/debug/clab --model sonnet prompt "review this diff"
+./target/debug/clab --permission-mode read-only prompt "summarize Cargo.toml"
+./target/debug/clab --permission-mode workspace-write prompt "update README.md"
+./target/debug/clab --allowedTools read,glob "inspect the runtime crate"
 ```
 
 Supported permission modes:
@@ -269,7 +269,7 @@ export ANTHROPIC_BASE_URL="http://127.0.0.1:8080"
 export ANTHROPIC_AUTH_TOKEN="local-dev-token"
 
 cd rust
-./target/debug/claw --model "claude-sonnet-4-6" prompt "reply with the word ready"
+./target/debug/clab --model "claude-sonnet-4-6" prompt "reply with the word ready"
 ```
 
 ### OpenAI-compatible endpoint
@@ -279,7 +279,7 @@ export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
 export OPENAI_API_KEY="local-dev-token"
 
 cd rust
-./target/debug/claw --model "qwen2.5-coder" prompt "reply with the word ready"
+./target/debug/clab --model "qwen2.5-coder" prompt "reply with the word ready"
 ```
 
 ### Ollama
@@ -289,7 +289,7 @@ export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
 unset OPENAI_API_KEY
 
 cd rust
-./target/debug/claw --model "llama3.2" prompt "summarize this repository in one sentence"
+./target/debug/clab --model "llama3.2" prompt "summarize this repository in one sentence"
 ```
 
 ### OpenRouter
@@ -299,7 +299,7 @@ export OPENAI_BASE_URL="https://openrouter.ai/api/v1"
 export OPENAI_API_KEY="sk-or-v1-..."
 
 cd rust
-./target/debug/claw --model "openai/gpt-4.1-mini" prompt "summarize this repository in one sentence"
+./target/debug/clab --model "openai/gpt-4.1-mini" prompt "summarize this repository in one sentence"
 ```
 
 ### Alibaba DashScope (Qwen)
@@ -310,9 +310,9 @@ For Qwen models via Alibaba's native DashScope API (higher rate limits than Open
 export DASHSCOPE_API_KEY="sk-..."
 
 cd rust
-./target/debug/claw --model "qwen/qwen-max" prompt "hello"
+./target/debug/clab --model "qwen/qwen-max" prompt "hello"
 # or bare:
-./target/debug/claw --model "qwen-plus" prompt "hello"
+./target/debug/clab --model "qwen-plus" prompt "hello"
 ```
 
 Model names starting with `qwen/` or `qwen-` are automatically routed to the DashScope compatible-mode endpoint (`https://dashscope.aliyuncs.com/compatible-mode/v1`). You do **not** need to set `OPENAI_BASE_URL` or unset `ANTHROPIC_API_KEY` — the model prefix wins over the ambient credential sniffer.
@@ -418,7 +418,7 @@ export HTTP_PROXY="http://proxy.corp.example:3128"
 export NO_PROXY="localhost,127.0.0.1,.corp.example"
 
 cd rust
-./target/debug/claw prompt "hello via the corporate proxy"
+./target/debug/clab prompt "hello via the corporate proxy"
 ```
 
 ### Programmatic `proxy_url` config option
@@ -465,12 +465,12 @@ If install succeeds but invocation fails with a provider HTTP error, treat provi
 
 ```bash
 cd rust
-./target/debug/claw status
-./target/debug/claw sandbox
-./target/debug/claw agents
-./target/debug/claw mcp
-./target/debug/claw skills
-./target/debug/claw system-prompt --cwd .. --date 2026-04-04
+./target/debug/clab status
+./target/debug/clab sandbox
+./target/debug/clab agents
+./target/debug/clab mcp
+./target/debug/clab skills
+./target/debug/clab system-prompt --cwd .. --date 2026-04-04
 ```
 
 ## Install an external skill
@@ -482,11 +482,11 @@ repository ships a skill prompt that should be available through `/skills`.
 For example, install TweetClaw as an X/Twitter automation skill:
 
 ```bash
-# From a parent directory that contains claw-code
+# From a parent directory that contains claw-lab
 git clone https://github.com/Xquik-dev/tweetclaw
-cd claw-code/rust
-./target/debug/claw skills install ../../tweetclaw/skills/tweetclaw
-./target/debug/claw skills show tweetclaw
+cd claw-lab/rust
+./target/debug/clab skills install ../../tweetclaw/skills/tweetclaw
+./target/debug/clab skills show tweetclaw
 ```
 
 TweetClaw gives `clab` users a local skill guide for OpenClaw/Xquik workflows
@@ -500,8 +500,8 @@ REPL turns are persisted under `.claw/sessions/` in the current workspace.
 
 ```bash
 cd rust
-./target/debug/claw --resume latest
-./target/debug/claw --resume latest /status /diff
+./target/debug/clab --resume latest
+./target/debug/clab --resume latest /status /diff
 ```
 
 Useful interactive commands include `/help`, `/status`, `/cost`, `/config`, `/session`, `/model`, `/permissions`, and `/export`.
