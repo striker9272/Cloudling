@@ -1,8 +1,11 @@
+use std::path::{Path, PathBuf};
+
 use runtime::{
     AssistantEvent, ContentBlock, ConversationMessage, PermissionMode, Session, TurnSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use tempfile::TempDir;
 
 /// Request shape for a reusable Claw engine turn.
 ///
@@ -139,6 +142,9 @@ trait EngineHost {
         runtime: crate::BuiltRuntime,
     ) -> Result<(), Box<dyn std::error::Error>>;
     fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>>;
+    fn workspace_root(&self) -> Option<&Path> {
+        None
+    }
 }
 
 impl EngineHost for crate::LiveCli {
@@ -184,6 +190,9 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
     let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
     let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
 
+    let _workspace_guard =
+        runtime::scoped_workspace_root(host.workspace_root().map(Path::to_path_buf));
+
     let result = match event_sink {
         Some(sink) => {
             runtime.run_turn_with_event_sink(input, Some(&mut permission_prompter), Some(sink))
@@ -216,6 +225,9 @@ pub(crate) struct ClawEngineSession {
     runtime: crate::BuiltRuntime,
     session: crate::SessionHandle,
     persist_session: bool,
+    working_dir: PathBuf,
+    // Kept alive so the per-request temp workspace is removed when the session drops.
+    workspace_tempdir: Option<TempDir>,
 }
 
 impl ClawEngineSession {
@@ -248,6 +260,8 @@ impl ClawEngineSession {
             runtime,
             session,
             persist_session: true,
+            working_dir: std::env::current_dir()?,
+            workspace_tempdir: None,
         };
         host.persist_engine_session()?;
         Ok(host)
@@ -287,6 +301,8 @@ impl ClawEngineSession {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut system_prompt = crate::build_system_prompt(&model)?;
         system_prompt.extend(extra_system_prompt);
+        let workspace_tempdir = tempfile::Builder::new().prefix("clab-ws-").tempdir()?;
+        let working_dir = workspace_tempdir.path().to_path_buf();
         let mut session_state = crate::new_cli_session()?;
         // Seed prior turns directly on the in-memory session. The ephemeral
         // session has no persistence path, so this never touches disk.
@@ -312,6 +328,8 @@ impl ClawEngineSession {
             runtime,
             session,
             persist_session: false,
+            working_dir,
+            workspace_tempdir: Some(workspace_tempdir),
         })
     }
 
@@ -325,6 +343,11 @@ impl ClawEngineSession {
         let system_prompt = crate::build_system_prompt(&model)?;
         let session_id = openai_session_id_for_key(session_key)?;
         let session = crate::create_managed_session_handle(&session_id)?;
+
+        let working_dir = std::env::current_dir()?
+            .join(".clab-workspaces")
+            .join(&session_id);
+        std::fs::create_dir_all(&working_dir)?;
 
         let session_state = if session.path.exists() {
             let loaded = Session::load_from_path(&session.path)?;
@@ -365,6 +388,8 @@ impl ClawEngineSession {
             runtime,
             session,
             persist_session: true,
+            working_dir,
+            workspace_tempdir: None,
         };
         host.persist_engine_session()?;
         Ok(host)
@@ -452,6 +477,10 @@ impl EngineHost for ClawEngineSession {
             self.runtime.session().save_to_path(&self.session.path)?;
         }
         Ok(())
+    }
+
+    fn workspace_root(&self) -> Option<&Path> {
+        Some(&self.working_dir)
     }
 }
 

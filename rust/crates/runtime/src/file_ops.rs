@@ -645,7 +645,7 @@ fn normalize_path(path: &str) -> io::Result<PathBuf> {
     let candidate = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        std::env::current_dir()?.join(path)
+        crate::current_workspace_root()?.join(path)
     };
     candidate.canonicalize()
 }
@@ -654,7 +654,7 @@ fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
     let candidate = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
-        std::env::current_dir()?.join(path)
+        crate::current_workspace_root()?.join(path)
     };
 
     if let Ok(canonical) = candidate.canonicalize() {
