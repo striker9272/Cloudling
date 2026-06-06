@@ -1,63 +1,89 @@
 #!/usr/bin/env bash
+# install-openai-service.sh — install, configure, or remove the Claw Lab
+# OpenAI-compatible service (systemd unit + env file + wrapper).
+#
+# Modes:
+#   (install — default)  Write the env file (single source of truth), wrapper, and
+#       systemd unit; optionally install a prebuilt binary and enable/restart the
+#       service. Run with no required flags on a terminal to get an interactive
+#       wizard; pass flags for non-interactive / CI use.
+#   --uninstall          Stop and disable the service, then remove the unit,
+#       wrapper, env file, and runtime binary. By default also removes the
+#       work/sandbox directories and *.bak-* backups (use --keep-data to keep them).
+#
+# Nothing here hardcodes a host: every path and name is a flag with a portable
+# claw-lab-* default, so the fork stays movable across machines.
 set -euo pipefail
 
-SERVICE_NAME="clab-openai.service"
+# --- defaults (claw-lab-* canon; all overridable via flags) ---
+SERVICE_NAME="claw-lab-openai.service"
 USER_NAME="$(id -un)"
 GROUP_NAME=""
-RUNTIME_BIN="/opt/clab/bin/clab"
-RUNTIME_BIN_SRC=""
-WRAPPER_PATH="/usr/local/bin/clab-openai-serve"
-ENV_FILE="/etc/clab/openai.env"
-WORKDIR="/var/lib/clab/work"
-SANDBOX_DIR="/var/lib/clab/sandbox"
+RUNTIME_BIN="/opt/claw-lab/bin/clab"
+# A freshly built binary to install at RUNTIME_BIN. install.sh passes this via
+# CLAB_RUNTIME_BIN_SRC for end-to-end setup; --runtime-bin-src overrides it.
+RUNTIME_BIN_SRC="${CLAB_RUNTIME_BIN_SRC:-}"
+WRAPPER_PATH="/usr/local/bin/claw-lab-openai-serve"
+ENV_FILE="/etc/claw-lab/openai.env"
+WORKDIR="/var/lib/claw-lab/work"
+SANDBOX_DIR="/var/lib/claw-lab/sandbox"
 TMPDIR_VALUE=""
 BIND="127.0.0.1:4097"
 OPENAI_BASE_URL=""
 BACKEND_MODEL=""
-SERVED_MODEL_ID=""
+SERVED_MODEL_ID="clab-agent"
 PERMISSION_MODE="read-only"
 WEBSEARCH_URL=""
 API_KEY=""
 ENABLE_SERVICE=0
 RESTART_SERVICE=0
 DRY_RUN=0
+UNINSTALL=0
+ASSUME_YES=0
+KEEP_DATA=0
 
 usage() {
   cat <<'USAGE'
 Usage:
-  scripts/install-openai-service.sh [options]
+  install-openai-service.sh [options]              # install / configure
+  install-openai-service.sh --uninstall [options]  # remove the service
 
-Required:
-  --service NAME              systemd service name, e.g. claw-lab-openai.service
-  --user USER                 service user
-  --runtime-bin PATH          installed claw runtime binary
-  --wrapper PATH              wrapper script to install
-  --env-file PATH             environment file to write
-  --workdir PATH              neutral agent working directory
-  --sandbox-dir PATH          sandbox directory
+Install (no required flags on a terminal -> interactive wizard):
   --base-url URL              OpenAI-compatible backend base URL
-  --backend-model MODEL       backend/adaptor model id sent to provider
-  --served-model-id MODEL     model id exposed by /health and /v1/models
+  --backend-model MODEL       backend/adaptor model id sent to the provider
+  --served-model-id MODEL     model id exposed to clients. Default: clab-agent.
 
-Options:
-  --group GROUP               service group. Defaults to USER.
+Common options:
+  --service NAME              systemd service name. Default: claw-lab-openai.service
+  --user USER                 service user. Default: current user.
+  --group GROUP               service group. Default: USER.
+  --runtime-bin PATH          installed clab runtime binary. Default: /opt/claw-lab/bin/clab
   --runtime-bin-src PATH      install this binary to --runtime-bin before setup.
-  --tmpdir PATH               TMPDIR. Defaults to SANDBOX_DIR/tmp.
+  --wrapper PATH              wrapper script. Default: /usr/local/bin/claw-lab-openai-serve
+  --env-file PATH             environment file. Default: /etc/claw-lab/openai.env
+  --workdir PATH              neutral agent working directory. Default: /var/lib/claw-lab/work
+  --sandbox-dir PATH          sandbox directory. Default: /var/lib/claw-lab/sandbox
+  --tmpdir PATH               TMPDIR. Default: SANDBOX_DIR/tmp.
   --bind ADDR                 bind address. Default: 127.0.0.1:4097.
-  --permission-mode MODE      read-only|acceptEdits|bypassPermissions|danger-full-access, etc. Default: read-only.
+  --permission-mode MODE      read-only|workspace-write|danger-full-access, etc. Default: read-only.
   --websearch-url URL         optional CLAWD_WEB_SEARCH_BASE_URL.
-  --api-key VALUE             optional OPENAI_API_KEY. If omitted, existing env value is preserved when present.
+  --api-key VALUE             optional OPENAI_API_KEY. If omitted, an existing env value is kept.
   --enable                    enable the systemd service.
   --restart                   restart the systemd service after install.
-  --dry-run                   print actions without changing files.
-  -h, --help                  show help.
+  --dry-run                   print actions without changing anything.
+  -y, --yes                   do not prompt for confirmation (required for non-interactive uninstall).
+  -h, --help                  show this help.
+
+Uninstall:
+  --uninstall                 remove the service named by --service and its files.
+  --keep-data                 keep the work/sandbox directories and *.bak-* backups.
 
 Design:
-  - Installs systemd service + env + wrapper for OpenAI-compatible Claw server.
+  - Installs systemd service + env + wrapper for the OpenAI-compatible Claw Lab server.
   - Uses a neutral workdir by default via --workdir.
-  - Does not build the binary; can install a prebuilt one via --runtime-bin-src,
-    otherwise use deploy-openai-server.sh to build and replace it.
-  - Does not hardcode local host paths or model names.
+  - Does not build the binary; install a prebuilt one via --runtime-bin-src, or use
+    deploy-openai-server.sh to build and replace it.
+  - Does not hardcode local host paths or model names; everything is a flag/default.
 USAGE
 }
 
@@ -100,6 +126,9 @@ while [ "$#" -gt 0 ]; do
     --enable) ENABLE_SERVICE=1; shift ;;
     --restart) RESTART_SERVICE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --uninstall) UNINSTALL=1; shift ;;
+    --keep-data) KEEP_DATA=1; shift ;;
+    -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "FAIL: unknown argument: $1" >&2; usage; exit 2 ;;
   esac
@@ -111,30 +140,12 @@ fail() {
 }
 
 need() {
-  local name="$1"
-  local value="$2"
+  local name="$1" value="$2"
   [ -n "$value" ] || fail "missing $name"
 }
 
-need "--base-url" "$OPENAI_BASE_URL"
-need "--backend-model" "$BACKEND_MODEL"
-need "--served-model-id" "$SERVED_MODEL_ID"
-
-case "$OPENAI_BASE_URL" in
-  http://?*|https://?*) ;;
-  *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
-esac
-
-if [ -n "$RUNTIME_BIN_SRC" ] && [ ! -f "$RUNTIME_BIN_SRC" ]; then
-  fail "--runtime-bin-src not found: $RUNTIME_BIN_SRC"
-fi
-
 if [ -z "$GROUP_NAME" ]; then
   GROUP_NAME="$USER_NAME"
-fi
-
-if [ -z "$TMPDIR_VALUE" ]; then
-  TMPDIR_VALUE="${SANDBOX_DIR%/}/tmp"
 fi
 
 if [ "$(id -u)" = "0" ]; then
@@ -150,19 +161,175 @@ run() {
   fi
 }
 
-run_shell() {
-  echo "+ $*"
-  if [ "$DRY_RUN" != "1" ]; then
-    bash -lc "$*"
-  fi
-}
-
 existing_var() {
   local key="$1"
   if [ -f "$ENV_FILE" ]; then
     grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true
   fi
 }
+
+confirm() {  # confirm "question" -> returns 0 to proceed, else aborts
+  local q="$1" reply
+  [ "$ASSUME_YES" = "1" ] && return 0
+  if [ ! -t 0 ]; then
+    fail "refusing to proceed non-interactively; pass --yes to confirm"
+  fi
+  read -r -p "$q [y/N]: " reply
+  case "${reply:-N}" in
+    y|Y) return 0 ;;
+    *) echo "aborted."; exit 0 ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# Uninstall mode
+# ---------------------------------------------------------------------------
+
+do_uninstall() {
+  local unit="/etc/systemd/system/$SERVICE_NAME"
+  echo "Uninstall plan"
+  echo "  service:      $SERVICE_NAME"
+  echo "  unit:         $unit"
+  echo "  wrapper:      $WRAPPER_PATH"
+  echo "  env-file:     $ENV_FILE"
+  echo "  runtime-bin:  $RUNTIME_BIN"
+  if [ "$KEEP_DATA" = "1" ]; then
+    echo "  data:         kept (workdir, sandbox, and *.bak-* backups left in place)"
+  else
+    echo "  workdir:      $WORKDIR (removed)"
+    echo "  sandbox-dir:  $SANDBOX_DIR (removed)"
+    echo "  backups:      *.bak-* for unit/wrapper/env/bin (removed)"
+  fi
+  echo "  dry-run:      $DRY_RUN"
+  echo
+
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "Dry-run complete. No changes made."
+    return 0
+  fi
+
+  confirm "Remove the service and files above?"
+
+  run "${SUDO[@]}" systemctl stop "$SERVICE_NAME" || true
+  run "${SUDO[@]}" systemctl disable "$SERVICE_NAME" || true
+
+  local f
+  for f in "$unit" "$WRAPPER_PATH" "$ENV_FILE" "$RUNTIME_BIN"; do
+    if [ -e "$f" ]; then
+      run "${SUDO[@]}" rm -f "$f"
+    fi
+  done
+
+  if [ "$KEEP_DATA" != "1" ]; then
+    local d
+    for d in "$WORKDIR" "$SANDBOX_DIR"; do
+      if [ -d "$d" ]; then
+        run "${SUDO[@]}" rm -rf "$d"
+      fi
+    done
+    shopt -s nullglob
+    local baks=( "$unit".bak-* "$WRAPPER_PATH".bak-* "$ENV_FILE".bak-* "$RUNTIME_BIN".bak-* )
+    shopt -u nullglob
+    if [ "${#baks[@]}" -gt 0 ]; then
+      run "${SUDO[@]}" rm -f "${baks[@]}"
+    fi
+  fi
+
+  run "${SUDO[@]}" systemctl daemon-reload
+  run "${SUDO[@]}" systemctl reset-failed "$SERVICE_NAME" || true
+
+  echo
+  echo "Uninstall complete."
+}
+
+if [ "$UNINSTALL" = "1" ]; then
+  do_uninstall
+  exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Interactive wizard (install mode, on a terminal, when essentials are missing)
+# ---------------------------------------------------------------------------
+
+ask() {  # ask "Prompt" "default" -> echoes the answer (default if empty)
+  local prompt="$1" def="${2:-}" reply
+  if [ -n "$def" ]; then
+    read -r -p "$prompt [$def]: " reply
+    printf '%s' "${reply:-$def}"
+  else
+    read -r -p "$prompt: " reply
+    printf '%s' "$reply"
+  fi
+}
+
+run_wizard() {
+  echo "=== Claw Lab — service setup ==="
+  echo "Press Enter to accept the [default]. You only need your backend + a served model id."
+  echo
+
+  while :; do
+    OPENAI_BASE_URL="$(ask 'Backend base URL (OpenAI-compatible, e.g. http://127.0.0.1:8000/v1)' '')"
+    [ -n "$OPENAI_BASE_URL" ] || { echo "  required: backend base URL" >&2; continue; }
+    case "$OPENAI_BASE_URL" in
+      http://?*|https://?*) break ;;
+      *) echo "  invalid: must start with http:// or https:// and include a host" >&2 ;;
+    esac
+  done
+
+  BACKEND_MODEL="$(ask 'Backend model id (the model your backend serves)' '')"
+  [ -n "$BACKEND_MODEL" ] || fail "backend model id is required"
+
+  read -r -s -p "Backend API key (leave blank if your backend needs none): " API_KEY; echo
+
+  SERVED_MODEL_ID="$(ask 'Served model id (shown to Open WebUI)' "$SERVED_MODEL_ID")"
+  BIND="$(ask 'Bind address' "$BIND")"
+  PERMISSION_MODE="$(ask 'Permission mode (read-only | workspace-write | danger-full-access)' "$PERMISSION_MODE")"
+
+  local start_reply
+  read -r -p "Start now and enable on boot? [Y/n]: " start_reply
+  case "${start_reply:-Y}" in
+    y|Y) ENABLE_SERVICE=1; RESTART_SERVICE=1 ;;
+  esac
+
+  echo
+  echo "--- Summary ---"
+  echo "  backend URL:     $OPENAI_BASE_URL"
+  echo "  backend model:   $BACKEND_MODEL"
+  echo "  api key:         $( [ -n "$API_KEY" ] && echo '(set)' || echo '(none)')"
+  echo "  served model id: $SERVED_MODEL_ID"
+  echo "  bind:            $BIND"
+  echo "  permission mode: $PERMISSION_MODE"
+  [ -n "$RUNTIME_BIN_SRC" ] && echo "  install binary:  $RUNTIME_BIN_SRC -> $RUNTIME_BIN"
+  echo "  service:         $SERVICE_NAME (user=$USER_NAME)"
+  echo "  paths:           bin=$RUNTIME_BIN, env=$ENV_FILE, workdir=$WORKDIR"
+  echo
+  confirm "Proceed?"
+}
+
+if [ -z "$OPENAI_BASE_URL" ] && [ -t 0 ]; then
+  run_wizard
+fi
+
+# ---------------------------------------------------------------------------
+# Install mode
+# ---------------------------------------------------------------------------
+
+need "--base-url" "$OPENAI_BASE_URL"
+need "--backend-model" "$BACKEND_MODEL"
+need "--served-model-id" "$SERVED_MODEL_ID"
+
+case "$OPENAI_BASE_URL" in
+  http://?*|https://?*) ;;
+  *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
+esac
+
+if [ -n "$RUNTIME_BIN_SRC" ] && [ ! -f "$RUNTIME_BIN_SRC" ]; then
+  fail "--runtime-bin-src not found: $RUNTIME_BIN_SRC"
+fi
+
+if [ -z "$TMPDIR_VALUE" ]; then
+  TMPDIR_VALUE="${SANDBOX_DIR%/}/tmp"
+fi
 
 if [ -z "$API_KEY" ]; then
   API_KEY="$(existing_var OPENAI_API_KEY)"

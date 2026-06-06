@@ -78,11 +78,11 @@ cd claw-lab
 - запущенный OpenAI-совместимый бэкенд с моделью (Ollama / llama.cpp / vLLM / облако), доступный по сети;
 - Open WebUI (или любой OpenAI-клиент), который будет ходить в clab.
 
-Мастер можно запустить и отдельно (бинарник кладёт `install.sh`; при ручной сборке сначала положи его: `sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab`):
+Мастер можно запустить и отдельно — `install-openai-service.sh` без флагов на терминале сам переходит в интерактивный режим (бинарник кладёт `install.sh`; при ручной сборке сначала положи его: `sudo install -D -m 755 rust/target/release/clab /opt/claw-lab/bin/clab`):
 
 ```bash
 cd rust
-bash scripts/clab-setup.sh
+bash scripts/install-openai-service.sh
 ```
 
 Либо одной командой, без вопросов:
@@ -96,7 +96,7 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (имя сервиса, пользователь, пути `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`, permission mode `read-only`) подставляется по умолчанию и переопределяется флагами.
+(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (сервис `claw-lab-openai.service`, пользователь, пути `/opt/claw-lab`, `/etc/claw-lab`, `/var/lib/claw-lab`, bind `127.0.0.1:4097`, permission mode `read-only`) подставляется по умолчанию и переопределяется флагами.
 
 Мастер спрашивает:
 
@@ -108,17 +108,25 @@ scripts/install-openai-service.sh \
 | **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `clab-agent`). |
 | **Permission mode** (`--permission-mode`) | Что агенту можно: `read-only` (по умолч.) — только чтение; `workspace-write` — правка/запуск в рабочей папке; `danger-full-access` — полный доступ ко всей ФС (опасно для сервиса, открытого в чат). |
 
-**Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/clab/openai.env`) + рестарт сервиса.
+**Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) + рестарт сервиса.
 
 Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
 
 ```bash
 cd rust
 scripts/deploy-openai-server.sh \
-  --runtime-bin /path/to/clab \
-  --service clab-openai.service \
+  --runtime-bin /opt/claw-lab/bin/clab \
+  --service claw-lab-openai.service \
   --health-url http://127.0.0.1:4097/health
 ```
+
+Снести сервис целиком — парной командой `uninstall.sh` (убирает unit, wrapper, env, бинарник, а также рабочие каталоги и бэкапы; `--keep-data` оставит данные, `--dry-run` покажет план, `--yes` без вопросов):
+
+```bash
+./uninstall.sh
+```
+
+**Какой скрипт когда:** `install.sh` — точка входа (собрать бинарник + при желании поднять сервис); `rust/scripts/install-openai-service.sh` — движок установки сервиса (интерактивный без флагов, неинтерактивный по флагам); `rust/scripts/deploy-openai-server.sh` — пересобрать и заменить бинарник у уже работающего сервиса; `uninstall.sh` — снести всё.
 
 ### Структура репозитория
 
@@ -195,11 +203,11 @@ The main use case. If you installed via `./install.sh --release`, it offers to s
 - a running OpenAI-compatible backend with a model (Ollama / llama.cpp / vLLM / cloud), reachable over the network;
 - Open WebUI (or any OpenAI client) to talk to clab.
 
-You can also run the wizard separately (`install.sh` places the binary; for a manual build, place it first: `sudo install -D -m 755 rust/target/release/clab /opt/clab/bin/clab`):
+You can also run the installer separately — `install-openai-service.sh` drops into its interactive wizard when run with no flags on a terminal (`install.sh` places the binary; for a manual build, place it first: `sudo install -D -m 755 rust/target/release/clab /opt/claw-lab/bin/clab`):
 
 ```bash
 cd rust
-bash scripts/clab-setup.sh
+bash scripts/install-openai-service.sh
 ```
 
 Or in one non-interactive command:
@@ -213,7 +221,7 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(if your backend needs a key, add `--api-key sk-...`). Everything else (service name, user, paths `/opt/clab`, `/etc/clab`, `/var/lib/clab`, bind `127.0.0.1:4097`, permission mode `read-only`) is defaulted and overridable via flags.
+(if your backend needs a key, add `--api-key sk-...`). Everything else (service `claw-lab-openai.service`, user, paths `/opt/claw-lab`, `/etc/claw-lab`, `/var/lib/claw-lab`, bind `127.0.0.1:4097`, permission mode `read-only`) is defaulted and overridable via flags.
 
 The wizard asks for:
 
@@ -225,17 +233,25 @@ The wizard asks for:
 | **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `clab-agent`). |
 | **Permission mode** (`--permission-mode`) | What the agent may do: `read-only` (default) — read only; `workspace-write` — edit/run inside the work dir; `danger-full-access` — full filesystem access (risky for a chat-exposed service). |
 
-**Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/clab/openai.env`) followed by a service restart.
+**Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) followed by a service restart.
 
 When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
 
 ```bash
 cd rust
 scripts/deploy-openai-server.sh \
-  --runtime-bin /path/to/clab \
-  --service clab-openai.service \
+  --runtime-bin /opt/claw-lab/bin/clab \
+  --service claw-lab-openai.service \
   --health-url http://127.0.0.1:4097/health
 ```
+
+To remove the service, use the counterpart command `uninstall.sh` (removes the unit, wrapper, env, binary, plus the work/sandbox dirs and backups; `--keep-data` keeps the data, `--dry-run` shows the plan, `--yes` skips prompts):
+
+```bash
+./uninstall.sh
+```
+
+**Which script when:** `install.sh` — entry point (build the binary + optionally set up the service); `rust/scripts/install-openai-service.sh` — the service install engine (interactive with no flags, non-interactive with flags); `rust/scripts/deploy-openai-server.sh` — rebuild and swap the binary on an already-running service; `uninstall.sh` — remove everything.
 
 ### Repository layout
 
