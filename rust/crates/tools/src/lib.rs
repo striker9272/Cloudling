@@ -2093,7 +2093,7 @@ fn classify_bash_permission(command: &str) -> PermissionMode {
 fn has_dangerous_paths(command: &str) -> bool {
     // Look for absolute paths
     let tokens: Vec<&str> = command.split_whitespace().collect();
-    let cwd = std::env::current_dir()
+    let cwd = runtime::current_workspace_root()
         .ok()
         .map(|cwd| cwd.canonicalize().unwrap_or(cwd));
 
@@ -2318,7 +2318,7 @@ fn branch_divergence_output(
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_read_file(input: ReadFileInput) -> Result<String, String> {
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     to_pretty_json(
         read_file_in_workspace(&input.path, input.offset, input.limit, &workspace)
             .map_err(io_to_string)?,
@@ -2327,7 +2327,7 @@ fn run_read_file(input: ReadFileInput) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_write_file(input: WriteFileInput) -> Result<String, String> {
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     to_pretty_json(
         write_file_in_workspace(&input.path, &input.content, &workspace).map_err(io_to_string)?,
     )
@@ -2335,7 +2335,7 @@ fn run_write_file(input: WriteFileInput) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_edit_file(input: EditFileInput) -> Result<String, String> {
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     to_pretty_json(
         edit_file_in_workspace(
             &input.path,
@@ -2350,7 +2350,7 @@ fn run_edit_file(input: EditFileInput) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_glob_search(input: GlobSearchInputValue) -> Result<String, String> {
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     to_pretty_json(
         glob_search_in_workspace(&input.pattern, input.path.as_deref(), &workspace)
             .map_err(io_to_string)?,
@@ -2359,7 +2359,7 @@ fn run_glob_search(input: GlobSearchInputValue) -> Result<String, String> {
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_grep_search(input: GrepSearchInput) -> Result<String, String> {
-    let workspace = std::env::current_dir().map_err(|error| error.to_string())?;
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     to_pretty_json(grep_search_in_workspace(&input, &workspace).map_err(io_to_string)?)
 }
 
@@ -2473,7 +2473,7 @@ fn path_within_current_workspace(path: &str, allow_missing: bool) -> bool {
         return false;
     }
 
-    let Ok(cwd) = std::env::current_dir() else {
+    let Ok(cwd) = runtime::current_workspace_root() else {
         return false;
     };
     let cwd = cwd.canonicalize().unwrap_or(cwd);
@@ -2573,7 +2573,7 @@ fn is_within_workspace(path: &str) -> bool {
 
     // If path is absolute, check if it starts with CWD
     if path.is_absolute() {
-        if let Ok(cwd) = std::env::current_dir() {
+        if let Ok(cwd) = runtime::current_workspace_root() {
             let cwd = cwd.canonicalize().unwrap_or(cwd);
             let resolved = path.canonicalize().unwrap_or(path);
             return resolved.starts_with(&cwd);
@@ -3712,12 +3712,12 @@ fn todo_store_path() -> Result<std::path::PathBuf, String> {
     if let Ok(path) = std::env::var("CLAWD_TODO_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     Ok(cwd.join(".clawd-todos.json"))
 }
 
 fn resolve_skill_path(skill: &str) -> Result<std::path::PathBuf, String> {
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     match commands::resolve_skill_path(&cwd, skill) {
         Ok(path) => Ok(path),
         Err(_) => resolve_skill_path_from_compat_roots(skill),
@@ -3754,7 +3754,7 @@ struct SkillLookupRoot {
 fn skill_lookup_roots() -> Vec<SkillLookupRoot> {
     let mut roots = Vec::new();
 
-    if let Ok(cwd) = std::env::current_dir() {
+    if let Ok(cwd) = runtime::current_workspace_root() {
         push_project_skill_lookup_roots(&mut roots, &cwd);
     }
 
@@ -4124,7 +4124,7 @@ fn build_agent_runtime(
 }
 
 fn build_agent_system_prompt(subagent_type: &str, model: &str) -> Result<Vec<String>, String> {
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     let mut prompt = load_system_prompt(
         cwd,
         DEFAULT_AGENT_SYSTEM_DATE.to_string(),
@@ -4895,7 +4895,7 @@ fn derive_agent_state(
 fn maybe_commit_provenance(result: Option<&str>) -> Option<LaneCommitProvenance> {
     let commit = extract_commit_sha(result?)?;
     let branch = current_git_branch().unwrap_or_else(|| "unknown".to_string());
-    let worktree = std::env::current_dir()
+    let worktree = runtime::current_workspace_root()
         .ok()
         .map(|path| path.display().to_string());
     Some(LaneCommitProvenance {
@@ -5064,7 +5064,7 @@ fn build_provider_entry(model: &str) -> Result<ProviderEntry, String> {
 }
 
 fn load_provider_fallback_config() -> ProviderFallbackConfig {
-    std::env::current_dir()
+    runtime::current_workspace_root()
         .ok()
         .and_then(|cwd| ConfigLoader::default_for(cwd).load().ok())
         .map_or_else(ProviderFallbackConfig::default, |config| {
@@ -5557,7 +5557,7 @@ fn agent_store_dir() -> Result<std::path::PathBuf, String> {
     if let Ok(path) = std::env::var("CLAWD_AGENT_STORE") {
         return Ok(std::path::PathBuf::from(path));
     }
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     if let Some(workspace_root) = cwd.ancestors().nth(2) {
         return Ok(workspace_root.join(".clawd-agents"));
     }
@@ -6292,7 +6292,7 @@ fn normalize_config_value(spec: ConfigSettingSpec, value: ConfigValue) -> Result
 }
 
 fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, String> {
-    let cwd = std::env::current_dir().map_err(|error| error.to_string())?;
+    let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     Ok(match scope {
         ConfigScope::Global => config_home_dir()?.join("settings.json"),
         ConfigScope::Settings => cwd.join(".claw").join("settings.local.json"),
