@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Claw Code installer
+# Claw Lab installer
 #
 # Detects the host OS, verifies the Rust toolchain (rustc + cargo),
 # builds the `clab` binary from the `rust/` workspace, and runs a
-# post-install verification step. Supports Linux, macOS, and WSL.
+# post-install verification step. Linux is the supported target;
+# macOS and WSL are best-effort.
 #
 # Usage:
 #   ./install.sh                # debug build (fast, default)
@@ -59,14 +60,14 @@ error() { printf '%s  error%s %s\n' "${COLOR_RED}" "${COLOR_RESET}" "$1" 1>&2; }
 print_banner() {
     printf '%s' "${COLOR_BOLD}"
     cat <<'EOF'
-   ____  _                   ____          _
-  / ___|| |  __ _ __      __ / ___|___   __| | ___
- | |    | | / _` |\ \ /\ / /| |   / _ \ / _` |/ _ \
- | |___ | || (_| | \ V  V / | |__| (_) | (_| |  __/
-  \____||_| \__,_|  \_/\_/   \____\___/ \__,_|\___|
+   ____  _                  _          _
+  / ___|| | __ ___      __ | |    __ _| |__
+ | |    | |/ _` \ \ /\ / / | |   / _` | '_ \
+ | |___ | | (_| |\ V  V /  | |__| (_| | |_) |
+  \____||_|\__,_| \_/\_/   |_____\__,_|_.__/
 EOF
     printf '%s\n' "${COLOR_RESET}"
-    printf '%sClaw Code installer%s\n' "${COLOR_DIM}" "${COLOR_RESET}"
+    printf '%sClaw Lab installer%s\n' "${COLOR_DIM}" "${COLOR_RESET}"
 }
 
 print_usage() {
@@ -700,28 +701,22 @@ fi
 step "Next steps"
 
 cat <<EOF
-${COLOR_GREEN}Claw Code is built and ready.${COLOR_RESET}
+${COLOR_GREEN}Claw Lab is built and ready.${COLOR_RESET}
 
   Binary:  ${COLOR_BOLD}${CLAW_BIN}${COLOR_RESET}
   Profile: ${BUILD_PROFILE}
 
-Try it out:
+Run it as a service (the main use case — backend, served model id, bind, permissions):
 
-  ${COLOR_DIM}# interactive REPL${COLOR_RESET}
-  ${CLAW_BIN}
+  bash ${SETUP_SCRIPT}
 
-  ${COLOR_DIM}# one-shot prompt${COLOR_RESET}
+Or try the CLI directly:
+
+  ${COLOR_DIM}# smoke test${COLOR_RESET}
+  ${CLAW_BIN} --help
+
+  ${COLOR_DIM}# one-shot prompt against your configured backend${COLOR_RESET}
   ${CLAW_BIN} prompt "summarize this repository"
-
-  ${COLOR_DIM}# health check (run /doctor inside the REPL)${COLOR_RESET}
-  ${CLAW_BIN}
-  /doctor
-
-Authentication:
-
-  export ANTHROPIC_API_KEY="sk-ant-..."
-  ${COLOR_DIM}# or use OAuth:${COLOR_RESET}
-  ${CLAW_BIN} login
 
 For deeper docs, see USAGE.md and rust/README.md.
 EOF

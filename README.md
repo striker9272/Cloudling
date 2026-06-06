@@ -49,7 +49,7 @@
 - **Инструменты и агентный цикл** — модель не просто отвечает, а выполняет многошаговые задачи через встроенные инструменты.
 - **Встроенный веб-поиск** — разбирает JSON-результаты со сниппетами, с откатом на DuckDuckGo/HTML.
 - **Аккуратные tool-call'ы в Open WebUI** — вызовы инструментов показываются как сворачиваемые детали, а не как сырой текст в ответе.
-- **Сессии под чат** — по умолчанию эфемерные (историю держит фронт через `messages[]`); персистентность включается заголовком `X-Claw-Session-Key`.
+- **Сессии под чат** — эфемерные: историю держит фронт и присылает её целиком в каждом запросе (`messages[]`), а clab пересобирает сессию на каждый запрос. Истории не утекают между чатами.
 - **Стабильное имя модели** — фронт видит постоянный id (например `clab-agent`), а реальная модель провайдера остаётся внутренней и заменяемой.
 - **Изоляция** — живой сервис работает в нейтральной директории и не тянет в обычные чаты `CLAUDE.md`, git-статус и настройки проекта.
 
@@ -166,7 +166,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 - **Tools and an agent loop** — the model runs multi-step tasks via built-in tools instead of only replying.
 - **Built-in web search** — parses JSON results with snippets, with a DuckDuckGo/HTML fallback.
 - **Clean tool calls in Open WebUI** — tool calls render as collapsible details, not raw text.
-- **Chat-friendly sessions** — ephemeral by default (the frontend owns history via `messages[]`); enable persistence with `X-Claw-Session-Key`.
+- **Chat-friendly sessions** — ephemeral: the frontend owns history and resends it in full on every request (`messages[]`), and clab rebuilds the session per request. No history leaks between chats.
 - **Stable model name** — the frontend sees a constant id (e.g. `clab-agent`) while the real provider model stays internal and swappable.
 - **Isolation** — the live service runs in a neutral workdir and won't pull `CLAUDE.md`, git status, or project settings into ordinary chats.
 
