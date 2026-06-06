@@ -54,7 +54,9 @@ def github_anchor(heading: str) -> str:
     anchor = heading.strip().lower()
     anchor = re.sub(r"<[^>]+>", "", anchor)
     anchor = re.sub(r"`([^`]*)`", r"\1", anchor)
-    anchor = re.sub(r"[^a-z0-9 _-]", "", anchor)
+    # Keep Unicode word characters (e.g. Cyrillic headings in the bilingual
+    # README) instead of stripping them; GitHub anchors preserve them lowercased.
+    anchor = re.sub(r"[^\w \-]", "", anchor, flags=re.UNICODE)
     anchor = anchor.replace(" ", "-")
     anchor = re.sub(r"-+", "-", anchor)
     return anchor.strip("-")
