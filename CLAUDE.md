@@ -45,11 +45,17 @@ offering to install missing ones via the host package manager (`y/n`, or `--inst
 building — needs `gh` or `curl`, `--prebuilt-tag vX.Y.Z` to pin); `--setup-service` (after the
 binary is ready, place it and run the service wizard end-to-end; Linux only).
 
-The OpenAI service is set up by `rust/scripts/clab-setup.sh` (interactive wizard), which delegates
-to `rust/scripts/install-openai-service.sh` — the latter writes the env file (single source of
-truth), wrapper, and systemd unit, and can place a freshly built binary at the runtime path via
-`--runtime-bin-src`. For rebuild-and-swap of an existing service, use
-`rust/scripts/deploy-openai-server.sh`.
+The OpenAI service is set up by `rust/scripts/install-openai-service.sh` — run with no flags on a
+terminal it drops into an interactive wizard; with flags it runs non-interactively (CI). It writes
+the env file (single source of truth), wrapper, and systemd unit, and can place a freshly built
+binary at the runtime path via `--runtime-bin-src` (or the `CLAB_RUNTIME_BIN_SRC` env, which
+`install.sh --setup-service` sets). Defaults follow the `claw-lab-*` naming
+(`claw-lab-openai.service`, `/opt/claw-lab/bin/clab`, `/etc/claw-lab/openai.env`,
+`/var/lib/claw-lab/{work,sandbox}`) and are all overridable via flags. For rebuild-and-swap of an
+existing service, use `rust/scripts/deploy-openai-server.sh`. To remove the service, use
+`uninstall.sh` (repo root) — a thin counterpart to `install.sh` that delegates to
+`install-openai-service.sh --uninstall` (also removes work/sandbox dirs and backups unless
+`--keep-data`).
 
 Releases: pushing a tag `v*` triggers `.github/workflows/release.yml`, which builds and publishes
 assets named `claw-<os>-<arch>` (+ `.sha256`) — asset names keep the `claw-` prefix though the

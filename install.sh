@@ -660,12 +660,12 @@ fi
 step "Setting up the OpenAI service (optional)"
 
 DO_SETUP=0
-SETUP_SCRIPT="${RUST_DIR}/scripts/clab-setup.sh"
+SETUP_SCRIPT="${RUST_DIR}/scripts/install-openai-service.sh"
 
 if [ "${OS_FAMILY}" != "linux" ]; then
     info "service setup is Linux/systemd only — skipping on ${OS_FAMILY}"
 elif [ ! -f "${SETUP_SCRIPT}" ]; then
-    warn "service wizard not found at ${SETUP_SCRIPT} — skipping"
+    warn "service installer not found at ${SETUP_SCRIPT} — skipping"
 else
     case "${SETUP_SERVICE}" in
         yes) DO_SETUP=1 ;;
@@ -685,9 +685,10 @@ else
 fi
 
 if [ "${DO_SETUP}" = "1" ]; then
-    info "launching service wizard: scripts/clab-setup.sh"
-    # Hand the freshly built binary to the wizard so it gets installed at the
-    # runtime path without a manual copy step.
+    info "launching service setup: scripts/install-openai-service.sh"
+    # Hand the freshly built binary to the installer so it gets placed at the
+    # runtime path without a manual copy step. Run with no flags, the installer
+    # drops into its interactive wizard.
     CLAB_RUNTIME_BIN_SRC="${CLAW_BIN}" bash "${SETUP_SCRIPT}"
     ok "service setup finished"
 else
