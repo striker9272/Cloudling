@@ -75,4 +75,3 @@ cargo run -p clab-analog -- ...   # при RAG_BASE_URL или rag_base_url в T
 ## Связанные документы
 
 - Локальный запуск контейнеров (если поднимете векторку): [`container.md`](container.md).
-- Обзор `clab-analog`: [`how_to_run.md`](../how_to_run.md).
