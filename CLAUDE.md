@@ -64,21 +64,29 @@ version in `rust/Cargo.toml`.
 
 ## Deploy (combsrv)
 
-The live service is `claw-lab-openai.service`, started via the wrapper
-`/usr/local/bin/claw-lab-openai-serve`, which runs the `clab` binary in a neutral
-workdir. Rebuild + install + restart with:
+The repo is checked out under the deploying user's home (`~/claw-lab`); the install
+defaults place the runtime binary at `/opt/claw-lab/bin/clab`, the env file at
+`/etc/claw-lab/openai.env`, and the work/sandbox dirs under `/var/lib/claw-lab`. The
+live service is `claw-lab-openai.service`, started via the wrapper
+`/usr/local/bin/claw-lab-openai-serve`, which runs the `clab` binary from the neutral
+workdir. First-time setup is `install.sh` (builds + runs the service wizard); removal
+is `uninstall.sh`.
+
+For rebuild + install + restart of an existing service, use the deploy helper:
 
 ```bash
-claw-lab-deploy-openai     # run as combiner, NOT with outer sudo
+cd ~/claw-lab/rust
+scripts/deploy-openai-server.sh \
+  --runtime-bin /opt/claw-lab/bin/clab \
+  --service claw-lab-openai.service \
+  --health-url http://127.0.0.1:4097/health
 ```
 
-Run it **without** an outer `sudo`: the script builds/tests as the current user (cargo
-lives in combiner's `~/.cargo/bin`, not on root's PATH) and self-escalates with `sudo`
+Run it as the current user, **NOT** with an outer `sudo`: the script builds/tests as the
+user (cargo lives in `~/.cargo/bin`, not on root's PATH) and self-escalates with `sudo`
 only for the install/backup/restart steps, prompting for the password once at the
-"sudo preflight" step. Running it as `sudo claw-lab-deploy-openai` fails with
-`cargo: command not found`. combsrv has no passwordless sudo, so Alexander runs the
-deploy interactively. The runtime binary path keeps the filename `claw` for now
-(internal plumbing); the source/build product is `clab`.
+"sudo preflight" step. combsrv has no passwordless sudo, so Alexander runs the deploy
+interactively.
 
 ## Conventions
 
