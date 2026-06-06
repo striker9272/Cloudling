@@ -1,5 +1,7 @@
 # Windows install and release quickstart
 
+> **Status: experimental / unvalidated.** Linux is the supported platform for Claw Lab. The Windows and macOS release binaries are produced by CI but are not tested regularly, and `install.sh --prebuilt` currently downloads Linux/macOS artifacts only. Treat this guide as best-effort. For the primary path, see the root [`README.md`](../README.md) and [`USAGE.md`](../USAGE.md).
+
 This page is the PowerShell-first path for installing, verifying, and safely switching providers on Windows. It is intentionally copyable without embedding live secrets.
 
 ## Choose an install path
