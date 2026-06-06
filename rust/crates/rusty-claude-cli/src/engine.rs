@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use runtime::{
-    AssistantEvent, ContentBlock, ConversationMessage, PermissionMode, Session, TurnSummary,
+    AssistantEvent, ContentBlock, ConversationMessage, PermissionMode, TurnSummary,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -231,58 +231,6 @@ pub(crate) struct ClawEngineSession {
 }
 
 impl ClawEngineSession {
-    pub(crate) fn new(
-        model: String,
-        enable_tools: bool,
-        allowed_tools: Option<crate::AllowedToolSet>,
-        permission_mode: PermissionMode,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let system_prompt = crate::build_system_prompt(&model)?;
-        let session_state = crate::new_cli_session()?;
-        let session = crate::create_managed_session_handle(&session_state.session_id)?;
-        let runtime = crate::build_runtime(
-            session_state.with_persistence_path(session.path.clone()),
-            &session.id,
-            model.clone(),
-            system_prompt.clone(),
-            enable_tools,
-            false,
-            allowed_tools.clone(),
-            permission_mode,
-            None,
-        )?;
-
-        let host = Self {
-            model,
-            allowed_tools,
-            permission_mode,
-            system_prompt,
-            runtime,
-            session,
-            persist_session: true,
-            working_dir: std::env::current_dir()?,
-            workspace_tempdir: None,
-        };
-        host.persist_engine_session()?;
-        Ok(host)
-    }
-
-    pub(crate) fn new_ephemeral(
-        model: String,
-        enable_tools: bool,
-        allowed_tools: Option<crate::AllowedToolSet>,
-        permission_mode: PermissionMode,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::new_ephemeral_with_context(
-            model,
-            enable_tools,
-            allowed_tools,
-            permission_mode,
-            Vec::new(),
-            Vec::new(),
-        )
-    }
-
     /// Ephemeral (non-persistent) session seeded with prior conversation history
     /// and optional extra system-prompt sections.
     ///
@@ -333,68 +281,6 @@ impl ClawEngineSession {
         })
     }
 
-    pub(crate) fn resume_or_create_for_key(
-        session_key: &str,
-        model: String,
-        enable_tools: bool,
-        allowed_tools: Option<crate::AllowedToolSet>,
-        permission_mode: PermissionMode,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let system_prompt = crate::build_system_prompt(&model)?;
-        let session_id = openai_session_id_for_key(session_key)?;
-        let session = crate::create_managed_session_handle(&session_id)?;
-
-        let working_dir = std::env::current_dir()?
-            .join(".clab-workspaces")
-            .join(&session_id);
-        std::fs::create_dir_all(&working_dir)?;
-
-        let session_state = if session.path.exists() {
-            let loaded = Session::load_from_path(&session.path)?;
-            if loaded.session_id != session_id {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "persistent session id mismatch: expected {session_id}, found {}",
-                        loaded.session_id
-                    ),
-                )
-                .into());
-            }
-            loaded
-        } else {
-            let mut created = crate::new_cli_session()?;
-            created.session_id = session_id;
-            created.with_persistence_path(session.path.clone())
-        };
-
-        let runtime = crate::build_runtime(
-            session_state.with_persistence_path(session.path.clone()),
-            &session.id,
-            model.clone(),
-            system_prompt.clone(),
-            enable_tools,
-            false,
-            allowed_tools.clone(),
-            permission_mode,
-            None,
-        )?;
-
-        let host = Self {
-            model,
-            allowed_tools,
-            permission_mode,
-            system_prompt,
-            runtime,
-            session,
-            persist_session: true,
-            working_dir,
-            workspace_tempdir: None,
-        };
-        host.persist_engine_session()?;
-        Ok(host)
-    }
-
     pub(crate) fn run_prompt_json(
         &mut self,
         input: &str,
@@ -409,27 +295,6 @@ impl ClawEngineSession {
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
         run_prompt_with_host_and_event_sink(self, input, Some(event_sink))
     }
-}
-
-fn openai_session_id_for_key(session_key: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let normalized = session_key.trim();
-    if normalized.is_empty() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "persistent session key must not be empty",
-        )
-        .into());
-    }
-    Ok(format!("session-openai-{}", stable_fnv1a_hex(normalized)))
-}
-
-fn stable_fnv1a_hex(value: &str) -> String {
-    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in value.as_bytes() {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    format!("{hash:016x}")
 }
 
 impl EngineHost for ClawEngineSession {
@@ -628,17 +493,6 @@ mod tests {
         assert_eq!(response.tool_results.len(), 1);
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 5);
-    }
-
-    #[test]
-    fn openai_session_id_for_key_is_stable_and_does_not_leak_raw_key() {
-        let first = openai_session_id_for_key(" chat-123 ").expect("session id");
-        let second = openai_session_id_for_key("chat-123").expect("session id");
-
-        assert_eq!(first, second);
-        assert!(first.starts_with("session-openai-"));
-        assert!(!first.contains("chat-123"));
-        assert_eq!(first.len(), "session-openai-".len() + 16);
     }
 
     #[test]

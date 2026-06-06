@@ -1,6 +1,6 @@
 use axum::{
     extract::State,
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -198,40 +198,33 @@ fn served_model_id_from_value(value: Option<String>, backend_model: &str) -> Str
 
 async fn chat_completions(
     State(state): State<Arc<OpenAiServerState>>,
-    headers: HeaderMap,
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
-    let session_key = claw_session_key(&headers);
     if request.stream {
-        return stream_chat_completions(state, request, session_key);
+        return stream_chat_completions(state, request);
     }
 
-    let plan = match plan_turn(&request.messages, session_key.is_some()) {
-        Ok(plan) => plan,
+    let conversation = match stateless_conversation_from_messages(&request.messages) {
+        Ok(conversation) => conversation,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
         }
     };
 
     let state_for_task = state.clone();
-    let session_key_for_task = session_key.clone();
     let result = tokio::task::spawn_blocking(
         move || -> Result<crate::engine::ClawEngineResponse, String> {
-            let (input, stateless_seed) = match plan {
-                TurnPlan::Persistent { input } => (input, None),
-                TurnPlan::Stateless {
-                    input,
-                    history,
-                    system_additions,
-                } => (input, Some((history, system_additions))),
-            };
+            let StatelessConversation {
+                input,
+                history,
+                system_additions,
+            } = conversation;
             let mut session = create_engine_session(
                 state_for_task.backend_model.clone(),
                 true,
                 state_for_task.allowed_tools.clone(),
                 state_for_task.permission_mode,
-                session_key_for_task.as_deref(),
-                stateless_seed,
+                (history, system_additions),
             )
             .map_err(|error| error.to_string())?;
             session
@@ -285,10 +278,9 @@ async fn chat_completions(
 fn stream_chat_completions(
     state: Arc<OpenAiServerState>,
     request: ChatCompletionRequest,
-    session_key: Option<String>,
 ) -> Response {
-    let plan = match plan_turn(&request.messages, session_key.is_some()) {
-        Ok(plan) => plan,
+    let conversation = match stateless_conversation_from_messages(&request.messages) {
+        Ok(conversation) => conversation,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
         }
@@ -310,21 +302,17 @@ fn stream_chat_completions(
         let _ = sender.send(openai_sse_role_chunk(&id, created, &response_model));
 
         let result = {
-            let (input, stateless_seed) = match plan {
-                TurnPlan::Persistent { input } => (input, None),
-                TurnPlan::Stateless {
-                    input,
-                    history,
-                    system_additions,
-                } => (input, Some((history, system_additions))),
-            };
+            let StatelessConversation {
+                input,
+                history,
+                system_additions,
+            } = conversation;
             let mut session = match create_engine_session(
                 backend_model,
                 true,
                 allowed_tools,
                 permission_mode,
-                session_key.as_deref(),
-                stateless_seed,
+                (history, system_additions),
             ) {
                 Ok(session) => session,
                 Err(error) => {
@@ -373,52 +361,22 @@ fn stream_chat_completions(
         .into_response()
 }
 
-fn claw_session_key(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("x-claw-session-key")
-        .and_then(|value| value.to_str().ok())
-        .and_then(normalize_session_key)
-}
-
-fn normalize_session_key(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.contains("{{") || trimmed.contains("}}") {
-        return None;
-    }
-    Some(trimmed.chars().take(256).collect())
-}
-
 fn create_engine_session(
     model: String,
     enable_tools: bool,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
-    session_key: Option<&str>,
-    stateless_seed: Option<(Vec<ConversationMessage>, Vec<String>)>,
+    seed: (Vec<ConversationMessage>, Vec<String>),
 ) -> Result<crate::engine::ClawEngineSession, Box<dyn std::error::Error>> {
-    match session_key {
-        Some(key) => crate::engine::ClawEngineSession::resume_or_create_for_key(
-            key,
-            model,
-            enable_tools,
-            allowed_tools,
-            permission_mode,
-        ),
-        None => {
-            let (history, system_additions) = stateless_seed.unwrap_or_default();
-            crate::engine::ClawEngineSession::new_ephemeral_with_context(
-                model,
-                enable_tools,
-                allowed_tools,
-                permission_mode,
-                history,
-                system_additions,
-            )
-        }
-    }
+    let (history, system_additions) = seed;
+    crate::engine::ClawEngineSession::new_ephemeral_with_context(
+        model,
+        enable_tools,
+        allowed_tools,
+        permission_mode,
+        history,
+        system_additions,
+    )
 }
 
 fn assistant_event_to_openai_sse_chunk(
@@ -580,22 +538,6 @@ fn openai_sse_done() -> Result<Event, Infallible> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn claw_session_key_reads_trimmed_header_value() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-claw-session-key", "  chat-abc  ".parse().unwrap());
-
-        assert_eq!(claw_session_key(&headers).as_deref(), Some("chat-abc"));
-    }
-
-    #[test]
-    fn claw_session_key_ignores_unresolved_template_value() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-claw-session-key", "{{CHAT_ID}}".parse().unwrap());
-
-        assert_eq!(claw_session_key(&headers), None);
-    }
-
     fn sample_messages() -> Vec<ChatMessage> {
         vec![
             ChatMessage {
@@ -618,43 +560,31 @@ mod tests {
     }
 
     #[test]
-    fn persistent_plan_uses_only_latest_user_message() {
-        match plan_turn(&sample_messages(), true).expect("persistent plan") {
-            TurnPlan::Persistent { input } => assert_eq!(input, "second"),
-            TurnPlan::Stateless { .. } => panic!("expected persistent plan"),
-        }
+    fn stateless_conversation_seeds_history_hoists_system_and_takes_last_user() {
+        let conv =
+            stateless_conversation_from_messages(&sample_messages()).expect("stateless conversation");
+        assert_eq!(conv.input, "second");
+        // Client system message is hoisted out of the compactable history.
+        assert_eq!(
+            conv.system_additions,
+            vec!["client system prompt".to_string()]
+        );
+        // Prior user + assistant turns become seed history (last user excluded).
+        assert_eq!(conv.history.len(), 2);
     }
 
     #[test]
-    fn stateless_plan_seeds_history_hoists_system_and_takes_last_user() {
-        match plan_turn(&sample_messages(), false).expect("stateless plan") {
-            TurnPlan::Stateless {
-                input,
-                history,
-                system_additions,
-            } => {
-                assert_eq!(input, "second");
-                // Client system message is hoisted out of the compactable history.
-                assert_eq!(system_additions, vec!["client system prompt".to_string()]);
-                // Prior user + assistant turns become seed history (last user excluded).
-                assert_eq!(history.len(), 2);
-            }
-            TurnPlan::Persistent { .. } => panic!("expected stateless plan"),
-        }
-    }
-
-    #[test]
-    fn stateless_plan_errors_without_user_message() {
+    fn stateless_conversation_errors_without_user_message() {
         let messages = vec![ChatMessage {
             role: "system".to_string(),
             content: Value::String("only system".to_string()),
         }];
 
-        assert!(plan_turn(&messages, false).is_err());
+        assert!(stateless_conversation_from_messages(&messages).is_err());
     }
 
     #[test]
-    fn stateless_plan_tolerates_null_assistant_content() {
+    fn stateless_conversation_tolerates_null_assistant_content() {
         // Assistant tool-call envelopes can carry a null content field; the
         // mapper must not error and should simply drop the empty entry.
         let messages = vec![
@@ -668,15 +598,10 @@ mod tests {
             },
         ];
 
-        match plan_turn(&messages, false).expect("stateless plan") {
-            TurnPlan::Stateless {
-                input, history, ..
-            } => {
-                assert_eq!(input, "hello");
-                assert!(history.is_empty());
-            }
-            TurnPlan::Persistent { .. } => panic!("expected stateless plan"),
-        }
+        let conv =
+            stateless_conversation_from_messages(&messages).expect("stateless conversation");
+        assert_eq!(conv.input, "hello");
+        assert!(conv.history.is_empty());
     }
 
     #[test]
@@ -706,49 +631,6 @@ fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
         )
     });
     Ok(Event::default().data(data))
-}
-
-/// How a single chat-completions request maps onto a runtime turn.
-enum TurnPlan {
-    /// Persistent mode (a session key was supplied): clab owns the transcript,
-    /// so only the latest user message drives the turn.
-    Persistent { input: String },
-    /// Stateless mode (no session key): the client re-sends the whole transcript.
-    /// `history` seeds the runtime session (subject to auto-compaction), client
-    /// `system` messages are hoisted to `system_additions` (never compacted), and
-    /// `input` is the latest user message.
-    Stateless {
-        input: String,
-        history: Vec<ConversationMessage>,
-        system_additions: Vec<String>,
-    },
-}
-
-fn plan_turn(messages: &[ChatMessage], persistent_session: bool) -> Result<TurnPlan, String> {
-    if persistent_session {
-        Ok(TurnPlan::Persistent {
-            input: latest_user_message_to_prompt(messages)?,
-        })
-    } else {
-        let conversation = stateless_conversation_from_messages(messages)?;
-        Ok(TurnPlan::Stateless {
-            input: conversation.input,
-            history: conversation.history,
-            system_additions: conversation.system_additions,
-        })
-    }
-}
-
-fn latest_user_message_to_prompt(messages: &[ChatMessage]) -> Result<String, String> {
-    let Some(message) = messages
-        .iter()
-        .rev()
-        .find(|message| message.role.trim().eq_ignore_ascii_case("user"))
-    else {
-        return Err("persistent sessions require at least one user message".to_string());
-    };
-
-    content_to_text(&message.content)
 }
 
 struct StatelessConversation {
