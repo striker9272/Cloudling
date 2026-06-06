@@ -47,7 +47,7 @@
 ### Что внутри
 
 - **Инструменты и агентный цикл** — модель не просто отвечает, а выполняет многошаговые задачи через встроенные инструменты.
-- **Встроенный веб-поиск** — разбирает JSON-результаты со сниппетами, с откатом на DuckDuckGo/HTML.
+- **Встроенный веб-поиск** — ходит в настраиваемый JSON-бэкенд (например, self-hosted SearXNG) через `CLAWD_WEB_SEARCH_BASE_URL`; если он не задан — откат на скрейп DuckDuckGo/HTML (менее надёжный).
 - **Аккуратные tool-call'ы в Open WebUI** — вызовы инструментов показываются как сворачиваемые детали, а не как сырой текст в ответе.
 - **Сессии под чат** — эфемерные: историю держит фронт и присылает её целиком в каждом запросе (`messages[]`), а clab пересобирает сессию на каждый запрос. Истории не утекают между чатами.
 - **Стабильное имя модели** — фронт видит постоянный id (например `clab-agent`), а реальная модель провайдера остаётся внутренней и заменяемой.
@@ -107,6 +107,9 @@ scripts/install-openai-service.sh \
 | **API key** (`--api-key`) | Ключ доступа к бэкенду. Локальным (Ollama/llama.cpp) обычно не нужен — оставь пустым; облаку/удалённому — ключ провайдера. |
 | **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `clab-agent`). |
 | **Permission mode** (`--permission-mode`) | Что агенту можно: `read-only` (по умолч.) — только чтение; `workspace-write` — правка/запуск в рабочей папке; `danger-full-access` — полный доступ ко всей ФС (опасно для сервиса, открытого в чат). |
+| **Web search URL** (`--websearch-url`) | Необязательно. Адрес JSON-бэкенда поиска (SearXNG): `http://<host>:8888/search?format=json`. Если пусто — `clab` использует встроенный фолбэк на DuckDuckGo (менее надёжный). |
+
+**Веб-поиск (необязательно, но рекомендуется).** Без `CLAWD_WEB_SEARCH_BASE_URL` поиск идёт через скрейп DuckDuckGo — работает, но ненадёжно. Для нормального поиска подними self-hosted [SearXNG](https://github.com/searxng/searxng), включи у него JSON-формат (`search.formats: [html, json]` в `settings.yml`) и передай `--websearch-url http://<host>:8888/search?format=json` (или впиши `CLAWD_WEB_SEARCH_BASE_URL` в env-файл). Допишет `&q=<запрос>` `clab` сам.
 
 **Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) + рестарт сервиса.
 
@@ -172,7 +175,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 ### What's inside
 
 - **Tools and an agent loop** — the model runs multi-step tasks via built-in tools instead of only replying.
-- **Built-in web search** — parses JSON results with snippets, with a DuckDuckGo/HTML fallback.
+- **Built-in web search** — queries a configurable JSON backend (e.g. a self-hosted SearXNG) via `CLAWD_WEB_SEARCH_BASE_URL`; falls back to scraping DuckDuckGo/HTML when unset (less reliable).
 - **Clean tool calls in Open WebUI** — tool calls render as collapsible details, not raw text.
 - **Chat-friendly sessions** — ephemeral: the frontend owns history and resends it in full on every request (`messages[]`), and clab rebuilds the session per request. No history leaks between chats.
 - **Stable model name** — the frontend sees a constant id (e.g. `clab-agent`) while the real provider model stays internal and swappable.
@@ -232,6 +235,9 @@ The wizard asks for:
 | **API key** (`--api-key`) | Your backend's access key. Local backends (Ollama/llama.cpp) usually need none — leave blank; cloud/remote needs the provider's key. |
 | **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `clab-agent`). |
 | **Permission mode** (`--permission-mode`) | What the agent may do: `read-only` (default) — read only; `workspace-write` — edit/run inside the work dir; `danger-full-access` — full filesystem access (risky for a chat-exposed service). |
+| **Web search URL** (`--websearch-url`) | Optional. A JSON search backend (SearXNG) URL: `http://<host>:8888/search?format=json`. If empty, `clab` uses a built-in DuckDuckGo fallback (less reliable). |
+
+**Web search (optional but recommended).** Without `CLAWD_WEB_SEARCH_BASE_URL`, search scrapes DuckDuckGo — it works but is unreliable. For real search, run a self-hosted [SearXNG](https://github.com/searxng/searxng), enable its JSON format (`search.formats: [html, json]` in `settings.yml`), and pass `--websearch-url http://<host>:8888/search?format=json` (or set `CLAWD_WEB_SEARCH_BASE_URL` in the env file). `clab` appends `&q=<query>` itself.
 
 **Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) followed by a service restart.
 

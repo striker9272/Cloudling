@@ -3252,7 +3252,7 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
     dedupe_hits(&mut hits);
     hits.truncate(8);
 
-    let summary = if hits.is_empty() {
+    let mut summary = if hits.is_empty() {
         format!("No web search results matched the query {:?}.", input.query)
     } else {
         let rendered_hits = hits
@@ -3265,6 +3265,17 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
             input.query, rendered_hits
         )
     };
+
+    // Honest fallback notice: with no configured search backend, clab scrapes
+    // DuckDuckGo HTML, which is unreliable. Surface that instead of silently
+    // presenting the built-in default as a first-class search provider.
+    if std::env::var("CLAWD_WEB_SEARCH_BASE_URL").is_err() {
+        summary = format!(
+            "Note: no web search backend configured; using the built-in DuckDuckGo fallback \
+             (results may be unreliable). Set CLAWD_WEB_SEARCH_BASE_URL to a JSON search backend \
+             (e.g. a self-hosted SearXNG at http://HOST:PORT/search?format=json) for reliable results.\n{summary}"
+        );
+    }
 
     Ok(WebSearchOutput {
         query: input.query.clone(),
