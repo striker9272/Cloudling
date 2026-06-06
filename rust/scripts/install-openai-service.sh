@@ -284,6 +284,7 @@ run_wizard() {
   SERVED_MODEL_ID="$(ask 'Served model id (shown to Open WebUI)' "$SERVED_MODEL_ID")"
   BIND="$(ask 'Bind address' "$BIND")"
   PERMISSION_MODE="$(ask 'Permission mode (read-only | workspace-write | danger-full-access)' "$PERMISSION_MODE")"
+  WEBSEARCH_URL="$(ask 'Web search backend URL (optional; JSON/SearXNG, e.g. http://127.0.0.1:8888/search?format=json)' "$WEBSEARCH_URL")"
 
   local start_reply
   read -r -p "Start now and enable on boot? [Y/n]: " start_reply
@@ -299,6 +300,7 @@ run_wizard() {
   echo "  served model id: $SERVED_MODEL_ID"
   echo "  bind:            $BIND"
   echo "  permission mode: $PERMISSION_MODE"
+  [ -n "$WEBSEARCH_URL" ] && echo "  web search:      $WEBSEARCH_URL"
   [ -n "$RUNTIME_BIN_SRC" ] && echo "  install binary:  $RUNTIME_BIN_SRC -> $RUNTIME_BIN"
   echo "  service:         $SERVICE_NAME (user=$USER_NAME)"
   echo "  paths:           bin=$RUNTIME_BIN, env=$ENV_FILE, workdir=$WORKDIR"
