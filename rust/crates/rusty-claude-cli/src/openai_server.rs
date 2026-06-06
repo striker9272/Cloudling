@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use runtime::{AssistantEvent, PermissionMode};
+use runtime::{AssistantEvent, ContentBlock, ConversationMessage, PermissionMode};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -206,8 +206,8 @@ async fn chat_completions(
         return stream_chat_completions(state, request, session_key);
     }
 
-    let prompt = match prompt_for_request(&request.messages, session_key.is_some()) {
-        Ok(prompt) => prompt,
+    let plan = match plan_turn(&request.messages, session_key.is_some()) {
+        Ok(plan) => plan,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
         }
@@ -217,16 +217,25 @@ async fn chat_completions(
     let session_key_for_task = session_key.clone();
     let result = tokio::task::spawn_blocking(
         move || -> Result<crate::engine::ClawEngineResponse, String> {
+            let (input, stateless_seed) = match plan {
+                TurnPlan::Persistent { input } => (input, None),
+                TurnPlan::Stateless {
+                    input,
+                    history,
+                    system_additions,
+                } => (input, Some((history, system_additions))),
+            };
             let mut session = create_engine_session(
                 state_for_task.backend_model.clone(),
                 true,
                 state_for_task.allowed_tools.clone(),
                 state_for_task.permission_mode,
                 session_key_for_task.as_deref(),
+                stateless_seed,
             )
             .map_err(|error| error.to_string())?;
             session
-                .run_prompt_json(&prompt)
+                .run_prompt_json(&input)
                 .map_err(|error| error.to_string())
         },
     )
@@ -278,8 +287,8 @@ fn stream_chat_completions(
     request: ChatCompletionRequest,
     session_key: Option<String>,
 ) -> Response {
-    let prompt = match prompt_for_request(&request.messages, session_key.is_some()) {
-        Ok(prompt) => prompt,
+    let plan = match plan_turn(&request.messages, session_key.is_some()) {
+        Ok(plan) => plan,
         Err(message) => {
             return error_response(StatusCode::BAD_REQUEST, &message, "invalid_request")
         }
@@ -301,12 +310,21 @@ fn stream_chat_completions(
         let _ = sender.send(openai_sse_role_chunk(&id, created, &response_model));
 
         let result = {
+            let (input, stateless_seed) = match plan {
+                TurnPlan::Persistent { input } => (input, None),
+                TurnPlan::Stateless {
+                    input,
+                    history,
+                    system_additions,
+                } => (input, Some((history, system_additions))),
+            };
             let mut session = match create_engine_session(
                 backend_model,
                 true,
                 allowed_tools,
                 permission_mode,
                 session_key.as_deref(),
+                stateless_seed,
             ) {
                 Ok(session) => session,
                 Err(error) => {
@@ -329,7 +347,7 @@ fn stream_chat_completions(
                 }
             };
 
-            session.run_prompt_json_with_event_sink(&prompt, &mut event_sink)
+            session.run_prompt_json_with_event_sink(&input, &mut event_sink)
         };
 
         match result {
@@ -379,6 +397,7 @@ fn create_engine_session(
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
     session_key: Option<&str>,
+    stateless_seed: Option<(Vec<ConversationMessage>, Vec<String>)>,
 ) -> Result<crate::engine::ClawEngineSession, Box<dyn std::error::Error>> {
     match session_key {
         Some(key) => crate::engine::ClawEngineSession::resume_or_create_for_key(
@@ -388,12 +407,17 @@ fn create_engine_session(
             allowed_tools,
             permission_mode,
         ),
-        None => crate::engine::ClawEngineSession::new_ephemeral(
-            model,
-            enable_tools,
-            allowed_tools,
-            permission_mode,
-        ),
+        None => {
+            let (history, system_additions) = stateless_seed.unwrap_or_default();
+            crate::engine::ClawEngineSession::new_ephemeral_with_context(
+                model,
+                enable_tools,
+                allowed_tools,
+                permission_mode,
+                history,
+                system_additions,
+            )
+        }
     }
 }
 
@@ -572,12 +596,11 @@ mod tests {
         assert_eq!(claw_session_key(&headers), None);
     }
 
-    #[test]
-    fn persistent_prompt_uses_only_latest_user_message() {
-        let messages = vec![
+    fn sample_messages() -> Vec<ChatMessage> {
+        vec![
             ChatMessage {
                 role: "system".to_string(),
-                content: Value::String("system prompt".to_string()),
+                content: Value::String("client system prompt".to_string()),
             },
             ChatMessage {
                 role: "user".to_string(),
@@ -591,15 +614,69 @@ mod tests {
                 role: "user".to_string(),
                 content: Value::String("second".to_string()),
             },
+        ]
+    }
+
+    #[test]
+    fn persistent_plan_uses_only_latest_user_message() {
+        match plan_turn(&sample_messages(), true).expect("persistent plan") {
+            TurnPlan::Persistent { input } => assert_eq!(input, "second"),
+            TurnPlan::Stateless { .. } => panic!("expected persistent plan"),
+        }
+    }
+
+    #[test]
+    fn stateless_plan_seeds_history_hoists_system_and_takes_last_user() {
+        match plan_turn(&sample_messages(), false).expect("stateless plan") {
+            TurnPlan::Stateless {
+                input,
+                history,
+                system_additions,
+            } => {
+                assert_eq!(input, "second");
+                // Client system message is hoisted out of the compactable history.
+                assert_eq!(system_additions, vec!["client system prompt".to_string()]);
+                // Prior user + assistant turns become seed history (last user excluded).
+                assert_eq!(history.len(), 2);
+            }
+            TurnPlan::Persistent { .. } => panic!("expected stateless plan"),
+        }
+    }
+
+    #[test]
+    fn stateless_plan_errors_without_user_message() {
+        let messages = vec![ChatMessage {
+            role: "system".to_string(),
+            content: Value::String("only system".to_string()),
+        }];
+
+        assert!(plan_turn(&messages, false).is_err());
+    }
+
+    #[test]
+    fn stateless_plan_tolerates_null_assistant_content() {
+        // Assistant tool-call envelopes can carry a null content field; the
+        // mapper must not error and should simply drop the empty entry.
+        let messages = vec![
+            ChatMessage {
+                role: "assistant".to_string(),
+                content: Value::Null,
+            },
+            ChatMessage {
+                role: "user".to_string(),
+                content: Value::String("hello".to_string()),
+            },
         ];
 
-        assert_eq!(
-            prompt_for_request(&messages, true).expect("persistent prompt"),
-            "second"
-        );
-        assert!(prompt_for_request(&messages, false)
-            .expect("full prompt")
-            .contains("user: first"));
+        match plan_turn(&messages, false).expect("stateless plan") {
+            TurnPlan::Stateless {
+                input, history, ..
+            } => {
+                assert_eq!(input, "hello");
+                assert!(history.is_empty());
+            }
+            TurnPlan::Persistent { .. } => panic!("expected stateless plan"),
+        }
     }
 
     #[test]
@@ -631,14 +708,34 @@ fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
     Ok(Event::default().data(data))
 }
 
-fn prompt_for_request(
-    messages: &[ChatMessage],
-    persistent_session: bool,
-) -> Result<String, String> {
+/// How a single chat-completions request maps onto a runtime turn.
+enum TurnPlan {
+    /// Persistent mode (a session key was supplied): clab owns the transcript,
+    /// so only the latest user message drives the turn.
+    Persistent { input: String },
+    /// Stateless mode (no session key): the client re-sends the whole transcript.
+    /// `history` seeds the runtime session (subject to auto-compaction), client
+    /// `system` messages are hoisted to `system_additions` (never compacted), and
+    /// `input` is the latest user message.
+    Stateless {
+        input: String,
+        history: Vec<ConversationMessage>,
+        system_additions: Vec<String>,
+    },
+}
+
+fn plan_turn(messages: &[ChatMessage], persistent_session: bool) -> Result<TurnPlan, String> {
     if persistent_session {
-        latest_user_message_to_prompt(messages)
+        Ok(TurnPlan::Persistent {
+            input: latest_user_message_to_prompt(messages)?,
+        })
     } else {
-        messages_to_prompt(messages)
+        let conversation = stateless_conversation_from_messages(messages)?;
+        Ok(TurnPlan::Stateless {
+            input: conversation.input,
+            history: conversation.history,
+            system_additions: conversation.system_additions,
+        })
     }
 }
 
@@ -654,24 +751,71 @@ fn latest_user_message_to_prompt(messages: &[ChatMessage]) -> Result<String, Str
     content_to_text(&message.content)
 }
 
-fn messages_to_prompt(messages: &[ChatMessage]) -> Result<String, String> {
-    if messages.is_empty() {
-        return Err("messages must not be empty".to_string());
-    }
+struct StatelessConversation {
+    input: String,
+    history: Vec<ConversationMessage>,
+    system_additions: Vec<String>,
+}
 
-    let mut parts = Vec::new();
+/// Maps an incoming OpenAI `messages` array onto a seedable runtime conversation.
+///
+/// - `system` messages are hoisted into `system_additions` so they join the
+///   non-compacted system channel and survive auto-compaction.
+/// - `user` / `assistant` messages become seed `history` (compactable).
+/// - The latest `user` message is pulled out as the turn `input`.
+/// - Other roles (e.g. `tool`) and assistant tool-call envelopes are folded in
+///   as plain assistant text; tool-call machinery is intentionally not rebuilt.
+fn stateless_conversation_from_messages(
+    messages: &[ChatMessage],
+) -> Result<StatelessConversation, String> {
+    let last_user_index = messages
+        .iter()
+        .rposition(|message| message.role.trim().eq_ignore_ascii_case("user"))
+        .ok_or_else(|| "messages must include at least one user message".to_string())?;
 
-    for message in messages {
-        let content = content_to_text(&message.content)?;
+    let mut history = Vec::new();
+    let mut system_additions = Vec::new();
+    let mut input = String::new();
+
+    for (index, message) in messages.iter().enumerate() {
         let role = message.role.trim();
         if role.is_empty() {
             return Err("message role must not be empty".to_string());
         }
-        parts.push(format!("{role}: {content}"));
+        let text = message_text(&message.content)?;
+
+        if index == last_user_index {
+            input = text;
+            continue;
+        }
+
+        if role.eq_ignore_ascii_case("system") {
+            if !text.trim().is_empty() {
+                system_additions.push(text);
+            }
+        } else if role.eq_ignore_ascii_case("user") {
+            history.push(ConversationMessage::user_text(text));
+        } else if !text.trim().is_empty() {
+            // assistant, tool, or any other role → plain assistant context text.
+            history.push(ConversationMessage::assistant(vec![ContentBlock::Text { text }]));
+        }
     }
 
-    parts.push("assistant:".to_string());
-    Ok(parts.join("\n\n"))
+    Ok(StatelessConversation {
+        input,
+        history,
+        system_additions,
+    })
+}
+
+/// Like [`content_to_text`] but tolerates a missing/`null` content field
+/// (e.g. assistant messages that carry only `tool_calls`) by treating it as
+/// empty text instead of erroring.
+fn message_text(content: &Value) -> Result<String, String> {
+    if content.is_null() {
+        return Ok(String::new());
+    }
+    content_to_text(content)
 }
 
 fn content_to_text(content: &Value) -> Result<String, String> {
