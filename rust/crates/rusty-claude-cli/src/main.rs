@@ -9893,7 +9893,13 @@ impl runtime::PermissionPrompter for CliPermissionPrompter {
         let _ = io::stdout().flush();
 
         let mut response = String::new();
-        match io::stdin().read_line(&mut response) {
+        let read = io::stdin().read_line(&mut response);
+        // Terminate the prompt line so any subsequent stdout (e.g. the final JSON
+        // envelope in --output-format json) starts on its own line. With piped
+        // stdin the typed answer is not echoed, so without this the prompt and the
+        // following output would share a line.
+        println!();
+        match read {
             Ok(_) => {
                 let normalized = response.trim().to_ascii_lowercase();
                 if matches!(normalized.as_str(), "y" | "yes") {
