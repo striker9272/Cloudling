@@ -42,7 +42,7 @@
 
 На выходе Claw Lab поднимает `/v1/chat/completions` со стримингом, который Open WebUI (или другой клиент) видит как одну модель. Всё остальное — инструменты, поиск, сессии — уже внутри.
 
-> **Статус:** проект экспериментальный, для домашнего сервера. Сервис ставится одной командой (бэкенд + вывод) или интерактивным мастером — см. раздел «Запуск как сервиса» ниже.
+> **Статус:** проект экспериментальный, для домашнего сервера. **Проверенная платформа — Linux**; macOS и Windows/WSL — на будущее, «как есть» и без гарантий (бинарники под них собираются в CI, но регулярно не тестируются). Сервис ставится одной командой (бэкенд + вывод) или интерактивным мастером — см. раздел «Запуск как сервиса» ниже.
 
 ### Что внутри
 
@@ -159,7 +159,7 @@ By design you only need two things:
 
 Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or any client) sees as a single model. Everything else — tools, search, sessions — happens inside.
 
-> **Status:** experimental, built for a home server. The service installs with a single command (backend + output) or an interactive wizard — see "Run it as a service" below.
+> **Status:** experimental, built for a home server. **Linux is the validated platform**; macOS and Windows/WSL are best-effort, future targets with no guarantees (CI builds binaries for them but they are not tested regularly). The service installs with a single command (backend + output) or an interactive wizard — see "Run it as a service" below.
 
 ### What's inside
 
