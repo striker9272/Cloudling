@@ -1,4 +1,6 @@
-use runtime::{AssistantEvent, ContentBlock, PermissionMode, Session, TurnSummary};
+use runtime::{
+    AssistantEvent, ContentBlock, ConversationMessage, PermissionMode, Session, TurnSummary,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -257,8 +259,38 @@ impl ClawEngineSession {
         allowed_tools: Option<crate::AllowedToolSet>,
         permission_mode: PermissionMode,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let system_prompt = crate::build_system_prompt(&model)?;
-        let session_state = crate::new_cli_session()?;
+        Self::new_ephemeral_with_context(
+            model,
+            enable_tools,
+            allowed_tools,
+            permission_mode,
+            Vec::new(),
+            Vec::new(),
+        )
+    }
+
+    /// Ephemeral (non-persistent) session seeded with prior conversation history
+    /// and optional extra system-prompt sections.
+    ///
+    /// Used by the stateless OpenAI-compat path: the client re-sends the whole
+    /// transcript on every request, so we seed the runtime session with that
+    /// prior history (letting the existing auto-compaction run over it) and
+    /// append any client `system` messages to the system prompt so they live in
+    /// the non-compacted system channel. Nothing is persisted between requests.
+    pub(crate) fn new_ephemeral_with_context(
+        model: String,
+        enable_tools: bool,
+        allowed_tools: Option<crate::AllowedToolSet>,
+        permission_mode: PermissionMode,
+        seed_history: Vec<ConversationMessage>,
+        extra_system_prompt: Vec<String>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut system_prompt = crate::build_system_prompt(&model)?;
+        system_prompt.extend(extra_system_prompt);
+        let mut session_state = crate::new_cli_session()?;
+        // Seed prior turns directly on the in-memory session. The ephemeral
+        // session has no persistence path, so this never touches disk.
+        session_state.messages = seed_history;
         let session = crate::create_managed_session_handle(&session_state.session_id)?;
         let runtime = crate::build_runtime(
             session_state,
