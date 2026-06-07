@@ -3359,6 +3359,28 @@ fn summarize_web_fetch(
         format!("Prompt: {prompt}\nContent preview:\n{preview}")
     };
 
+    if content_type.contains("html") {
+        let mut highlights = Vec::new();
+        if let Some(description) = extract_meta_description(raw_body) {
+            highlights.push(format!("Description: {description}"));
+        }
+        if let Some(json_ld) = extract_json_ld(raw_body) {
+            highlights.push(format!("Structured data (JSON-LD): {json_ld}"));
+        }
+        let mut out = format!("Fetched {url}\n{detail}");
+        if highlights.is_empty() {
+            if compact.trim().is_empty() {
+                out.push_str(
+                    "\n\nNote: this page returned no static text content (likely client-rendered / JavaScript). Try the web search snippets or a data API for this URL.",
+                );
+            }
+        } else {
+            out.push_str("\n\n");
+            out.push_str(&highlights.join("\n"));
+        }
+        return out;
+    }
+
     format!("Fetched {url}\n{detail}")
 }
 
@@ -3386,7 +3408,104 @@ fn extract_title(content: &str, raw_body: &str, content_type: &str) -> Option<St
     None
 }
 
+/// Remove the *contents* of `<script>` and `<style>` elements so page text
+/// extraction does not dump JavaScript/CSS as if it were readable content. This
+/// is the single biggest quality fix for JS-heavy pages, which otherwise return
+/// a soup of inline script source instead of the visible text.
+fn strip_script_style_blocks(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    loop {
+        let next = ["<script", "<style"]
+            .iter()
+            .filter_map(|tag| find_ci(rest, tag).map(|pos| (pos, *tag)))
+            .min_by_key(|(pos, _)| *pos);
+        let Some((pos, tag)) = next else {
+            out.push_str(rest);
+            break;
+        };
+        out.push_str(&rest[..pos]);
+        let closing = if tag == "<script" { "</script" } else { "</style" };
+        let Some(close_rel) = find_ci(&rest[pos..], closing) else {
+            // Unclosed element: drop the remainder rather than leak it.
+            break;
+        };
+        let after_close = pos + close_rel;
+        rest = match rest[after_close..].find('>') {
+            Some(gt) => &rest[after_close + gt + 1..],
+            None => &rest[after_close..],
+        };
+    }
+    out
+}
+
+/// Case-insensitive (ASCII) substring search returning a byte offset.
+fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() || h.len() < n.len() {
+        return None;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
+}
+
+/// Extract an attribute value (quoted or bare) from a single HTML tag.
+fn extract_tag_attr(tag: &str, attr: &str) -> Option<String> {
+    let key = format!("{attr}=");
+    let pos = find_ci(tag, &key)? + key.len();
+    let rest = tag[pos..].trim_start();
+    let first = *rest.as_bytes().first()?;
+    let value = if first == b'"' || first == b'\'' {
+        let quote = first as char;
+        let end = rest[1..].find(quote)? + 1;
+        &rest[1..end]
+    } else {
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '>')
+            .unwrap_or(rest.len());
+        &rest[..end]
+    };
+    let value = collapse_whitespace(&decode_html_entities(value));
+    (!value.is_empty()).then_some(value)
+}
+
+/// Pull a human-readable page description from `<meta>` tags (plain description
+/// or OpenGraph). Many client-rendered pages still ship this for SEO.
+fn extract_meta_description(html: &str) -> Option<String> {
+    for needle in [
+        "name=\"description\"",
+        "property=\"og:description\"",
+        "name='description'",
+        "property='og:description'",
+    ] {
+        let Some(pos) = find_ci(html, needle) else {
+            continue;
+        };
+        let Some(tag_start) = html[..pos].rfind('<') else {
+            continue;
+        };
+        let Some(tag_end) = html[pos..].find('>').map(|end| pos + end + 1) else {
+            continue;
+        };
+        if let Some(content) = extract_tag_attr(&html[tag_start..tag_end], "content") {
+            return Some(content);
+        }
+    }
+    None
+}
+
+/// Pull the first JSON-LD structured-data block. This is where many "JS" sites
+/// (news, products, recipes) embed the real data server-side.
+fn extract_json_ld(html: &str) -> Option<String> {
+    let pos = find_ci(html, "application/ld+json")?;
+    let open_end = html[pos..].find('>').map(|end| pos + end + 1)?;
+    let close_rel = find_ci(&html[open_end..], "</script")?;
+    let json = collapse_whitespace(&html[open_end..open_end + close_rel]);
+    (!json.is_empty()).then(|| preview_text(&json, 600))
+}
+
 fn html_to_text(html: &str) -> String {
+    let html = strip_script_style_blocks(html);
     let mut text = String::with_capacity(html.len());
     let mut in_tag = false;
     let mut previous_was_space = false;
@@ -7756,6 +7875,35 @@ mod tests {
         )
         .expect_err("invalid URL should fail");
         assert!(error.contains("relative URL without a base") || error.contains("invalid"));
+    }
+
+    #[test]
+    fn web_fetch_strips_scripts_and_surfaces_metadata() {
+        let server = TestServer::spawn(Arc::new(|request_line: &str| {
+            assert!(request_line.starts_with("GET /app "));
+            HttpResponse::html(
+                200,
+                "OK",
+                "<html><head><title>App</title>\
+                 <meta name=\"description\" content=\"Real summary here\">\
+                 <script>var secret = 'do-not-leak-this-js';</script></head>\
+                 <body><p>Visible body text.</p></body></html>",
+            )
+        }));
+
+        let result = execute_tool(
+            "WebFetch",
+            &json!({
+                "url": format!("http://{}/app", server.addr()),
+                "prompt": "Summarize this page"
+            }),
+        )
+        .expect("WebFetch should succeed");
+        let output: serde_json::Value = serde_json::from_str(&result).expect("valid json");
+        let summary = output["result"].as_str().expect("result string");
+        assert!(summary.contains("Visible body text"));
+        assert!(summary.contains("Real summary here"));
+        assert!(!summary.contains("do-not-leak-this-js"));
     }
 
     #[test]
