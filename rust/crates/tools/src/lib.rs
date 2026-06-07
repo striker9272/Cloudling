@@ -3048,6 +3048,8 @@ struct AgentOutput {
     derived_state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -3993,7 +3995,37 @@ const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
 const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
 
 fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
-    execute_agent_with_spawn(input, spawn_agent_job)
+    // Run the sub-agent synchronously and reflect its outcome onto the returned
+    // manifest, so a delegating turn gets the result inline instead of a transient
+    // "running" snapshot. The fire-and-forget seam (execute_agent_with_spawn) is
+    // preserved for tests that inject a fake spawn.
+    let outcome: std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>> =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let outcome_for_spawn = std::sync::Arc::clone(&outcome);
+    let mut manifest =
+        execute_agent_with_spawn(input, move |job| run_agent_job_blocking(job, &outcome_for_spawn))?;
+    let recorded = outcome
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    match recorded {
+        Some(Ok(text)) => {
+            manifest.status = String::from("completed");
+            manifest.completed_at = Some(iso8601_now());
+            manifest.derived_state =
+                derive_agent_state("completed", Some(text.as_str()), None, None).to_string();
+            manifest.result = Some(text);
+        }
+        Some(Err(error)) => {
+            manifest.derived_state =
+                derive_agent_state("failed", None, Some(error.as_str()), None).to_string();
+            manifest.status = String::from("failed");
+            manifest.completed_at = Some(iso8601_now());
+            manifest.error = Some(error);
+        }
+        None => {}
+    }
+    Ok(manifest)
 }
 
 fn execute_agent_with_spawn<F>(input: AgentInput, spawn_fn: F) -> Result<AgentOutput, String>
@@ -4057,6 +4089,7 @@ where
         current_blocker: None,
         derived_state: String::from("working"),
         error: None,
+        result: None,
     };
     write_agent_manifest(&manifest)?;
 
@@ -4076,40 +4109,64 @@ where
     Ok(manifest)
 }
 
-fn spawn_agent_job(job: AgentJob) -> Result<(), String> {
-    let thread_name = format!("clawd-agent-{}", job.manifest.agent_id);
-    std::thread::Builder::new()
+fn run_agent_job_blocking(
+    job: AgentJob,
+    outcome: &std::sync::Arc<std::sync::Mutex<Option<Result<String, String>>>>,
+) -> Result<(), String> {
+    // Run the sub-agent on a dedicated thread (kept free of the serve request's
+    // async context so the sub-agent's own tokio runtime is valid) but JOIN it, so
+    // the delegating turn blocks until the result is ready. Carry the parent's
+    // per-conversation workspace root into the thread so the sub-agent's file tools
+    // stay isolated to this conversation (the root guard is thread-local).
+    let parent_root = runtime::current_workspace_root().ok();
+    let outcome_for_thread = std::sync::Arc::clone(outcome);
+    let thread_name = format!("clab-agent-{}", job.manifest.agent_id);
+    let handle = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
+            let _guard = runtime::scoped_workspace_root(parent_root);
             let result =
-                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_job(&job)));
-            match result {
-                Ok(Ok(())) => {}
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_turn(&job)));
+            let recorded = match result {
+                Ok(Ok(text)) => Ok(text),
                 Ok(Err(error)) => {
-                    let _ =
-                        persist_agent_terminal_state(&job.manifest, "failed", None, Some(error));
-                }
-                Err(_) => {
                     let _ = persist_agent_terminal_state(
                         &job.manifest,
                         "failed",
                         None,
-                        Some(String::from("sub-agent thread panicked")),
+                        Some(error.clone()),
                     );
+                    Err(error)
                 }
-            }
+                Err(_) => {
+                    let message = String::from("sub-agent thread panicked");
+                    let _ = persist_agent_terminal_state(
+                        &job.manifest,
+                        "failed",
+                        None,
+                        Some(message.clone()),
+                    );
+                    Err(message)
+                }
+            };
+            *outcome_for_thread
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(recorded);
         })
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    handle
+        .join()
+        .map_err(|_| String::from("sub-agent thread panicked"))
 }
 
-fn run_agent_job(job: &AgentJob) -> Result<(), String> {
+fn run_agent_turn(job: &AgentJob) -> Result<String, String> {
     let mut runtime = build_agent_runtime(job)?.with_max_iterations(DEFAULT_AGENT_MAX_ITERATIONS);
     let summary = runtime
         .run_turn(job.prompt.clone(), None)
         .map_err(|error| error.to_string())?;
     let final_text = final_assistant_text(&summary);
-    persist_agent_terminal_state(&job.manifest, "completed", Some(final_text.as_str()), None)
+    persist_agent_terminal_state(&job.manifest, "completed", Some(final_text.as_str()), None)?;
+    Ok(final_text)
 }
 
 fn build_agent_runtime(
@@ -4151,11 +4208,24 @@ fn build_agent_system_prompt(subagent_type: &str, model: &str) -> Result<Vec<Str
 }
 
 fn resolve_agent_model(model: Option<&str>) -> String {
-    model
-        .map(str::trim)
-        .filter(|model| !model.is_empty())
-        .unwrap_or(DEFAULT_AGENT_MODEL)
-        .to_string()
+    // An explicit model on the Agent call always wins.
+    if let Some(explicit) = model.map(str::trim).filter(|model| !model.is_empty()) {
+        return explicit.to_string();
+    }
+    // Otherwise inherit the active backend instead of a hardcoded provider:
+    // prefer an explicit CLAW_AGENT_MODEL override, then the openai-serve backend
+    // model (OPENAI_MODEL). Only fall back to the built-in default when neither is
+    // set (e.g. a bare CLI run), so the sub-agent stays on the same provider as the
+    // main runtime and the fork remains portable.
+    for var in ["CLAW_AGENT_MODEL", "OPENAI_MODEL"] {
+        if let Ok(value) = std::env::var(var) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return value.to_string();
+            }
+        }
+    }
+    DEFAULT_AGENT_MODEL.to_string()
 }
 
 fn allowed_tools_for_subagent(subagent_type: &str) -> BTreeSet<String> {
