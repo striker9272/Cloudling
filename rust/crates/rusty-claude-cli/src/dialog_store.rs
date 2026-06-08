@@ -20,6 +20,17 @@ CREATE TABLE IF NOT EXISTS dialogs (
     messages_json TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dialogs_updated ON dialogs(updated_ms DESC);
+CREATE TABLE IF NOT EXISTS presets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    prompt TEXT NOT NULL,
+    created_ms INTEGER NOT NULL,
+    updated_ms INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ui_kv (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 ";
 
 /// Resolve the UI data directory. `CLAW_UI_DATA_DIR` wins; otherwise a portable
@@ -59,8 +70,18 @@ pub struct Dialog {
     pub messages: serde_json::Value,
 }
 
+#[derive(Serialize)]
+pub struct Preset {
+    pub id: String,
+    pub name: String,
+    pub prompt: String,
+    pub created_ms: i64,
+    pub updated_ms: i64,
+}
+
 /// Thread-safe handle to the dialog database (single connection behind a mutex —
-/// concurrency here is low and the writes are tiny).
+/// concurrency here is low and the writes are tiny). Also holds UI presets and a
+/// small key/value table for UI preferences (e.g. the active preset).
 pub struct DialogStore {
     conn: Mutex<Connection>,
 }
@@ -171,6 +192,90 @@ impl DialogStore {
         let conn = self.conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM dialogs WHERE id = ?1", params![id])
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---- system-prompt presets ----
+
+    /// All presets, oldest first.
+    pub fn list_presets(&self) -> Result<Vec<Preset>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id, name, prompt, created_ms, updated_ms FROM presets ORDER BY created_ms ASC")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok(Preset {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    prompt: r.get(2)?,
+                    created_ms: r.get(3)?,
+                    updated_ms: r.get(4)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row.map_err(|e| e.to_string())?);
+        }
+        Ok(out)
+    }
+
+    pub fn upsert_preset(&self, id: &str, name: &str, prompt: &str) -> Result<Preset, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let now = now_ms();
+        conn.execute(
+            "INSERT INTO presets (id, name, prompt, created_ms, updated_ms)
+             VALUES (?1, ?2, ?3, ?4, ?4)
+             ON CONFLICT(id) DO UPDATE SET name = ?2, prompt = ?3, updated_ms = ?4",
+            params![id, name, prompt, now],
+        )
+        .map_err(|e| e.to_string())?;
+        let created_ms = conn
+            .query_row(
+                "SELECT created_ms FROM presets WHERE id = ?1",
+                params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .unwrap_or(now);
+        Ok(Preset {
+            id: id.to_string(),
+            name: name.to_string(),
+            prompt: prompt.to_string(),
+            created_ms,
+            updated_ms: now,
+        })
+    }
+
+    pub fn delete_preset(&self, id: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute("DELETE FROM presets WHERE id = ?1", params![id])
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    // ---- small key/value store for UI preferences ----
+
+    pub fn get_kv(&self, key: &str) -> Result<Option<String>, String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let value = conn
+            .query_row(
+                "SELECT value FROM ui_kv WHERE key = ?1",
+                params![key],
+                |r| r.get::<_, String>(0),
+            )
+            .ok();
+        Ok(value)
+    }
+
+    pub fn set_kv(&self, key: &str, value: &str) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT INTO ui_kv (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )
+        .map_err(|e| e.to_string())?;
         Ok(())
     }
 }

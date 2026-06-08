@@ -243,7 +243,7 @@
     }
     fetch('/v1/chat/completions', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ model:'claw', stream:true, messages:convo }),
+      body:JSON.stringify({ model:'claw', stream:true, messages:outgoingMessages() }),
       signal:ac.signal
     }).then(function(r){
       if(!r.ok || !r.body){ return r.text().then(function(t){ throw new Error('HTTP '+r.status+(t?': '+t:'')); }); }
@@ -309,12 +309,8 @@
     btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ stopGen(btn); return; } trySend(); });
     ta.addEventListener('input', refresh);
     ta.addEventListener('keydown', function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); trySend(); } });
-    if(clip){ var names=['заметки.md','скрин.png','config.toml','данные.csv']; clip.addEventListener('click', function(){
-      var nm=names[atts.children.length % names.length]; var chip=document.createElement('span'); chip.className='att';
-      chip.innerHTML='<span>'+nm+'</span><span class="ax">×</span>';
-      chip.querySelector('.ax').addEventListener('click', function(){ chip.remove(); refresh(); });
-      atts.appendChild(chip); refresh();
-    }); }
+    /* attachments not wired yet — keep the button visible but inactive */
+    if(clip){ clip.disabled=true; clip.setAttribute('aria-disabled','true'); clip.title='Вложения — скоро'; }
     refresh();
   }
   wireComposer(document.querySelector('#view-home .entry'));
@@ -459,40 +455,50 @@
   searchInput.addEventListener('input', updateDialogList);
   updateDialogList();
 
-  /* ---------- system-prompt presets (variant B: list here + editor in center) ---------- */
-  var presets=[
+  /* ---------- system-prompt presets (server-backed; applied as a leading system message,
+       exactly how OWUI sends its model's system prompt) ---------- */
+  var presets=[], activePresetId=null, editingId=null;
+  var presetList=document.getElementById('presetList');
+  var vPreset=document.getElementById('view-preset');
+  var DEFAULT_PRESETS=[
     {name:'Обычный', prompt:'Ты — полезный локальный ассистент. Отвечай кратко и по делу, на русском.'},
     {name:'Кодер', prompt:'Ты — старший инженер. Пиши идиоматичный код, кратко поясняй решения, предлагай тесты. Ответы — на русском, код и комментарии — на английском.'},
     {name:'Краткий', prompt:'Отвечай максимально кратко — одно-два предложения, без воды.'}
   ];
-  var activePreset=0, editingIdx=null;
-  var presetList=document.getElementById('presetList');
-  var vPreset=document.getElementById('view-preset');
+  function pFetchJSON(url){ return fetch(url).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
+  function savePreset(id,name,prompt){ return fetch('/ui/presets/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,prompt:prompt})}).catch(function(){}); }
+  function deletePresetReq(id){ return fetch('/ui/presets/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){}); }
+  function setActivePreset(id){ activePresetId=id||null; return fetch('/ui/kv/active_preset',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id||''})}).catch(function(){}); }
+  function activePresetPrompt(){ for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId) return presets[i].prompt||''; } return ''; }
+  /* what we actually send: active preset's prompt prepended as a system message (or just convo) */
+  function outgoingMessages(){ var sys=activePresetPrompt(); return sys ? [{role:'system', content:sys}].concat(convo) : convo; }
 
-  function updateChip(){ var nm=presets[activePreset]?presets[activePreset].name:'—';
+  function updateChip(){ var nm='Без пресета';
+    for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId){ nm=presets[i].name; break; } }
     document.querySelectorAll('.entry .model').forEach(function(m){ m.innerHTML='<span class="dot"></span>'+esc(nm); }); }
 
   function renderPresetList(){
     presetList.innerHTML='';
-    presets.forEach(function(p,i){
-      var row=document.createElement('div'); row.className='prow'+(i===activePreset?' active':'');
+    presets.forEach(function(p){
+      var row=document.createElement('div'); row.className='prow'+(p.id===activePresetId?' active':'');
       row.innerHTML='<span class="pdot"></span><span class="pn">'+esc(p.name)+'</span>'+
         '<button class="pm pedit" title="Изменить" aria-label="Изменить">'+IC.edit+'</button>'+
         '<button class="pm pdel" title="Удалить" aria-label="Удалить">'+IC.trash+'</button>';
       row.addEventListener('click', function(e){
-        if(e.target.closest('.pedit')){ openPresetEditor(i); return; }
-        if(e.target.closest('.pdel')){ if(presets.length>1){ presets.splice(i,1); if(activePreset>=i&&activePreset>0)activePreset--; updateChip(); renderPresetList(); } return; }
-        activePreset=i; updateChip(); renderPresetList();
+        if(e.target.closest('.pedit')){ openPresetEditor(p.id); return; }
+        if(e.target.closest('.pdel')){ deletePresetReq(p.id).then(loadPresets); return; }
+        setActivePreset(p.id).then(function(){ renderPresetList(); updateChip(); });
       });
       presetList.appendChild(row);
     });
     var add=document.createElement('div'); add.className='padd'; add.textContent='+ Новый пресет';
-    add.addEventListener('click', function(){ openPresetEditor(-1); });
+    add.addEventListener('click', function(){ openPresetEditor(null); });
     presetList.appendChild(add);
   }
 
-  function openPresetEditor(idx){ editingIdx=idx; var p=idx>=0?presets[idx]:{name:'',prompt:''};
-    document.getElementById('presetName').value=p.name; document.getElementById('presetPrompt').value=p.prompt;
+  function openPresetEditor(id){ editingId=id; var p=null;
+    if(id){ for(var i=0;i<presets.length;i++){ if(presets[i].id===id){ p=presets[i]; break; } } }
+    document.getElementById('presetName').value=p?p.name:''; document.getElementById('presetPrompt').value=p?p.prompt:'';
     closeDrawers(); viewHome.hidden=true; viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; vPreset.hidden=false;
     setTimeout(function(){ document.getElementById('presetName').focus(); }, 150);
   }
@@ -500,13 +506,25 @@
   document.getElementById('presetSave').onclick=function(){
     var name=(document.getElementById('presetName').value||'').trim()||'Без имени';
     var prompt=document.getElementById('presetPrompt').value||'';
-    if(editingIdx>=0){ presets[editingIdx]={name:name,prompt:prompt}; }
-    else { presets.push({name:name,prompt:prompt}); activePreset=presets.length-1; }
-    updateChip(); renderPresetList(); closePresetEditor();
+    var id=editingId||genId(), isNew=!editingId;
+    savePreset(id,name,prompt).then(function(){ if(isNew) return setActivePreset(id); }).then(loadPresets).then(closePresetEditor);
   };
   document.getElementById('presetCancel').onclick=closePresetEditor;
   document.getElementById('presetBack').onclick=closePresetEditor;
-  renderPresetList(); updateChip();
+
+  function loadPresets(){
+    return pFetchJSON('/ui/presets').then(function(list){
+      if(Array.isArray(list) && list.length===0){
+        return Promise.all(DEFAULT_PRESETS.map(function(p){ return savePreset(genId(), p.name, p.prompt); })).then(function(){ return pFetchJSON('/ui/presets'); });
+      }
+      return list;
+    }).then(function(list){ presets=Array.isArray(list)?list:[];
+      return pFetchJSON('/ui/kv/active_preset');
+    }).then(function(kv){ activePresetId=(kv&&kv.value)?kv.value:(presets[0]?presets[0].id:null);
+      renderPresetList(); updateChip();
+    });
+  }
+  loadPresets();
 
   /* first run → setup screen; otherwise land on home (new dialog) */
   refreshSidebar();

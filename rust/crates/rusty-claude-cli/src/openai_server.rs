@@ -5,7 +5,7 @@ use axum::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use runtime::{AssistantEvent, ContentBlock, ConversationMessage, PermissionMode};
@@ -193,7 +193,10 @@ async fn serve(
             .route(
                 "/ui/dialogs/{id}",
                 get(ui_dialog_get).put(ui_dialog_put).delete(ui_dialog_delete),
-            );
+            )
+            .route("/ui/presets", get(ui_presets_list))
+            .route("/ui/presets/{id}", put(ui_preset_put).delete(ui_preset_delete))
+            .route("/ui/kv/{key}", get(ui_kv_get).put(ui_kv_put));
     }
     let app = app.with_state(state);
 
@@ -342,6 +345,96 @@ async fn ui_dialog_delete(
         return store_unavailable();
     };
     match store.delete(&id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+// ---- system-prompt presets + UI key/value ----
+
+async fn ui_presets_list(State(state): State<Arc<OpenAiServerState>>) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.list_presets() {
+        Ok(list) => Json(list).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct PresetBody {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    prompt: String,
+}
+
+async fn ui_preset_put(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(id): Path<String>,
+    Json(body): Json<PresetBody>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    let name = if body.name.trim().is_empty() {
+        "Пресет".to_string()
+    } else {
+        body.name
+    };
+    match store.upsert_preset(&id, &name, &body.prompt) {
+        Ok(preset) => Json(preset).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn ui_preset_delete(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.delete_preset(&id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+#[derive(Serialize)]
+struct KvValue {
+    value: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct KvBody {
+    #[serde(default)]
+    value: String,
+}
+
+async fn ui_kv_get(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(key): Path<String>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.get_kv(&key) {
+        Ok(value) => Json(KvValue { value }).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn ui_kv_put(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(key): Path<String>,
+    Json(body): Json<KvBody>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.set_kv(&key, &body.value) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     }
