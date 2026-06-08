@@ -381,6 +381,13 @@ where
                 return Err(error);
             }
 
+            // Turn-level cancellation: if the streaming layer tripped the abort signal
+            // (e.g. the OpenAI-serve client disconnected), stop before issuing another
+            // model call instead of running the agent on in the background.
+            if self.hook_abort_signal.is_aborted() {
+                break;
+            }
+
             let request = ApiRequest {
                 system_prompt: self.system_prompt.clone(),
                 messages: self.session.messages.clone(),
@@ -440,6 +447,10 @@ where
             }
 
             for (tool_use_id, tool_name, input) in pending_tool_uses {
+                // Stop launching further tools once the client has disconnected.
+                if self.hook_abort_signal.is_aborted() {
+                    break;
+                }
                 let pre_hook_result = self.run_pre_tool_use_hook(&tool_name, &input);
                 let effective_input = pre_hook_result
                     .updated_input()

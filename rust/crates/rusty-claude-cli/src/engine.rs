@@ -228,6 +228,11 @@ pub(crate) struct ClawEngineSession {
     working_dir: PathBuf,
     // Kept alive so the per-request temp workspace is removed when the session drops.
     workspace_tempdir: Option<TempDir>,
+    // Turn-level cancellation. Tripped by the streaming layer when the client
+    // disconnects (OpenAI-serve path), and checked by the conversation loop between
+    // steps so a disconnected client stops the agent instead of running on in the
+    // background. Reused as the runtime's abort signal in `prepare_engine_runtime`.
+    abort_signal: runtime::HookAbortSignal,
 }
 
 impl ClawEngineSession {
@@ -278,7 +283,15 @@ impl ClawEngineSession {
             persist_session: false,
             working_dir,
             workspace_tempdir: Some(workspace_tempdir),
+            abort_signal: runtime::HookAbortSignal::new(),
         })
+    }
+
+    /// Handle to this session's turn-level cancellation signal. The streaming
+    /// (OpenAI-serve) layer keeps a clone and trips it when the client disconnects;
+    /// the conversation loop checks the same signal between steps.
+    pub(crate) fn abort_signal(&self) -> runtime::HookAbortSignal {
+        self.abort_signal.clone()
     }
 
     pub(crate) fn run_prompt_json(
@@ -310,7 +323,7 @@ impl EngineHost for ClawEngineSession {
         &self,
         emit_output: bool,
     ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>> {
-        let hook_abort_signal = runtime::HookAbortSignal::new();
+        let hook_abort_signal = self.abort_signal.clone();
         let runtime = crate::build_runtime(
             self.runtime.session().clone(),
             &self.session.id,

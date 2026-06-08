@@ -56,7 +56,24 @@
     <div class="body" id="presetList"></div>
   </details>
   <div class="acc soon"><span>Инструменты</span><span class="soon-tag">скоро</span></div>
-  <div class="acc soon"><span>Безопасность</span><span class="soon-tag">скоро</span></div>
+  <details class="acc">
+    <summary>Безопасность <span class="chev">▾</span></summary>
+    <div class="body">
+      <div class="subhead" style="margin-top:10px;">Песочница</div>
+      <div class="fld"><div class="lab">Песочница</div><select data-sb="enabled"><option value="true">включена</option><option value="false">выключена</option></select></div>
+      <div class="fld"><div class="lab">Файловая система <span class="env">filesystemMode</span></div><select data-sb="filesystemMode"><option value="off">без ограничений</option><option value="workspace-only">только рабочая папка</option><option value="allow-list">по списку доверенных</option></select></div>
+      <div class="fld"><div class="lab">Сетевая изоляция <span class="env">networkIsolation</span></div><select data-sb="networkIsolation"><option value="false">выкл</option><option value="true">вкл</option></select></div>
+      <div class="fld"><div class="lab">Ограничения namespace <span class="env">namespaceRestrictions</span></div><select data-sb="namespaceRestrictions"><option value="true">вкл</option><option value="false">выкл</option></select></div>
+      <div class="subhead">Доверенные папки <span class="env">trustedRoots</span></div>
+      <div class="fld"><textarea class="cfgta" id="cfgTrusted" placeholder="По одному пути на строку, например /home/user/projects"></textarea></div>
+      <div class="subhead">Правила доступа <span class="env">permissions</span></div>
+      <div class="fld"><div class="lab">Разрешить <span class="env">allow</span></div><textarea class="cfgta" id="cfgAllow" placeholder="По одному правилу на строку"></textarea></div>
+      <div class="fld"><div class="lab">Запретить <span class="env">deny</span></div><textarea class="cfgta" id="cfgDeny" placeholder="По одному правилу на строку"></textarea></div>
+      <div class="note">Применяется со следующего сообщения — перезапуск не нужен.</div>
+      <div class="acts"><button class="primary" id="cfgSave">Сохранить</button></div>
+      <div class="savemsg" id="cfgMsg" hidden></div>
+    </div>
+  </details>
 </aside>
 
 <div class="content">

@@ -402,7 +402,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string" },
-                    "timeout": { "type": "integer", "minimum": 1 },
+                    "timeout": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional command timeout in MILLISECONDS (not seconds). Omit to run without an explicit timeout. Typical values: 30000-120000." },
                     "description": { "type": "string" },
                     "run_in_background": { "type": "boolean" },
                     "dangerouslyDisableSandbox": { "type": "boolean" },

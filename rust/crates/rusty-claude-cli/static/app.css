@@ -126,6 +126,10 @@ body.open-right .drawer.right{transform:translateX(0);}
 .fld .env{font-size:10.5px; color:var(--faint); font-family:var(--mono); letter-spacing:.02em;}
 .fld input,.fld select{width:100%; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:10px 11px; font:inherit; font-size:13px; transition:border-color .15s;}
 .fld input:focus,.fld select:focus{outline:none; border-color:var(--line2);}
+.fld textarea.cfgta{width:100%; min-height:62px; resize:vertical; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:10px 11px; font:inherit; font-size:13px; line-height:1.5; transition:border-color .15s;}
+.fld textarea.cfgta:focus{outline:none; border-color:var(--line2);}
+.subhead{font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--faint); font-weight:600; margin:15px 0 8px;}
+.subhead .env{text-transform:none; letter-spacing:.02em; font-family:var(--mono); font-size:10px; color:var(--faint);}
 .eye{position:absolute; right:9px; top:31px; background:none; border:none; color:var(--faint); cursor:pointer; font-size:14px;}
 .note{font-size:12px; color:var(--muted); line-height:1.5; background:#101013; border:1px solid var(--line); border-radius:12px; padding:10px 12px; margin:12px 0 13px;}
 .acts{display:flex; gap:9px;}

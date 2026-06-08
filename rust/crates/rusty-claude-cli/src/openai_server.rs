@@ -198,7 +198,9 @@ async fn serve(
             .route("/ui/presets/{id}", put(ui_preset_put).delete(ui_preset_delete))
             .route("/ui/kv/{key}", get(ui_kv_get).put(ui_kv_put))
             .route("/ui/settings", get(ui_settings_get))
-            .route("/ui/settings/save-restart", post(ui_settings_save_restart));
+            .route("/ui/settings/save-restart", post(ui_settings_save_restart))
+            .route("/ui/config", get(ui_config_get))
+            .route("/ui/config/save", post(ui_config_save));
     }
     let app = app.with_state(state);
 
@@ -538,6 +540,113 @@ async fn ui_settings_save_restart(
     Json(serde_json::json!({ "ok": true, "restarting": true })).into_response()
 }
 
+/// Path to the global user `settings.json` (config home). This single file is read by
+/// every runtime config-discovery path: the bash sandbox (discovered from the ephemeral
+/// per-request workspace, where only the config home is reachable) and the runtime
+/// feature config (permission rules, trusted roots). Writing here therefore applies
+/// without a restart — sandbox is re-read on each bash call, and permission rules /
+/// trusted roots are re-read when the per-request runtime is built.
+fn config_settings_path() -> std::path::PathBuf {
+    runtime::default_config_home().join("settings.json")
+}
+
+fn read_settings_object(path: &std::path::Path) -> serde_json::Map<String, Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+/// Recursively merge `overlay` into `base`: nested objects are merged key-by-key while
+/// scalars and arrays replace. Lets the UI update a subset of keys (e.g. the sandbox
+/// toggles) without dropping sibling keys it does not manage (`allowedMounts`,
+/// `permissions.defaultMode`, or unrelated top-level config such as `mcpServers`).
+fn merge_json_value(base: &mut Value, overlay: &Value) {
+    match (base, overlay) {
+        (Value::Object(base_map), Value::Object(overlay_map)) => {
+            for (key, value) in overlay_map {
+                merge_json_value(base_map.entry(key.clone()).or_insert(Value::Null), value);
+            }
+        }
+        (base_slot, overlay_value) => {
+            *base_slot = overlay_value.clone();
+        }
+    }
+}
+
+/// Keys the security UI section owns inside `settings.json`.
+const UI_CONFIG_KEYS: &[&str] = &["sandbox", "trustedRoots", "permissions"];
+
+async fn ui_config_get() -> Response {
+    let existing = read_settings_object(&config_settings_path());
+    let mut out = serde_json::Map::new();
+    out.insert(
+        "sandbox".to_string(),
+        existing.get("sandbox").cloned().unwrap_or(Value::Null),
+    );
+    out.insert(
+        "trustedRoots".to_string(),
+        existing
+            .get("trustedRoots")
+            .cloned()
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+    );
+    out.insert(
+        "permissions".to_string(),
+        existing.get("permissions").cloned().unwrap_or(Value::Null),
+    );
+    Json(Value::Object(out)).into_response()
+}
+
+async fn ui_config_save(Json(incoming): Json<Value>) -> Response {
+    let path = config_settings_path();
+    let mut root = Value::Object(read_settings_object(&path));
+    if let Some(incoming_map) = incoming.as_object() {
+        let root_map = root.as_object_mut().expect("root constructed as object");
+        for key in UI_CONFIG_KEYS {
+            if let Some(value) = incoming_map.get(*key) {
+                merge_json_value(root_map.entry((*key).to_string()).or_insert(Value::Null), value);
+            }
+        }
+    }
+    let serialized = match serde_json::to_string_pretty(&root) {
+        Ok(text) => text,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("serialize config: {error}"),
+            )
+                .into_response()
+        }
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp = path.with_extension("json.tmp");
+    if let Err(error) = std::fs::write(&tmp, serialized.as_bytes()) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write config: {error}"),
+        )
+            .into_response();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // settings.json may hold secrets (e.g. oauth tokens); keep it owner-only.
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    if let Err(error) = std::fs::rename(&tmp, &path) {
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("install config: {error}"),
+        )
+            .into_response();
+    }
+    Json(serde_json::json!({ "ok": true })).into_response()
+}
+
 async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoResponse {
     Json(HealthResponse {
         ok: true,
@@ -690,6 +799,7 @@ fn stream_chat_completions(
                 }
             };
 
+            let abort_signal = session.abort_signal();
             let mut tool_inputs = HashMap::<String, String>::new();
             let mut event_sink = |event: &AssistantEvent| {
                 if let Some(chunk) = assistant_event_to_openai_sse_chunk(
@@ -699,7 +809,13 @@ fn stream_chat_completions(
                     event,
                     &mut tool_inputs,
                 ) {
-                    let _ = sender.send(chunk);
+                    // Client-disconnect detection: once the SSE receiver is dropped
+                    // (tab closed / Stop pressed), `send` fails. Trip the turn-level
+                    // abort so the agent loop halts between steps instead of running on
+                    // in the background — the OWUI pattern (client gone -> stop).
+                    if sender.send(chunk).is_err() {
+                        abort_signal.abort();
+                    }
                 }
             };
 
