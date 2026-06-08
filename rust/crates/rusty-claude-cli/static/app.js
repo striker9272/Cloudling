@@ -129,7 +129,7 @@
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); }); }
   /* persist the active dialog (full transcript) */
   function saveActive(){ if(!activeId) return; var title=(dtitle.textContent||'').trim() || ((convo[0]&&convo[0].content)||'').slice(0,42) || 'Без названия'; apiSave(activeId, title, convo); }
-  document.getElementById('newDlg').onclick=newDialog;
+  document.getElementById('newDlg').onclick=function(){ newDialog(); closeDrawers(); };
 
   function showSetup(){ viewHome.hidden=true; viewDlg.hidden=true; document.getElementById('view-setup').hidden=false; }
   document.getElementById('openSetup').addEventListener('click', function(){
@@ -274,21 +274,55 @@
     }).then(function(){ if(currentAbort===ac) currentAbort=null; });
   }
 
+  /* FLIP: morph the composer from its home (centered) rect down to the docked dialog rect.
+     Manual transform via Web Animations — cross-browser (Firefox/Chrome/Safari/Edge). */
+  function dockMorph(fromRect){
+    var el=document.querySelector('#view-dialog .entry'); if(!el || !el.animate) return;
+    var to=el.getBoundingClientRect();
+    var dx=fromRect.left-to.left, dy=fromRect.top-to.top;
+    var sx=to.width?fromRect.width/to.width:1, sy=to.height?fromRect.height/to.height:1;
+    el.style.transformOrigin='0 0';
+    var a=el.animate(
+      [{transform:'translate('+dx+'px,'+dy+'px) scale('+sx+','+sy+')'},{transform:'none'}],
+      {duration:300, easing:'cubic-bezier(.4,0,.2,1)'}
+    );
+    a.onfinish=function(){ el.style.transformOrigin=''; };
+  }
+  /* leaving home: dialog is already shown; lay home on top (out of flow) and fade its hero
+     out while the docked composer takes over via the morph, then hide home. */
+  function leaveHome(){
+    var hero=viewHome.querySelector('.hero'), hcomp=viewHome.querySelector('.entry');
+    if(!viewHome.animate || !hero){ viewHome.hidden=true; return; }
+    if(hcomp) hcomp.style.visibility='hidden'; /* avoid a double composer during the morph */
+    viewHome.style.position='absolute'; viewHome.style.inset='0'; viewHome.style.zIndex='1'; viewHome.style.pointerEvents='none';
+    var a=hero.animate([{opacity:1, transform:'none'},{opacity:0, transform:'translateY(-12px)'}],{duration:220, easing:'ease-in'});
+    a.onfinish=function(){
+      viewHome.hidden=true;
+      viewHome.style.position=''; viewHome.style.inset=''; viewHome.style.zIndex=''; viewHome.style.pointerEvents='';
+      if(hcomp) hcomp.style.visibility='';
+    };
+  }
+
   function sendFlow(text, btn){
     if(viewHome.hidden===false){ /* coming from home: start a real new dialog */
+      var homeEntry=document.querySelector('#view-home .entry');
+      var fromRect=homeEntry?homeEntry.getBoundingClientRect():null;
       activeId=genId();
       var title=text.slice(0,42);
       var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
       activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[];
-      viewHome.hidden=true; viewDlg.hidden=false; updateDialogList();
+      viewDlg.hidden=false; updateDialogList(); leaveHome();
       btn = dlgSend() || btn; /* we switched to the dialog view — drive stop/send on its (visible) button */
+      if(fromRect) dockMorph(fromRect); /* slide the composer from center down into the dock */
+      var dh=viewDlg.querySelector('.dhdr'); if(dh && dh.animate){ dh.animate([{opacity:0},{opacity:1}],{duration:260, easing:'ease-out'}); }
     }
     convo.push({role:'user', content:text});
     saveActive(); /* persist now so the dialog exists even before the answer */
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-    thread.appendChild(userTurn(text)); stick=true; toBottom();
+    var ut=userTurn(text); thread.appendChild(ut); stick=true; toBottom();
+    if(ut.animate){ ut.animate([{opacity:0, transform:'translateY(8px)'},{opacity:1, transform:'none'}],{duration:280, easing:'cubic-bezier(.4,0,.2,1)'}); }
     generate(btn);
   }
 
