@@ -37,16 +37,16 @@
     <summary>Основное <span class="chev">▾</span></summary>
     <div class="body">
       <div class="fld" style="margin-top:10px;"><div class="lab">Адрес движка <span class="env">OPENAI_BASE_URL</span></div>
-        <div class="fieldrow"><input value="http://127.0.0.1:8080/v1" /><button class="verify" id="checkBackend" type="button" title="Проверить подключение" aria-label="Проверить подключение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button></div>
+        <div class="fieldrow"><input data-key="OPENAI_BASE_URL" value="" /><button class="verify" id="checkBackend" type="button" title="Проверить подключение" aria-label="Проверить подключение"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button></div>
         <div class="cstatus" id="checkStatus" hidden></div>
       </div>
-      <div class="fld"><div class="lab">Ключ API <span class="env">OPENAI_API_KEY</span></div><input id="key" type="password" value="sk-local-xxxxxxxxxxxx" /><button class="eye" type="button" onclick="var k=document.getElementById('key');k.type=k.type==='password'?'text':'password'">👁</button></div>
-      <div class="fld"><div class="lab">Модель <span class="env">OPENAI_MODEL</span></div><input value="qwen3.6-35b-a3b" /></div>
-      <div class="fld"><div class="lab">Имя модели <span class="env">CLAW_SERVED_MODEL_ID</span></div><input value="clab" /></div>
-      <div class="fld"><div class="lab">Режим прав <span class="env">RUSTY_CLAUDE_PERMISSION_MODE</span></div><select><option>безопасный</option><option>по запросу</option><option selected>полный доступ</option></select></div>
-      <div class="fld"><div class="lab">Адрес веб-поиска <span class="env">CLAWD_WEB_SEARCH_BASE_URL</span></div><input value="http://127.0.0.1:8888/search?format=json" /></div>
-      <div class="note">Изменения применяются после перезапуска ядра. «Сохранить и перезапустить» сделает это за тебя.</div>
-      <div class="acts"><button id="saveOnly">Сохранить</button><button class="primary" id="saveRestart">Сохранить и перезапустить</button></div>
+      <div class="fld"><div class="lab">Ключ API <span class="env">OPENAI_API_KEY</span></div><input id="key" data-key="OPENAI_API_KEY" type="password" value="" /><button class="eye" type="button" onclick="var k=document.getElementById('key');k.type=k.type==='password'?'text':'password'">👁</button></div>
+      <div class="fld"><div class="lab">Модель <span class="env">OPENAI_MODEL</span></div><input data-key="OPENAI_MODEL" value="" /></div>
+      <div class="fld"><div class="lab">Имя модели <span class="env">CLAW_SERVED_MODEL_ID</span></div><input data-key="CLAW_SERVED_MODEL_ID" value="" /></div>
+      <div class="fld"><div class="lab">Режим прав <span class="env">CLAW_PERMISSION_MODE</span></div><select data-key="CLAW_PERMISSION_MODE"><option value="read-only">безопасный</option><option value="workspace-write">запись в рабочей папке</option><option value="danger-full-access">полный доступ</option></select></div>
+      <div class="fld"><div class="lab">Адрес веб-поиска <span class="env">CLAWD_WEB_SEARCH_BASE_URL</span></div><input data-key="CLAWD_WEB_SEARCH_BASE_URL" value="" /></div>
+      <div class="note">Изменения применяются после перезапуска ядра.</div>
+      <div class="acts"><button class="primary" id="saveRestart">Сохранить и перезапустить</button></div>
       <div class="savemsg" id="saveMsg" hidden></div>
     </div>
   </details>

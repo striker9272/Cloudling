@@ -196,7 +196,9 @@ async fn serve(
             )
             .route("/ui/presets", get(ui_presets_list))
             .route("/ui/presets/{id}", put(ui_preset_put).delete(ui_preset_delete))
-            .route("/ui/kv/{key}", get(ui_kv_get).put(ui_kv_put));
+            .route("/ui/kv/{key}", get(ui_kv_get).put(ui_kv_put))
+            .route("/ui/settings", get(ui_settings_get))
+            .route("/ui/settings/save-restart", post(ui_settings_save_restart));
     }
     let app = app.with_state(state);
 
@@ -438,6 +440,102 @@ async fn ui_kv_put(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
     }
+}
+
+// ---- "Основное" settings: read active env, save to the env file, self-restart ----
+
+/// The env keys the UI may read and edit. Saving touches only these; everything else in
+/// the env file is preserved verbatim.
+const SETTINGS_KEYS: &[&str] = &[
+    "OPENAI_BASE_URL",
+    "OPENAI_API_KEY",
+    "OPENAI_MODEL",
+    "CLAW_SERVED_MODEL_ID",
+    "CLAW_PERMISSION_MODE",
+    "CLAWD_WEB_SEARCH_BASE_URL",
+];
+
+async fn ui_settings_get() -> Response {
+    let mut map = serde_json::Map::new();
+    for key in SETTINGS_KEYS {
+        map.insert(
+            (*key).to_string(),
+            serde_json::Value::String(std::env::var(key).unwrap_or_default()),
+        );
+    }
+    // tell the UI whether saving is even possible (env file path configured)
+    let can_save = std::env::var("CLAW_OPENAI_ENV_FILE")
+        .map(|p| !p.trim().is_empty())
+        .unwrap_or(false);
+    map.insert("_can_save".to_string(), serde_json::Value::Bool(can_save));
+    Json(serde_json::Value::Object(map)).into_response()
+}
+
+/// Rewrite only the known settings keys in the env file (preserving everything else),
+/// then exit so systemd brings the process back up with the new values (needs
+/// `Restart=always`). Atomic write via temp + rename.
+fn write_env_file(
+    path: &std::path::Path,
+    updates: &std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let mut seen = std::collections::HashSet::new();
+    let mut out = String::new();
+    for line in existing.lines() {
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim();
+            if SETTINGS_KEYS.contains(&key) {
+                if let Some(value) = updates.get(key) {
+                    out.push_str(key);
+                    out.push('=');
+                    out.push_str(value);
+                    out.push('\n');
+                    seen.insert(key.to_string());
+                    continue;
+                }
+            }
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    for key in SETTINGS_KEYS {
+        if !seen.contains(*key) {
+            if let Some(value) = updates.get(*key) {
+                out.push_str(key);
+                out.push('=');
+                out.push_str(value);
+                out.push('\n');
+            }
+        }
+    }
+    let tmp = path.with_extension("env.tmp");
+    std::fs::write(&tmp, out.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn ui_settings_save_restart(
+    Json(updates): Json<std::collections::HashMap<String, String>>,
+) -> Response {
+    let path = match std::env::var("CLAW_OPENAI_ENV_FILE") {
+        Ok(p) if !p.trim().is_empty() => p,
+        _ => {
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "settings saving not configured (CLAW_OPENAI_ENV_FILE unset)",
+            )
+                .into_response()
+        }
+    };
+    if let Err(error) = write_env_file(std::path::Path::new(&path), &updates) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, format!("write env: {error}")).into_response();
+    }
+    // Respond first, then exit shortly after so systemd restarts us with the new env.
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        std::process::exit(0);
+    });
+    Json(serde_json::json!({ "ok": true, "restarting": true })).into_response()
 }
 
 async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoResponse {
