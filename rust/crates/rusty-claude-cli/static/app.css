@@ -156,6 +156,8 @@ body.open-right .drawer.right{transform:translateX(0);}
 .view[hidden]{display:none;}
 .dhdr{display:flex; align-items:center; padding:22px 0 14px; border-bottom:1px solid var(--line); margin-bottom:16px;}
 .dhdr .h{font-family:var(--display); font-size:18px; font-weight:700; letter-spacing:-0.02em;}
+.toks{margin-left:auto; font-size:11.5px; color:var(--faint); font-family:var(--mono); white-space:nowrap;}
+.toks:empty{display:none;}
 .thread{display:flex; flex-direction:column; gap:22px; flex:1; min-height:0; overflow-y:auto; padding-bottom:14px;}
 .dock{position:relative; padding:12px 0 16px; background:var(--bg);}
 /* dialog composer: docked to the bottom edge — rounded top only, flush bottom (like our edge tabs) */

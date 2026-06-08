@@ -103,7 +103,11 @@
     t.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
     return t;
   }
-  function renderConvo(messages){ thread.innerHTML=''; convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
+  /* context-token counter: prompt_tokens from the final usage chunk = size of the context
+     the model received last turn. Cleared on dialog switch (no usage for stored history). */
+  var dlgToks={}; /* last context-token count per dialog id, so the counter survives chat switches */
+  function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
+  function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
     convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); }
 
   function fmtDate(ms){ if(!ms) return ''; var d=new Date(ms), now=new Date();
@@ -116,6 +120,26 @@
     var anchor=document.getElementById('emptyNone');
     list.forEach(function(d){ var it=sidebarItem(d); if(d.id===activeId){ it.classList.add('active'); activeItem=it; } leftDrawer.insertBefore(it, anchor); });
     updateDialogList(); return list; }); }
+
+  /* auto-title: after the first exchange, ask the model for a short title (like OWUI).
+     Separate non-stream call; falls back silently to the truncated first message. */
+  function stripBlocks(t){ return (t||'').replace(/<details type="(tool_calls|reasoning)"[\s\S]*?<\/details>/g,' ').replace(/\s+/g,' ').trim(); }
+  function genTitle(){
+    if(!activeId) return;
+    var id=activeId;
+    var firstUser=((convo[0]&&convo[0].content)||'').slice(0,400);
+    var firstAsst=stripBlocks((convo[1]&&convo[1].content)||'').slice(0,400);
+    if(!firstUser) return;
+    var text='Сообщение: '+firstUser+(firstAsst?('\nОтвет: '+firstAsst):'');
+    fetch('/ui/title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){
+        var t=(d&&d.title)||'';
+        t=stripBlocks(t).split('\n')[0].replace(/^["'«»\s]+|["'«».\s]+$/g,'').trim();
+        if(t.length>60) t=t.slice(0,60);
+        if(t && id===activeId){ dtitle.textContent=t; apiSave(id, t, convo); refreshSidebar(); }
+      }).catch(function(){});
+  }
 
   /* fade a full view out while it's laid on top (out of flow), then hide it */
   function dissolveOut(view){
@@ -293,6 +317,7 @@
       convo.push({role:'assistant', content:acc});
       saveActive();
       finishGen(btn); maybeScroll();
+      if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
     }
     fetch('/v1/chat/completions', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -314,6 +339,7 @@
             try{ var chunk=JSON.parse(payload);
               var delta=chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
               if(delta && delta.content){ onContent(delta.content); }
+              if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId) dlgToks[activeId]=pt; setCtxToks(pt); }
             }catch(e){ /* ignore keep-alives / partial chunks */ }
           });
           return pump();
