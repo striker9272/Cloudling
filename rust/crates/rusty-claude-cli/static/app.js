@@ -106,7 +106,7 @@
     h+='<div class="md">'+md(m.text)+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>';
     t.innerHTML=h; return t; }
 
-  function renderDialog(i){ thread.innerHTML=''; dialogs[i].msgs.forEach(function(m){ thread.appendChild(m.r==='u'?userTurn(m.text):assistantTurn(m)); }); }
+  function renderDialog(i){ thread.innerHTML=''; convo=[]; dialogs[i].msgs.forEach(function(m){ thread.appendChild(m.r==='u'?userTurn(m.text):assistantTurn(m)); convo.push({role:(m.r==='u'?'user':'assistant'), content:m.text}); }); }
 
   function openDialog(i,el){ var d=dialogs[i]; if(!d) return;
     dtitle.textContent=d.title; viewHome.hidden=true; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true; viewDlg.hidden=false;
@@ -116,7 +116,7 @@
     var tok=++skelToken; thread.innerHTML=SKELETON;
     setTimeout(function(){ if(tok===skelToken){ renderDialog(i); stick=true; toBottom(); updateScrollBtn(); } }, 700);
   }
-  function newDialog(){ viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeItem=null;
+  function newDialog(){ viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeItem=null; convo=[];
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); }); }
   document.getElementById('newDlg').onclick=newDialog;
 
@@ -140,75 +140,126 @@
 
   function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); }
 
-  /* The real UI is event-driven: the MODEL decides whether to call a tool, and the SSE
-     stream carries the tool-call events — the page never infers tool use from the prompt.
-     This is a backend-less mock, so tool calls and errors are explicit stage-directions
-     you type (/tool or /search, /err, /drop), not guesses about the user's intent. */
-  function detectMode(text){ return /(^|\s)\/drop\b/i.test(text) ? 'drop' : (/(^|\s)\/err\b/i.test(text) ? 'error' : 'ok'); }
-  function mockTool(text){ return /(^|\s)\/(tool|search)\b/i.test(text||''); }
-  /* placeholder reply text only — not model logic */
-  function pickReply(text){ text=text||'';
-    if(/rust|раст|верси|hello/i.test(text)) return "Последняя стабильная версия Rust — **1.96**. Минимальный пример:\n\n```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```\n\nСохрани в `main.rs` и собери `rustc main.rs`.";
-    if(/searxng|поиск|веб/i.test(text)) return "Веб-поиск идёт через `CLAWD_WEB_SEARCH_BASE_URL` (локальный SearXNG): модель зовёт `WebSearch`, `clab` парсит JSON-ответ в список результатов и отдаёт их обратно.";
-    return "Готово. Если нужно — могу сходить в инструменты (веб-поиск, bash, файловые операции) или уточнить детали.";
-  }
   function errboxHTML(){ return '<div class="errbox"><div class="ehead">'+IC.warn+'Не удалось получить ответ</div><div class="emsg">Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>'; }
 
+  /* ---------- real chat ----------
+     The page is the client: it holds the dialog history and re-sends it every turn
+     (clab is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
+     convo entry, so we can rewind both together on regenerate / edit. */
+  var convo = [], currentAbort = null;
+  function turnIndex(turn){ return Array.prototype.indexOf.call(thread.querySelectorAll('.turn'), turn); }
+
   function attachRetry(turn, btn){ var r=turn.querySelector('.retry'); if(!r) return;
-    r.addEventListener('click', function(){
-      var prevU=turn.previousElementSibling;
-      var ut=(prevU&&prevU.classList.contains('u'))?prevU.querySelector('.bubble').textContent:'';
+    r.addEventListener('click', function(){ if(generating) return;
       generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-      turn.remove(); genAssistant(btn, detectMode(ut), mockTool(ut), ut);
+      turn.remove(); generate(btn);
     });
   }
 
-  function streamReply(turn, btn, reply, mode){
-    var mdbox=turn.querySelector('.md');
-    var span=document.createElement('span'); mdbox.appendChild(span);
-    var caret=document.createElement('span'); caret.className='caret'; mdbox.appendChild(caret);
-    var plain=reply.replace(/```[\s\S]*?```/g,' …код… ').replace(/[`*#>|]/g,'').replace(/\n+/g,' ').trim();
-    var dropAt=(mode==='drop')?Math.floor(plain.length*0.45):Infinity;
-    var i=0; var tm=setInterval(function(){
-      i+=3; span.textContent=plain.slice(0,i); maybeScroll();
-      if(i>=dropAt){ clearInterval(tm); caret.remove();
-        turn.insertAdjacentHTML('beforeend','<div class="errbox"><div class="ehead">'+IC.warn+'Соединение прервано</div><div class="emsg">Связь с движком оборвалась во время ответа. Часть ответа сохранена.</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>');
-        attachRetry(turn, btn); finishGen(btn); maybeScroll(); return;
-      }
-      if(i>=plain.length){ clearInterval(tm); caret.remove();
-        mdbox.innerHTML=md(reply);
-        turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
-        finishGen(btn); maybeScroll();
-      }
-    }, 26); genTimers.push(tm);
+  /* ---- tool-call blocks in the stream (task #8) ----
+     clab streams tool results inline in the content as one chunk shaped like:
+       <details type="tool_calls" ... name="X">…<summary>Tool Executed|Tool Failed</summary>OUTPUT</details>
+     We peel those out and render each as its own collapsible block, markdown-rendering the
+     surrounding text. (ToolUse has no separate stream event, so there is no "running" state —
+     the block appears already executed.) */
+  var TOOL_RE=/<details type="tool_calls"[^>]*\bname="([^"]*)"[^>]*>([\s\S]*?)<\/details>/g;
+  function decodeEntities(s){ return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&'); }
+  function buildToolEl(name, inner){
+    var fail=/<summary>\s*Tool Failed/i.test(inner);
+    var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
+    var d=document.createElement('details'); d.className='tool'+(fail?' fail':'');
+    var sum=document.createElement('summary'); sum.className='head';
+    sum.innerHTML=(fail?IC.warn:'')+'<span class="tag">'+esc(decodeEntities(name))+'</span> · '+(fail?'ошибка':'выполнено');
+    var pre=document.createElement('pre'); pre.className='toolout'; pre.textContent=decodeEntities(out);
+    d.appendChild(sum); d.appendChild(pre); return d;
+  }
+  /* rebuild the assistant turn body from the raw accumulated content; caret only while streaming */
+  function paintTurn(turn, raw, streaming){
+    turn.innerHTML='';
+    var pos=0, m, segs=[]; TOOL_RE.lastIndex=0;
+    while((m=TOOL_RE.exec(raw))!==null){
+      if(m.index>pos) segs.push({t:'text', v:raw.slice(pos, m.index)});
+      segs.push({t:'tool', name:m[1], inner:m[2]});
+      pos=TOOL_RE.lastIndex;
+    }
+    if(pos<raw.length) segs.push({t:'text', v:raw.slice(pos)});
+    segs.forEach(function(s, i){
+      if(s.t==='tool'){ turn.appendChild(buildToolEl(s.name, s.inner)); return; }
+      if(!s.v.replace(/\s/g,'')) return; /* skip whitespace-only gaps between blocks */
+      var box=document.createElement('div'); box.className='md';
+      var isLast=(i===segs.length-1);
+      if(streaming && isLast){ box.textContent=s.v; } else { box.innerHTML=md(s.v); }
+      turn.appendChild(box);
+    });
+    if(streaming){ var c=document.createElement('span'); c.className='caret'; turn.appendChild(c); }
   }
 
-  /* mock turn: thinking → (optional tool) → stream | error. useTool mirrors the model
-     deciding whether to call a tool this turn; plain answers skip the tool block. */
-  function genAssistant(btn, mode, useTool, userText){
-    var reply=pickReply(userText);
+  /* Tasks #7–#8: stream the answer and render inline tool-call blocks. */
+  function generate(btn){
     var turn=document.createElement('div'); turn.className='turn a';
     turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>Claw думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
-    genTimers.push(setTimeout(function(){
-      if(useTool){
-        turn.innerHTML='<div class="tool"><div class="head">'+RIP+'<span class="tag">WebSearch</span> · ищу в вебе…</div></div><div class="md"></div>';
-        genTimers.push(setTimeout(function(){
-          if(mode==='error'){
-            turn.innerHTML='<div class="tool fail"><div class="head">'+IC.warn+'<span class="tag">WebSearch</span> · не удалось (нет ответа)</div></div>'+errboxHTML();
-            attachRetry(turn, btn); finishGen(btn); maybeScroll(); return;
-          }
-          turn.querySelector('.tool .head').innerHTML='<span class="tag">WebSearch</span> · веб-поиск';
-          streamReply(turn, btn, reply, mode);
-        }, 850));
-      } else {
-        if(mode==='error'){
-          turn.innerHTML=errboxHTML(); attachRetry(turn, btn); finishGen(btn); maybeScroll(); return;
-        }
-        turn.innerHTML='<div class="md"></div>';
-        streamReply(turn, btn, reply, mode);
+    var ac=new AbortController(); currentAbort=ac;
+    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true;
+    /* Incremental render: completed tool blocks + the text before them are committed ONCE
+       (permanent DOM); the trailing text node is re-rendered as markdown each token so
+       formatting appears live (progressive, like OpenWebUI). liveBox stays the last child
+       and is the anchor we insert committed blocks before, so the tool blocks never get
+       rebuilt/re-collapsed mid-stream. */
+    function onContent(piece){
+      acc+=piece;
+      if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
+        liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
+        caretEl=document.createElement('span'); caretEl.className='caret'; }
+      var m; TOOL_RE.lastIndex=0;
+      while((m=TOOL_RE.exec(acc))!==null){
+        if(m.index < committed) continue;
+        var pre=acc.slice(committed, m.index);
+        if(pre.replace(/\s/g,'')){ var b=document.createElement('div'); b.className='md'; b.innerHTML=md(pre); turn.insertBefore(b, liveBox); }
+        turn.insertBefore(buildToolEl(m[1], m[2]), liveBox);
+        committed=m.index+m[0].length;
       }
-    }, 950));
+      liveBox.innerHTML=md(acc.slice(committed));            /* progressive markdown */
+      (liveBox.lastElementChild || liveBox).appendChild(caretEl);  /* caret at end of last line */
+      maybeScroll();
+    }
+    function finalize(){
+      paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
+      convo.push({role:'assistant', content:acc});
+      finishGen(btn); maybeScroll();
+    }
+    fetch('/v1/chat/completions', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ model:'claw', stream:true, messages:convo }),
+      signal:ac.signal
+    }).then(function(r){
+      if(!r.ok || !r.body){ return r.text().then(function(t){ throw new Error('HTTP '+r.status+(t?': '+t:'')); }); }
+      var reader=r.body.getReader(), dec=new TextDecoder(), buf='';
+      function pump(){
+        return reader.read().then(function(res){
+          if(res.done){ finalize(); return; }
+          buf+=dec.decode(res.value, {stream:true});
+          var lines=buf.split('\n'); buf=lines.pop(); /* keep trailing partial line */
+          lines.forEach(function(line){
+            line=line.trim();
+            if(line.indexOf('data:')!==0) return;
+            var payload=line.slice(5).trim();
+            if(payload==='' || payload==='[DONE]') return;
+            try{ var chunk=JSON.parse(payload);
+              var delta=chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+              if(delta && delta.content){ onContent(delta.content); }
+            }catch(e){ /* ignore keep-alives / partial chunks */ }
+          });
+          return pump();
+        });
+      }
+      return pump();
+    }).catch(function(err){
+      if(err && err.name==='AbortError'){ return; } /* stop button owns the UI */
+      turn.innerHTML=errboxHTML(); attachRetry(turn, btn);
+      finishGen(btn); maybeScroll();
+    }).then(function(){ if(currentAbort===ac) currentAbort=null; });
   }
 
   function sendFlow(text, btn){
@@ -217,15 +268,16 @@
       it.innerHTML='<span class="t">'+esc(text.slice(0,42))+'</span><span class="date">сейчас</span><button class="kebab" aria-label="Действия">⋯</button>';
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem);
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
-      activeItem=it; dtitle.textContent=text.slice(0,42); thread.innerHTML='';
+      activeItem=it; dtitle.textContent=text.slice(0,42); thread.innerHTML=''; convo=[];
       viewHome.hidden=true; viewDlg.hidden=false; updateDialogList();
     }
+    convo.push({role:'user', content:text});
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
     thread.appendChild(userTurn(text)); stick=true; toBottom();
-    genAssistant(btn, detectMode(text), mockTool(text), text);
+    generate(btn);
   }
 
-  function stopGen(btn){ clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
+  function stopGen(btn){ if(currentAbort){ currentAbort.abort(); currentAbort=null; } clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
     var th=thread.querySelector('.thinking'); if(th){ th.closest('.turn').remove(); return; }
     var turn=thread.querySelector('.turn.a:last-child'); if(!turn) return;
     var c=turn.querySelector('.caret'); if(c) c.remove();
@@ -293,13 +345,13 @@
   function dlgSend(){ return document.querySelector('#view-dialog .send'); }
   /* regenerate: drop this answer (and anything after it) and re-run the turn */
   function regenTurn(turn){ if(generating) return;
-    var prevU=turn.previousElementSibling;
-    var ut=(prevU&&prevU.classList.contains('u'))?prevU.querySelector('.bubble').textContent:'';
+    var idx=turnIndex(turn); if(idx<0) return;
     var btn=dlgSend(); if(!btn) return;
+    /* drop this answer and everything after it, in both the thread and the history */
+    while(thread.children.length>idx) thread.removeChild(thread.lastChild);
+    convo=convo.slice(0, idx);
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-    while(turn.nextSibling) turn.parentNode.removeChild(turn.nextSibling);
-    turn.remove();
-    genAssistant(btn, detectMode(ut), mockTool(ut), ut);
+    generate(btn);
   }
   /* edit a user message: inline editor → on save, truncate after it and regenerate
      (mirrors how OWUI/real chat re-runs from an edited turn) */
@@ -314,10 +366,13 @@
     function restore(text){ var nb=document.createElement('div'); nb.className='bubble'; nb.textContent=text; ta.replaceWith(nb); acts.remove(); if(rowacts) rowacts.style.display=''; }
     acts.querySelector('.ecancel').onclick=function(){ restore(orig); };
     acts.querySelector('.esave').onclick=function(){ var nv=(ta.value||'').trim()||orig; restore(nv);
-      while(turn.nextSibling) turn.parentNode.removeChild(turn.nextSibling);
+      var idx=turnIndex(turn); if(idx<0) return;
+      /* keep this (edited) user turn, drop everything after; rewrite history from here */
+      while(thread.children.length>idx+1) thread.removeChild(thread.lastChild);
+      convo=convo.slice(0, idx); convo.push({role:'user', content:nv});
       var btn=dlgSend(); if(!btn) return;
       generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-      genAssistant(btn, detectMode(nv), mockTool(nv), nv);
+      generate(btn);
     };
     ta.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); acts.querySelector('.esave').click(); } else if(e.key==='Escape'){ e.preventDefault(); restore(orig); } });
   }
