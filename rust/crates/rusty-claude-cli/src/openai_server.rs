@@ -769,6 +769,15 @@ fn stream_chat_completions(
     let backend_model = state.backend_model.clone();
     let allowed_tools = state.allowed_tools.clone();
     let permission_mode = state.permission_mode;
+    // Whether to forward the model's reasoning to the client as a collapsible block.
+    // Stored as a UI preference (`ui_kv.show_reasoning`); defaults ON. Non-UI deployments
+    // (no dialog store) also default ON. Read per request so the toggle applies live.
+    let forward_reasoning = state
+        .dialog_store
+        .as_ref()
+        .and_then(|store| store.get_kv("show_reasoning").ok().flatten())
+        .map(|value| value.trim() != "false")
+        .unwrap_or(true);
     let created = now_unix();
     let id = format!("chatcmpl-{created}");
 
@@ -808,6 +817,7 @@ fn stream_chat_completions(
                     &response_model,
                     event,
                     &mut tool_inputs,
+                    forward_reasoning,
                 ) {
                     // Client-disconnect detection: once the SSE receiver is dropped
                     // (tab closed / Stop pressed), `send` fails. Trip the turn-level
@@ -869,6 +879,7 @@ fn assistant_event_to_openai_sse_chunk(
     model: &str,
     event: &AssistantEvent,
     tool_inputs: &mut HashMap<String, String>,
+    forward_reasoning: bool,
 ) -> Option<Result<Event, Infallible>> {
     match event {
         AssistantEvent::TextDelta(text) if !text.is_empty() => Some(openai_sse_chunk(
@@ -878,6 +889,19 @@ fn assistant_event_to_openai_sse_chunk(
             Some(text.clone()),
             None,
         )),
+        // Surface the model's reasoning as a collapsible block so a reasoning-only turn
+        // (the model thinks then stops without final text — seen intermittently with some
+        // system prompts) is never blank. Gated by the `show_reasoning` UI toggle; models
+        // without a thinking mode (or with it disabled on the backend) simply emit none.
+        AssistantEvent::Thinking { thinking, .. } if forward_reasoning && !thinking.is_empty() => {
+            Some(openai_sse_chunk(
+                id,
+                created,
+                model,
+                Some(openwebui_reasoning_details(thinking)),
+                None,
+            ))
+        }
         AssistantEvent::ToolUse {
             id: tool_use_id,
             input,
@@ -937,6 +961,16 @@ fn openwebui_tool_details(
         escape_html_attr(arguments),
         summary,
         escape_html_text(&output_json),
+    )
+}
+
+/// Render the model's reasoning as a collapsible OpenWebUI-style block. Unlike tool
+/// output the thinking is plain text (not JSON), so it is only HTML-escaped — the UI
+/// shows it as-is inside a collapsed "Reasoning" section.
+fn openwebui_reasoning_details(thinking: &str) -> String {
+    format!(
+        "\n<details type=\"reasoning\" done=\"true\">\n<summary>Reasoning</summary>\n{}\n</details>\n",
+        escape_html_text(thinking),
     )
 }
 
