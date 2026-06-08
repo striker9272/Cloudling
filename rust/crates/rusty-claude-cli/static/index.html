@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Claw</title>
+<title>clab</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" />
@@ -15,7 +15,7 @@
 
 <div class="splash" id="splash">
   <svg class="cloud" viewBox="0 0 40 28" width="96" height="67"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="4"/></g></svg>
-  <div class="nm">Claw</div>
+  <div class="nm">clab</div>
 </div>
 
 <div class="tab left" id="tabL" title="Диалоги" aria-label="Диалоги">☰</div>
@@ -27,10 +27,6 @@
   <div class="search"><input placeholder="Поиск диалогов…" /></div>
   <div class="grp" id="pinGroup" hidden>Закреплённые</div>
   <div class="grp" id="dlgGroup">Ранее</div>
-  <div class="item active" data-i="0"><span class="t">Нужен аудит searxng на сервере. Хочу оптимизировать веб-поиск</span><span class="date">04.06</span><button class="kebab" aria-label="Действия">⋯</button></div>
-  <div class="item" data-i="1"><span class="t">Идеи для встроенного UI</span><span class="date">вчера</span><button class="kebab" aria-label="Действия">⋯</button></div>
-  <div class="item" data-i="2"><span class="t">Последняя версия Rust + hello world</span><span class="date">3 дн</span><button class="kebab" aria-label="Действия">⋯</button></div>
-  <div class="item" data-i="3"><span class="t">Разбор веб-поиска SearXNG</span><span class="date">3 дн</span><button class="kebab" aria-label="Действия">⋯</button></div>
   <div class="empty" id="emptyNone" hidden><div class="ei"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>Пока нет диалогов<span>Начни новый — кнопкой + сверху</span></div>
   <div class="empty" id="emptySearch" hidden><div class="ei"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>Ничего не найдено<span>Попробуй другой запрос</span></div>
 </aside>
@@ -46,7 +42,7 @@
       </div>
       <div class="fld"><div class="lab">Ключ API <span class="env">OPENAI_API_KEY</span></div><input id="key" type="password" value="sk-local-xxxxxxxxxxxx" /><button class="eye" type="button" onclick="var k=document.getElementById('key');k.type=k.type==='password'?'text':'password'">👁</button></div>
       <div class="fld"><div class="lab">Модель <span class="env">OPENAI_MODEL</span></div><input value="qwen3.6-35b-a3b" /></div>
-      <div class="fld"><div class="lab">Имя модели <span class="env">CLAW_SERVED_MODEL_ID</span></div><input value="Claw" /></div>
+      <div class="fld"><div class="lab">Имя модели <span class="env">CLAW_SERVED_MODEL_ID</span></div><input value="clab" /></div>
       <div class="fld"><div class="lab">Режим прав <span class="env">RUSTY_CLAUDE_PERMISSION_MODE</span></div><select><option>безопасный</option><option>по запросу</option><option selected>полный доступ</option></select></div>
       <div class="fld"><div class="lab">Адрес веб-поиска <span class="env">CLAWD_WEB_SEARCH_BASE_URL</span></div><input value="http://127.0.0.1:8888/search?format=json" /></div>
       <div class="note">Изменения применяются после перезапуска ядра. «Сохранить и перезапустить» сделает это за тебя.</div>
@@ -65,8 +61,11 @@
 <div class="content">
   <div id="view-home" class="view">
     <div class="hero">
-      <div class="title">Claw</div>
-      <div class="sub">Локальный агент с инструментами и веб-поиском. Опиши задачу — Claw ответит и при необходимости сам сходит в инструменты.</div>
+      <div class="brand">
+        <svg class="cloud" viewBox="0 0 40 28" width="60" height="42"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle cx="14" cy="15" r="5"/><circle cx="26" cy="15" r="5"/><circle cx="20" cy="11" r="5"/></g></svg>
+        <div class="title">clab</div>
+      </div>
+      <div class="sub">Локальный агент с инструментами и веб-поиском. Опиши задачу — clab ответит и при необходимости сам сходит в инструменты.</div>
     </div>
     <div class="entry">
       <div class="attachments"></div>
@@ -97,8 +96,8 @@
   <div id="view-setup" class="view" hidden>
     <div class="setup">
       <div class="mark"><svg class="cloud" viewBox="0 0 40 28" width="64" height="45"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="4"/></g></svg></div>
-      <h1>Привет! Это Claw</h1>
-      <p>Локальный агент с инструментами и веб-поиском. Чтобы начать, подключи движок — модель, к которой Claw будет обращаться.</p>
+      <h1>Привет! Это clab</h1>
+      <p>Локальный агент с инструментами и веб-поиском. Чтобы начать, подключи движок — модель, к которой clab будет обращаться.</p>
       <div class="steps">
         <div class="step"><div class="n">1</div><div class="tx">Укажи адрес движка <span>— например, локальный Ollama или llama-server.</span></div></div>
         <div class="step"><div class="n">2</div><div class="tx">Добавь ключ <span>— если движок его требует.</span></div></div>
@@ -116,7 +115,7 @@
         <input class="pename" id="presetName" placeholder="Имя пресета" />
       </div>
       <div class="pelabel">Системный промпт</div>
-      <textarea id="presetPrompt" placeholder="Опиши, как Claw должен себя вести в этом пресете…"></textarea>
+      <textarea id="presetPrompt" placeholder="Опиши, как clab должен себя вести в этом пресете…"></textarea>
       <div class="peact"><button class="save" id="presetSave">Сохранить</button><button class="cancel" id="presetCancel">Отмена</button></div>
     </div>
   </div>

@@ -444,6 +444,7 @@ dependencies = [
  "plugins",
  "pulldown-cmark",
  "runtime",
+ "rusqlite",
  "rustyline",
  "serde",
  "serde_json",

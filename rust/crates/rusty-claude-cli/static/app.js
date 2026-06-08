@@ -61,25 +61,20 @@
   function copyText(t,btn){ var flash=function(){if(!btn)return;var o=btn.innerHTML;btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':'');setTimeout(function(){btn.innerHTML=o;},1100);};
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(flash,function(){fallback(t);flash();});} else {fallback(t);flash();} }
 
-  /* ---------- data ---------- */
-  var dialogs=[
-    {title:"Нужен аудит searxng на сервере", msgs:[
-      {r:"u", text:"Нужен аудит searxng на сервере. Хочу оптимизировать веб-поиск для clab."},
-      {r:"a", tool:["WebSearch","проверка конфигурации"], text:"### Аудит SearXNG\n\nКонфиг проверен — **JSON-формат включён**, и `clab` ходит к нему через `CLAWD_WEB_SEARCH_BASE_URL`.\n\n- Рабочие движки: DuckDuckGo, Wikipedia\n- Флапают: **Brave**, **Startpage**\n\n> Рекомендация: отключить нестабильные движки ради надёжности ⚠️\n\nПроверка завершена :tada: :rocket:"}
-    ]},
-    {title:"Идеи для встроенного UI", msgs:[
-      {r:"u", text:"Какие идеи по встроенному интерфейсу?"},
-      {r:"a", text:"Встроенный интерфейс — это:\n\n| Часть | Реализация |\n|---|---|\n| Ядро | один бинарник `clab` |\n| Интерфейс | страница вшита в бинарник |\n\nHeadless при этом **остаётся** — UI это просто режим поверх."}
-    ]},
-    {title:"Последняя версия Rust + hello world", msgs:[
-      {r:"u", text:"Найди последнюю версию Rust и покажи пример hello world."},
-      {r:"a", tool:["WebSearch","latest Rust version"], text:"Последняя стабильная — **1.96**. Минимальный пример:\n\n```rust\nfn main() {\n    println!(\"Hello, world!\");\n}\n```\n\nСохрани в `main.rs` и запусти `rustc main.rs && ./main`."}
-    ]},
-    {title:"Разбор веб-поиска SearXNG", msgs:[
-      {r:"u", text:"Как clab делает веб-поиск?"},
-      {r:"a", text:"### Как работает веб-поиск\n\n1. Модель зовёт инструмент `WebSearch`\n2. `clab` идёт в `CLAWD_WEB_SEARCH_BASE_URL` (локальный SearXNG)\n3. JSON-ответ парсится в список результатов\n\nПодробнее — [в доках SearXNG](https://docs.searxng.org)."}
-    ]}
-  ];
+  /* ---------- dialog storage (server-backed: GET/PUT/DELETE /ui/dialogs) ---------- */
+  var activeId=null;
+  function genId(){ return 'd-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8); }
+  function dlgApi(method, path, body){
+    return fetch('/ui/dialogs'+path, {
+      method:method,
+      headers: body ? {'Content-Type':'application/json'} : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    });
+  }
+  function apiList(){ return dlgApi('GET','').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; }); }
+  function apiGet(id){ return dlgApi('GET','/'+encodeURIComponent(id)).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }); }
+  function apiSave(id,title,messages){ return dlgApi('PUT','/'+encodeURIComponent(id),{title:title,messages:messages}).catch(function(){}); }
+  function apiDelete(id){ return dlgApi('DELETE','/'+encodeURIComponent(id)).catch(function(){}); }
 
   var viewHome=document.getElementById('view-home');
   var viewDlg=document.getElementById('view-dialog');
@@ -101,23 +96,39 @@
   function actBtn(act,label){return '<button class="act" data-act="'+act+'" title="'+label+'" aria-label="'+label+'">'+IC[act]+'</button>';}
   function userTurn(text){ var t=document.createElement('div'); t.className='turn u';
     t.innerHTML='<div class="bubble">'+esc(text)+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('edit','Редактировать')+'</div>'; return t; }
-  function assistantTurn(m){ var t=document.createElement('div'); t.className='turn a'; var h='';
-    if(m.tool){h+='<div class="tool"><div class="head"><span class="tag">'+m.tool[0]+'</span> · '+esc(m.tool[1])+'</div></div>';}
-    h+='<div class="md">'+md(m.text)+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>';
-    t.innerHTML=h; return t; }
+  /* stored assistant message → turn (content may carry inline tool-call <details>) */
+  function assistantTurnEl(content){
+    var t=document.createElement('div'); t.className='turn a';
+    paintTurn(t, content||'', false);
+    t.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
+    return t;
+  }
+  function renderConvo(messages){ thread.innerHTML=''; convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
+    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); }
 
-  function renderDialog(i){ thread.innerHTML=''; convo=[]; dialogs[i].msgs.forEach(function(m){ thread.appendChild(m.r==='u'?userTurn(m.text):assistantTurn(m)); convo.push({role:(m.r==='u'?'user':'assistant'), content:m.text}); }); }
+  function fmtDate(ms){ if(!ms) return ''; var d=new Date(ms), now=new Date();
+    if(d.toDateString()===now.toDateString()) return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
+    return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2); }
+  function sidebarItem(d){ var it=document.createElement('div'); it.className='item'; it.dataset.id=d.id;
+    it.innerHTML='<span class="t">'+esc(d.title||'Без названия')+'</span><span class="date">'+fmtDate(d.updated_ms)+'</span><button class="kebab" aria-label="Действия">⋯</button>'; return it; }
+  function refreshSidebar(){ return apiList().then(function(list){
+    leftDrawer.querySelectorAll('.item').forEach(function(n){ n.remove(); });
+    var anchor=document.getElementById('emptyNone');
+    list.forEach(function(d){ var it=sidebarItem(d); if(d.id===activeId){ it.classList.add('active'); activeItem=it; } leftDrawer.insertBefore(it, anchor); });
+    updateDialogList(); return list; }); }
 
-  function openDialog(i,el){ var d=dialogs[i]; if(!d) return;
-    dtitle.textContent=d.title; viewHome.hidden=true; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true; viewDlg.hidden=false;
+  function openDialog(id, el){
+    activeId=id; viewHome.hidden=true; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true; viewDlg.hidden=false;
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.toggle('active', it===el); });
     activeItem=el;
-    /* skeleton (S4) while "loading" the conversation */
     var tok=++skelToken; thread.innerHTML=SKELETON;
-    setTimeout(function(){ if(tok===skelToken){ renderDialog(i); stick=true; toBottom(); updateScrollBtn(); } }, 700);
-  }
-  function newDialog(){ viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeItem=null; convo=[];
+    apiGet(id).then(function(d){ if(tok!==skelToken) return;
+      dtitle.textContent=(d && d.title) || ''; renderConvo(d ? d.messages : []);
+      stick=true; toBottom(); updateScrollBtn(); }); }
+  function newDialog(){ viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[];
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); }); }
+  /* persist the active dialog (full transcript) */
+  function saveActive(){ if(!activeId) return; var title=(dtitle.textContent||'').trim() || ((convo[0]&&convo[0].content)||'').slice(0,42) || 'Без названия'; apiSave(activeId, title, convo); }
   document.getElementById('newDlg').onclick=newDialog;
 
   function showSetup(){ viewHome.hidden=true; viewDlg.hidden=true; document.getElementById('view-setup').hidden=false; }
@@ -197,7 +208,7 @@
   /* Tasks #7–#8: stream the answer and render inline tool-call blocks. */
   function generate(btn){
     var turn=document.createElement('div'); turn.className='turn a';
-    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>Claw думает…</span></div>';
+    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true;
@@ -227,6 +238,7 @@
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
       convo.push({role:'assistant', content:acc});
+      saveActive();
       finishGen(btn); maybeScroll();
     }
     fetch('/v1/chat/completions', {
@@ -263,15 +275,17 @@
   }
 
   function sendFlow(text, btn){
-    if(viewHome.hidden===false){ /* coming from home: open a fresh dialog */
-      var it=document.createElement('div'); it.className='item active'; it.dataset.i='0';
-      it.innerHTML='<span class="t">'+esc(text.slice(0,42))+'</span><span class="date">сейчас</span><button class="kebab" aria-label="Действия">⋯</button>';
-      var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem);
+    if(viewHome.hidden===false){ /* coming from home: start a real new dialog */
+      activeId=genId();
+      var title=text.slice(0,42);
+      var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
+      var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
-      activeItem=it; dtitle.textContent=text.slice(0,42); thread.innerHTML=''; convo=[];
+      activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[];
       viewHome.hidden=true; viewDlg.hidden=false; updateDialogList();
     }
     convo.push({role:'user', content:text});
+    saveActive(); /* persist now so the dialog exists even before the answer */
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
     thread.appendChild(userTurn(text)); stick=true; toBottom();
     generate(btn);
@@ -316,12 +330,13 @@
     if(kb){ e.stopPropagation(); current=kb.closest('.item');
       var r=kb.getBoundingClientRect(); menu.style.top=(r.bottom+6)+'px'; menu.style.left=Math.max(8, Math.min(r.right-176, window.innerWidth-184))+'px';
       menu.querySelector('.pin-label').textContent=current.classList.contains('pinned')?'Открепить':'Закрепить'; menu.style.display='block'; return; }
-    var it=e.target.closest('.item'); if(it && it.dataset.i!=null){ openDialog(+it.dataset.i, it); }
+    var it=e.target.closest('.item'); if(it && it.dataset.id){ openDialog(it.dataset.id, it); }
   });
   document.addEventListener('click', function(){ menu.style.display='none'; });
   menu.addEventListener('click', function(e){ var btn=e.target.closest('button'); if(!btn||!current) return; var m=btn.dataset.m;
-    if(m==='rename'){ var t=current.querySelector('.t'); t.contentEditable='true'; t.classList.add('editing'); t.focus();
-      t.addEventListener('blur', function(){t.contentEditable='false';t.classList.remove('editing');},{once:true});
+    if(m==='rename'){ var item=current, t=current.querySelector('.t'); t.contentEditable='true'; t.classList.add('editing'); t.focus();
+      t.addEventListener('blur', function(){ t.contentEditable='false'; t.classList.remove('editing'); var nv=(t.textContent||'').trim(), id=item.dataset.id;
+        if(nv && id){ if(id===activeId){ dtitle.textContent=nv; apiSave(id,nv,convo); } else { apiGet(id).then(function(d){ apiSave(id, nv, d?d.messages:[]); }); } } },{once:true});
       t.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ev.preventDefault(); t.blur();} }); }
     else if(m==='pin'){ current.classList.toggle('pinned'); updateDialogList(); }
     else if(m==='del'){ askDelete(current); }
@@ -331,7 +346,7 @@
   var pendingDel=null, confirmScrim=document.getElementById('confirmScrim');
   function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent='«'+item.querySelector('.t').textContent.trim()+'» будет удалён без возможности восстановления.'; confirmScrim.hidden=false; }
   function closeConfirm(){ confirmScrim.hidden=true; pendingDel=null; }
-  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
+  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id) apiDelete(id); pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
   document.getElementById('confirmCancel').addEventListener('click', closeConfirm);
   confirmScrim.addEventListener('click', function(e){ if(e.target===confirmScrim) closeConfirm(); });
 
@@ -494,5 +509,6 @@
   renderPresetList(); updateChip();
 
   /* first run → setup screen; otherwise land on home (new dialog) */
+  refreshSidebar();
   if(configured){ newDialog(); } else { showSetup(); }
 })();

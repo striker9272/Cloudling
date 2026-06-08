@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -27,6 +27,9 @@ struct OpenAiServerState {
     served_model_id: String,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
+    /// Dialog persistence for the built-in UI. `Some` only when `--ui` is on and the
+    /// store opened successfully; the chat path never touches it.
+    dialog_store: Option<Arc<crate::dialog_store::DialogStore>>,
 }
 
 #[derive(Serialize)]
@@ -153,11 +156,26 @@ async fn serve(
     let addr: SocketAddr = bind.parse()?;
     let served_model_id =
         served_model_id_from_value(std::env::var("CLAW_SERVED_MODEL_ID").ok(), &model);
+    // Dialog persistence is opt-in with the UI; a failure to open it disables storage
+    // but never blocks serving.
+    let dialog_store = if ui {
+        match crate::dialog_store::DialogStore::open() {
+            Ok(store) => Some(Arc::new(store)),
+            Err(error) => {
+                eprintln!("claw openai-serve: dialog store disabled ({error})");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let state = Arc::new(OpenAiServerState {
         backend_model: model,
         served_model_id,
         allowed_tools,
         permission_mode,
+        dialog_store,
     });
 
     // API routes are always present. The built-in web UI is opt-in via `--ui`, so the
@@ -170,7 +188,12 @@ async fn serve(
         app = app
             .route("/", get(ui_index))
             .route("/app.css", get(ui_css))
-            .route("/app.js", get(ui_js));
+            .route("/app.js", get(ui_js))
+            .route("/ui/dialogs", get(ui_dialogs_list))
+            .route(
+                "/ui/dialogs/{id}",
+                get(ui_dialog_get).put(ui_dialog_put).delete(ui_dialog_delete),
+            );
     }
     let app = app.with_state(state);
 
@@ -247,6 +270,81 @@ async fn ui_css() -> Response {
 }
 async fn ui_js() -> Response {
     ui_response(&UI_JS)
+}
+
+// ---- Dialog persistence endpoints (served only with `--ui`) ----
+
+fn store_unavailable() -> Response {
+    (StatusCode::SERVICE_UNAVAILABLE, "dialog store disabled").into_response()
+}
+
+async fn ui_dialogs_list(State(state): State<Arc<OpenAiServerState>>) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.list() {
+        Ok(list) => Json(list).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn ui_dialog_get(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.get(&id) {
+        Ok(Some(dialog)) => Json(dialog).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "dialog not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct DialogUpsertBody {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    messages: serde_json::Value,
+}
+
+async fn ui_dialog_put(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(id): Path<String>,
+    Json(body): Json<DialogUpsertBody>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    let title = if body.title.trim().is_empty() {
+        "Без названия".to_string()
+    } else {
+        body.title
+    };
+    let messages = if body.messages.is_null() {
+        serde_json::Value::Array(Vec::new())
+    } else {
+        body.messages
+    };
+    match store.upsert(&id, &title, &messages) {
+        Ok(summary) => Json(summary).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
+}
+
+async fn ui_dialog_delete(
+    State(state): State<Arc<OpenAiServerState>>,
+    Path(id): Path<String>,
+) -> Response {
+    let Some(store) = state.dialog_store.as_ref() else {
+        return store_unavailable();
+    };
+    match store.delete(&id) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error).into_response(),
+    }
 }
 
 async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoResponse {

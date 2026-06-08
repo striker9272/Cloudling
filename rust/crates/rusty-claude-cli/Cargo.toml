@@ -19,6 +19,7 @@ pulldown-cmark = "0.13"
 rustyline = "15"
 runtime = { path = "../runtime" }
 plugins = { path = "../plugins" }
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 syntect = "5"
