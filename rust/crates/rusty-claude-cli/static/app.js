@@ -206,7 +206,15 @@
      surrounding text. (ToolUse has no separate stream event, so there is no "running" state —
      the block appears already executed.) */
   var TOOL_RE=/<details type="tool_calls"[^>]*\bname="([^"]*)"[^>]*>([\s\S]*?)<\/details>/g;
+  /* Generic block matcher: tool-call results AND reasoning blocks. m[1]=kind, m[2]=opening-tag
+     attrs (tool name lives here), m[3]=inner. */
+  var BLOCK_RE=/<details type="(tool_calls|reasoning)"([^>]*)>([\s\S]*?)<\/details>/g;
   function decodeEntities(s){ return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&'); }
+  function blockEl(kind, attrs, inner){
+    if(kind==='reasoning') return buildReasonEl(inner);
+    var name=(attrs.match(/\bname="([^"]*)"/)||[])[1]||'';
+    return buildToolEl(name, inner);
+  }
   function buildToolEl(name, inner){
     var fail=/<summary>\s*Tool Failed/i.test(inner);
     var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
@@ -220,18 +228,27 @@
     pre.textContent=text;
     d.appendChild(sum); d.appendChild(pre); return d;
   }
+  /* reasoning block: the model's thinking, collapsed by default */
+  function buildReasonEl(inner){
+    var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
+    var d=document.createElement('details'); d.className='tool reason';
+    var sum=document.createElement('summary'); sum.className='head';
+    sum.innerHTML='<span class="tag">Размышление</span>';
+    var pre=document.createElement('pre'); pre.className='toolout'; pre.textContent=decodeEntities(out);
+    d.appendChild(sum); d.appendChild(pre); return d;
+  }
   /* rebuild the assistant turn body from the raw accumulated content; caret only while streaming */
   function paintTurn(turn, raw, streaming){
     turn.innerHTML='';
-    var pos=0, m, segs=[]; TOOL_RE.lastIndex=0;
-    while((m=TOOL_RE.exec(raw))!==null){
+    var pos=0, m, segs=[]; BLOCK_RE.lastIndex=0;
+    while((m=BLOCK_RE.exec(raw))!==null){
       if(m.index>pos) segs.push({t:'text', v:raw.slice(pos, m.index)});
-      segs.push({t:'tool', name:m[1], inner:m[2]});
-      pos=TOOL_RE.lastIndex;
+      segs.push({t:'block', kind:m[1], attrs:m[2], inner:m[3]});
+      pos=BLOCK_RE.lastIndex;
     }
     if(pos<raw.length) segs.push({t:'text', v:raw.slice(pos)});
     segs.forEach(function(s, i){
-      if(s.t==='tool'){ turn.appendChild(buildToolEl(s.name, s.inner)); return; }
+      if(s.t==='block'){ turn.appendChild(blockEl(s.kind, s.attrs, s.inner)); return; }
       if(!s.v.replace(/\s/g,'')) return; /* skip whitespace-only gaps between blocks */
       var box=document.createElement('div'); box.className='md';
       var isLast=(i===segs.length-1);
@@ -258,12 +275,12 @@
       if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
         liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
         caretEl=document.createElement('span'); caretEl.className='caret'; }
-      var m; TOOL_RE.lastIndex=0;
-      while((m=TOOL_RE.exec(acc))!==null){
+      var m; BLOCK_RE.lastIndex=0;
+      while((m=BLOCK_RE.exec(acc))!==null){
         if(m.index < committed) continue;
         var pre=acc.slice(committed, m.index);
         if(pre.replace(/\s/g,'')){ var b=document.createElement('div'); b.className='md'; b.innerHTML=md(pre); turn.insertBefore(b, liveBox); }
-        turn.insertBefore(buildToolEl(m[1], m[2]), liveBox);
+        turn.insertBefore(blockEl(m[1], m[2], m[3]), liveBox);
         committed=m.index+m[0].length;
       }
       liveBox.innerHTML=md(acc.slice(committed));            /* progressive markdown */
@@ -541,6 +558,17 @@
   });
   loadConfig();
 
+  /* ---------- reasoning display toggle (ui_kv show_reasoning, default ON) ---------- */
+  (function(){
+    var sel=document.getElementById('showReason'); if(!sel) return;
+    fetch('/ui/kv/show_reasoning').then(function(r){ return r.ok?r.json():null; }).then(function(d){
+      if(d && d.value==='false') sel.value='false';
+    }).catch(function(){});
+    sel.addEventListener('change', function(){
+      fetch('/ui/kv/show_reasoning',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.value})}).catch(function(){});
+    });
+  })();
+
   /* ---------- backend connection check (like OWUI) ---------- */
   function setConnDot(state){ document.querySelectorAll('.entry .model .dot').forEach(function(d){ d.style.background = state==='err' ? '#d97b7b' : (state==='ok' ? '#5fa97e' : '#8a8b91'); }); }
   document.getElementById('checkBackend').addEventListener('click', function(){
@@ -599,7 +627,13 @@
   function setActivePreset(id){ activePresetId=id||null; return fetch('/ui/kv/active_preset',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id||''})}).catch(function(){}); }
   function activePresetPrompt(){ for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId) return presets[i].prompt||''; } return ''; }
   /* what we actually send: active preset's prompt prepended as a system message (or just convo) */
-  function outgoingMessages(){ var sys=activePresetPrompt(); return sys ? [{role:'system', content:sys}].concat(convo) : convo; }
+  function stripReasoning(t){ return (t||'').replace(/<details type="reasoning"[\s\S]*?<\/details>/g,'').replace(/\n{3,}/g,'\n\n'); }
+  function outgoingMessages(){
+    var sys=activePresetPrompt();
+    /* reasoning blocks are display-only — drop them from resent history so context stays lean */
+    var hist=convo.map(function(m){ return m.role==='assistant' ? {role:m.role, content:stripReasoning(m.content)} : m; });
+    return sys ? [{role:'system', content:sys}].concat(hist) : hist;
+  }
 
   function updateChip(){ var nm='Без пресета';
     for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId){ nm=presets[i].name; break; } }
