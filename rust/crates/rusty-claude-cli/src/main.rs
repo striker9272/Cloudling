@@ -18,6 +18,7 @@ mod input;
 mod render;
 
 mod engine;
+mod dialog_store;
 mod openai_server;
 use std::collections::BTreeSet;
 use std::env;
