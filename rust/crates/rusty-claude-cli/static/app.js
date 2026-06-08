@@ -283,6 +283,7 @@
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
       activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[];
       viewHome.hidden=true; viewDlg.hidden=false; updateDialogList();
+      btn = dlgSend() || btn; /* we switched to the dialog view — drive stop/send on its (visible) button */
     }
     convo.push({role:'user', content:text});
     saveActive(); /* persist now so the dialog exists even before the answer */
@@ -396,21 +397,42 @@
     else if(act==='up'||act==='down'){ a.classList.toggle('on'); var other=turn.querySelector('[data-act='+(act==='up'?'down':'up')+']'); if(other)other.classList.remove('on'); }
   });
 
-  /* ---------- settings: save & restart (core restart loader) ---------- */
-  function engineUrlValid(){ var u=document.querySelector('.drawer.right .fieldrow input'); return /^https?:\/\/.+/i.test((u&&u.value||'').trim()); }
-  function saveError(){ var sm=document.getElementById('saveMsg'); sm.hidden=false; sm.className='savemsg err'; sm.textContent='Не удалось сохранить — укажи корректный адрес движка'; }
+  /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
+  function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
+  function loadSettings(){
+    return fetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
+      if(!s) return;
+      settingsFields().forEach(function(el){ var k=el.getAttribute('data-key'); if(k in s) el.value=s[k]||''; });
+      var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
+    }).catch(function(){});
+  }
+  function engineUrlValid(){ var u=document.querySelector('.drawer.right [data-key="OPENAI_BASE_URL"]'); return /^https?:\/\/.+/i.test((u&&u.value||'').trim()); }
+  function saveError(msg){ var sm=document.getElementById('saveMsg'); sm.hidden=false; sm.className='savemsg err'; sm.textContent=msg||'Не удалось сохранить — укажи корректный адрес движка'; }
 
+  /* the server rewrites the env file then exits; systemd restarts it with the new values.
+     we show a loader and poll /health until it answers again. */
+  function waitForRestart(btn,orig){
+    setTimeout(function(){
+      var tries=0;
+      (function poll(){ tries++;
+        fetch('/health',{cache:'no-store'}).then(function(r){ return r.ok; }).catch(function(){ return false; })
+          .then(function(ok){
+            if(ok){ btn.innerHTML=IC.check+' Готово'; loadSettings(); setTimeout(function(){ btn.innerHTML=orig; btn.disabled=false; }, 1200); }
+            else if(tries>45){ btn.innerHTML=orig; btn.disabled=false; saveError('Сервер не вернулся — проверь вручную'); }
+            else setTimeout(poll, 600);
+          });
+      })();
+    }, 2500);
+  }
   document.getElementById('saveRestart').addEventListener('click', function(){
     if(!engineUrlValid()){ saveError(); return; }
-    var btn=this; var o=btn.innerHTML; btn.disabled=true;
+    var btn=this, o=btn.innerHTML; document.getElementById('saveMsg').hidden=true; btn.disabled=true;
+    var body={}; settingsFields().forEach(function(el){ body[el.getAttribute('data-key')]=el.value||''; });
     btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Перезапуск ядра…</span>';
-    setTimeout(function(){ btn.innerHTML=IC.check+' Готово'; setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1100); }, 2000);
-  });
-
-  document.getElementById('saveOnly').addEventListener('click', function(){
-    if(!engineUrlValid()){ saveError(); return; }
-    var sm=document.getElementById('saveMsg'); sm.hidden=false; sm.className='savemsg'; sm.textContent='Сохранено';
-    setTimeout(function(){ sm.hidden=true; }, 1800);
+    fetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
+      .then(function(){ waitForRestart(btn,o); })
+      .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
   });
 
   /* ---------- backend connection check (like OWUI) ---------- */
@@ -528,5 +550,6 @@
 
   /* first run → setup screen; otherwise land on home (new dialog) */
   refreshSidebar();
+  loadSettings();
   if(configured){ newDialog(); } else { showSetup(); }
 })();
