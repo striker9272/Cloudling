@@ -631,8 +631,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             allowed_tools,
             permission_mode,
+            ui,
         } => {
-            openai_server::serve_blocking(bind, model, allowed_tools, permission_mode)?;
+            openai_server::serve_blocking(bind, model, allowed_tools, permission_mode, ui)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
@@ -765,6 +766,9 @@ enum CliAction {
         model: String,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        /// Serve the built-in web UI (page + assets) alongside the API. Off by
+        /// default so the headless service is unchanged unless explicitly enabled.
+        ui: bool,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -1691,13 +1695,14 @@ fn parse_openai_serve_args(
     permission_mode: PermissionMode,
 ) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
+    let mut ui = false;
     let mut index = 0;
 
     while index < args.len() {
         match args[index].as_str() {
             "--bind" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    "missing_flag_value: missing value for --bind.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]".to_string()
+                    "missing_flag_value: missing value for --bind.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]".to_string()
                 })?;
                 bind = value.clone();
                 index += 2;
@@ -1706,15 +1711,19 @@ fn parse_openai_serve_args(
                 bind = flag[7..].to_string();
                 index += 1;
             }
+            "--ui" => {
+                ui = true;
+                index += 1;
+            }
             "--help" | "-h" => {
                 return Err(
-                    "Usage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]\nStarts the experimental OpenAI-compatible HTTP server. If --model is omitted, OPENAI_MODEL is used."
+                    "Usage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]\nStarts the experimental OpenAI-compatible HTTP server. If --model is omitted, OPENAI_MODEL is used.\n--ui also serves the built-in web UI at GET / (headless by default)."
                         .to_string(),
                 );
             }
             other => {
                 return Err(format!(
-                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]"
+                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]"
                 ));
             }
         }
@@ -1726,6 +1735,7 @@ fn parse_openai_serve_args(
         model,
         allowed_tools,
         permission_mode,
+        ui,
     })
 }
 
