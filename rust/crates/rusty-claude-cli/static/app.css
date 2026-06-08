@@ -219,6 +219,11 @@ body.open-right .drawer.right{transform:translateX(0);}
 .tool .tag{color:var(--link); font-weight:500;}
 .tool.fail{border-color:#4a2626;}
 .tool.fail .tag{color:#e08a8a;}
+details.tool>summary.head{cursor:pointer; list-style:none;}
+details.tool>summary.head::-webkit-details-marker{display:none;}
+details.tool>summary.head::after{content:"▾"; margin-left:auto; color:var(--faint); font-size:11px; transition:transform .15s;}
+details.tool[open]>summary.head::after{transform:rotate(180deg);}
+.toolout{margin:0; padding:10px 12px; border-top:1px solid var(--line); background:#0c0c0e; font-family:var(--mono); font-size:12px; line-height:1.5; max-height:280px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#c9ccd3;}
 .errbox{border:1px solid #4a2626; background:#1f1414; border-radius:12px; padding:12px 14px; margin-top:2px;}
 .errbox .ehead{display:flex; align-items:center; gap:8px; color:#e08a8a; font-weight:500; font-size:13.5px; margin-bottom:5px;}
 .errbox .emsg{color:#c79090; font-size:13px; line-height:1.5; margin-bottom:11px;}
