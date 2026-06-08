@@ -134,12 +134,13 @@ pub(crate) fn serve_blocking(
     model: String,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
+    ui: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
-    runtime.block_on(serve(bind, model, allowed_tools, permission_mode))
+    runtime.block_on(serve(bind, model, allowed_tools, permission_mode, ui))
 }
 
 async fn serve(
@@ -147,6 +148,7 @@ async fn serve(
     model: String,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
+    ui: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = bind.parse()?;
     let served_model_id =
@@ -158,16 +160,93 @@ async fn serve(
         permission_mode,
     });
 
-    let app = Router::new()
+    // API routes are always present. The built-in web UI is opt-in via `--ui`, so the
+    // headless service is byte-for-byte unchanged unless the operator asks for it.
+    let mut app = Router::new()
         .route("/health", get(health))
         .route("/v1/models", get(models))
-        .route("/v1/chat/completions", post(chat_completions))
-        .with_state(state);
+        .route("/v1/chat/completions", post(chat_completions));
+    if ui {
+        app = app
+            .route("/", get(ui_index))
+            .route("/app.css", get(ui_css))
+            .route("/app.js", get(ui_js));
+    }
+    let app = app.with_state(state);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    eprintln!("claw openai-serve listening on http://{addr}");
+    if ui {
+        eprintln!("claw openai-serve listening on http://{addr} (web UI at /)");
+    } else {
+        eprintln!("claw openai-serve listening on http://{addr}");
+    }
     axum::serve(listener, app).await?;
     Ok(())
+}
+
+// ---- Built-in web UI (served only with `--ui`) ----
+//
+// Layout "B": each UI source file lives separately under `static/` and is embedded
+// individually, so HTML / CSS / JS stay editable in isolation rather than as one blob.
+// For a fast edit loop, `CLAB_UI_DIR` overrides the embedded copy by reading the file
+// from disk at runtime (dev only); when unset, the compile-time embedded asset is served,
+// keeping the shipped binary fully self-contained and portable. Growing to a whole-folder
+// embed later only means swapping the per-file constants for a directory walk.
+struct UiAsset {
+    /// File name under `static/` and under `CLAB_UI_DIR`.
+    file: &'static str,
+    /// Value for the `Content-Type` header.
+    content_type: &'static str,
+    /// Compile-time embedded contents (default / release path).
+    embedded: &'static str,
+}
+
+static UI_INDEX: UiAsset = UiAsset {
+    file: "index.html",
+    content_type: "text/html; charset=utf-8",
+    embedded: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/index.html")),
+};
+static UI_CSS: UiAsset = UiAsset {
+    file: "app.css",
+    content_type: "text/css; charset=utf-8",
+    embedded: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.css")),
+};
+static UI_JS: UiAsset = UiAsset {
+    file: "app.js",
+    content_type: "text/javascript; charset=utf-8",
+    embedded: include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/static/app.js")),
+};
+
+fn ui_asset_body(asset: &UiAsset) -> String {
+    // Dev override: read from CLAB_UI_DIR at runtime so UI edits don't need a rebuild.
+    if let Ok(dir) = std::env::var("CLAB_UI_DIR") {
+        let dir = dir.trim();
+        if !dir.is_empty() {
+            let path = std::path::Path::new(dir).join(asset.file);
+            if let Ok(contents) = std::fs::read_to_string(&path) {
+                return contents;
+            }
+        }
+    }
+    asset.embedded.to_string()
+}
+
+fn ui_response(asset: &'static UiAsset) -> Response {
+    (
+        [(axum::http::header::CONTENT_TYPE, asset.content_type)],
+        ui_asset_body(asset),
+    )
+        .into_response()
+}
+
+async fn ui_index() -> Response {
+    ui_response(&UI_INDEX)
+}
+async fn ui_css() -> Response {
+    ui_response(&UI_CSS)
+}
+async fn ui_js() -> Response {
+    ui_response(&UI_JS)
 }
 
 async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoResponse {
