@@ -117,16 +117,48 @@
     list.forEach(function(d){ var it=sidebarItem(d); if(d.id===activeId){ it.classList.add('active'); activeItem=it; } leftDrawer.insertBefore(it, anchor); });
     updateDialogList(); return list; }); }
 
+  /* fade a full view out while it's laid on top (out of flow), then hide it */
+  function dissolveOut(view){
+    view.style.position='absolute'; view.style.inset='0'; view.style.zIndex='1'; view.style.pointerEvents='none';
+    var a=view.animate([{opacity:1},{opacity:0}],{duration:200, easing:'ease-in'});
+    a.onfinish=function(){ view.hidden=true; view.style.position=''; view.style.inset=''; view.style.zIndex=''; view.style.pointerEvents=''; };
+  }
   function openDialog(id, el){
-    activeId=id; viewHome.hidden=true; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true; viewDlg.hidden=false;
+    var wasDialog=(viewDlg.hidden===false), wasHome=(viewHome.hidden===false);
+    activeId=id; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true;
+    /* take home out of flow FIRST (dissolve), THEN show the dialog — otherwise the dialog is
+       briefly pushed below the fold and jumps up when home leaves the flow */
+    if(wasHome && viewHome.animate){ dissolveOut(viewHome); } else { viewHome.hidden=true; }
+    viewDlg.hidden=false;
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.toggle('active', it===el); });
     activeItem=el;
-    var tok=++skelToken; thread.innerHTML=SKELETON;
+    if(!wasDialog){ thread.style.opacity='0'; } /* coming from home: don't flash the old/empty thread */
+    var tok=++skelToken;
+    /* fetch first, then swap content while hidden (no skeleton flash, scroll snap invisible),
+       then fade in — keeps the transition smooth */
     apiGet(id).then(function(d){ if(tok!==skelToken) return;
-      dtitle.textContent=(d && d.title) || ''; renderConvo(d ? d.messages : []);
-      stick=true; toBottom(); updateScrollBtn(); }); }
-  function newDialog(){ viewDlg.hidden=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[];
-    leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); }); }
+      function apply(){
+        dtitle.textContent=(d && d.title) || '';
+        thread.style.opacity='0';
+        renderConvo(d ? d.messages : []); stick=true; toBottom(); updateScrollBtn();
+        if(thread.animate){ var fa=thread.animate([{opacity:0},{opacity:1}],{duration:200, easing:'ease-out'}); fa.onfinish=function(){ thread.style.opacity=''; }; }
+        else { thread.style.opacity=''; }
+      }
+      if(wasDialog && thread.animate && thread.children.length){
+        var fo=thread.animate([{opacity:1},{opacity:0}],{duration:120, easing:'ease-in'}); fo.onfinish=apply;
+      } else { apply(); }
+    });
+  }
+  function newDialog(){
+    var wasDialog=(viewDlg.hidden===false);
+    document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[];
+    leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); });
+    /* dialog → new chat: dissolve the dialog to reveal home, fade the hero in */
+    if(wasDialog && viewDlg.animate){
+      dissolveOut(viewDlg);
+      var hero=viewHome.querySelector('.hero'); if(hero && hero.animate){ hero.animate([{opacity:0, transform:'translateY(-8px)'},{opacity:1, transform:'none'}],{duration:260, easing:'ease-out'}); }
+    } else { viewDlg.hidden=true; }
+  }
   /* persist the active dialog (full transcript) */
   function saveActive(){ if(!activeId) return; var title=(dtitle.textContent||'').trim() || ((convo[0]&&convo[0].content)||'').slice(0,42) || 'Без названия'; apiSave(activeId, title, convo); }
   document.getElementById('newDlg').onclick=function(){ newDialog(); closeDrawers(); };
@@ -181,7 +213,11 @@
     var d=document.createElement('details'); d.className='tool'+(fail?' fail':'');
     var sum=document.createElement('summary'); sum.className='head';
     sum.innerHTML=(fail?IC.warn:'')+'<span class="tag">'+esc(decodeEntities(name))+'</span> · '+(fail?'ошибка':'выполнено');
-    var pre=document.createElement('pre'); pre.className='toolout'; pre.textContent=decodeEntities(out);
+    var pre=document.createElement('pre'); pre.className='toolout';
+    var raw=decodeEntities(out), text;
+    try{ var parsed=JSON.parse(raw); text=(typeof parsed==='string')?parsed:JSON.stringify(parsed,null,2); }
+    catch(e){ text=raw; }
+    pre.textContent=text;
     d.appendChild(sum); d.appendChild(pre); return d;
   }
   /* rebuild the assistant turn body from the raw accumulated content; caret only while streaming */
@@ -468,6 +504,42 @@
       .then(function(){ waitForRestart(btn,o); })
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
   });
+
+  /* ---------- security section: settings.json-backed config (no restart) ---------- */
+  function cfgSandboxFields(){ return document.querySelectorAll('.drawer.right [data-sb]'); }
+  function linesToArray(s){ return (s||'').split('\n').map(function(x){ return x.trim(); }).filter(function(x){ return x.length; }); }
+  function loadConfig(){
+    return fetch('/ui/config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
+      if(!c) return;
+      var sb=c.sandbox||{};
+      var defaults={enabled:true, filesystemMode:'workspace-only', networkIsolation:false, namespaceRestrictions:true};
+      cfgSandboxFields().forEach(function(el){
+        var k=el.getAttribute('data-sb');
+        var v=(sb && k in sb)?sb[k]:defaults[k];
+        if(typeof v==='boolean') v=v?'true':'false';
+        el.value=(v==null?'':String(v));
+      });
+      document.getElementById('cfgTrusted').value=(c.trustedRoots||[]).join('\n');
+      var perm=c.permissions||{};
+      document.getElementById('cfgAllow').value=(perm.allow||[]).join('\n');
+      document.getElementById('cfgDeny').value=(perm.deny||[]).join('\n');
+    }).catch(function(){});
+  }
+  function cfgMsg(ok,text){ var m=document.getElementById('cfgMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2400); }
+  document.getElementById('cfgSave').addEventListener('click', function(){
+    var btn=this; btn.disabled=true; document.getElementById('cfgMsg').hidden=true;
+    var sandbox={};
+    cfgSandboxFields().forEach(function(el){
+      var k=el.getAttribute('data-sb'), v=el.value;
+      sandbox[k]=(v==='true')?true:(v==='false')?false:v;
+    });
+    var body={ sandbox:sandbox, trustedRoots:linesToArray(document.getElementById('cfgTrusted').value), permissions:{ allow:linesToArray(document.getElementById('cfgAllow').value), deny:linesToArray(document.getElementById('cfgDeny').value) } };
+    fetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
+      .then(function(){ btn.disabled=false; cfgMsg(true,'Сохранено — применится со следующего сообщения'); })
+      .catch(function(err){ btn.disabled=false; cfgMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
+  });
+  loadConfig();
 
   /* ---------- backend connection check (like OWUI) ---------- */
   function setConnDot(state){ document.querySelectorAll('.entry .model .dot').forEach(function(d){ d.style.background = state==='err' ? '#d97b7b' : (state==='ok' ? '#5fa97e' : '#8a8b91'); }); }
