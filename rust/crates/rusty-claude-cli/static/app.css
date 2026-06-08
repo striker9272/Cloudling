@@ -16,7 +16,7 @@ body{margin:0; background:var(--bg); color:var(--text); font-family:var(--font);
 ::placeholder{color:#5d5f66;}
 
 html,body{height:100%;}
-.content{height:100vh; overflow:hidden;}
+.content{height:100vh; overflow:hidden; position:relative;}
 #view-home,#view-setup,#view-preset{height:100%; overflow-y:auto; max-width:780px; margin:0 auto; padding:84px 26px 40px;}
 #view-dialog:not([hidden]){height:100%; max-width:780px; margin:0 auto; padding:0 26px; position:relative; display:flex; flex-direction:column;}
 .scrolldown{position:absolute; left:50%; transform:translateX(-50%); top:-48px; width:34px; height:34px; border-radius:50%; background:#202028; border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; box-shadow:0 6px 20px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition:opacity .15s; z-index:5;}
@@ -79,6 +79,9 @@ body.open-right .drawer.right{transform:translateX(0);}
 .dtitle{font-size:17px; font-weight:600; letter-spacing:-0.01em; margin-bottom:14px;}
 .newbtn{background:none; border:1px solid var(--line); color:var(--text); width:28px; height:28px; border-radius:8px; cursor:pointer; font-size:17px; line-height:1; display:flex; align-items:center; justify-content:center; transition:background .12s;}
 .newbtn:hover{background:#202024;}
+.newchat{width:100%; display:flex; align-items:center; justify-content:center; gap:8px; background:#f0f1f3; border:none; color:#16161a; border-radius:12px; padding:10px; font:inherit; font-size:14px; font-weight:600; cursor:pointer; margin-bottom:14px; transition:filter .12s, transform .1s;}
+.newchat:hover{filter:brightness(.93);}
+.newchat:active{transform:scale(.99);}
 
 .search input{width:100%; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:12px; padding:9px 11px; font:inherit; font-size:13px; margin-bottom:14px; transition:border-color .15s;}
 .search input:focus{outline:none; border-color:var(--line2);}
@@ -151,6 +154,11 @@ body.open-right .drawer.right{transform:translateX(0);}
 .dhdr .h{font-family:var(--display); font-size:18px; font-weight:700; letter-spacing:-0.02em;}
 .thread{display:flex; flex-direction:column; gap:22px; flex:1; min-height:0; overflow-y:auto; padding-bottom:14px;}
 .dock{position:relative; padding:12px 0 16px; background:var(--bg);}
+/* dialog composer: docked to the bottom edge — rounded top only, flush bottom (like our edge tabs) */
+#view-dialog .dock{padding:0;}
+#view-dialog .thread{padding-bottom:8px;}
+#view-dialog .entry{border-radius:18px 18px 0 0; border-bottom:none; margin-top:0; margin-bottom:0;}
+#view-dialog .entry textarea{min-height:46px; padding-top:10px;}
 
 /* first-run setup */
 .setup{max-width:560px; margin:36px auto 0; text-align:center;}
