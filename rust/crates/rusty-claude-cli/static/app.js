@@ -213,8 +213,18 @@
      The page is the client: it holds the dialog history and re-sends it every turn
      (clab is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
      convo entry, so we can rewind both together on regenerate / edit. */
-  var convo = [], currentAbort = null;
-  function turnIndex(turn){ return Array.prototype.indexOf.call(thread.querySelectorAll('.turn'), turn); }
+  var convo = [], currentAbort = null, liveAcc = '';
+  /* Invariant: every *real* `.turn` maps 1:1 onto a `convo` entry. Error boxes are
+     marked `.noconv` (they have no history entry) and are excluded from index math,
+     so regenerate/edit slice `convo` at the right spot even after a failed turn. */
+  function realTurns(){ return Array.prototype.filter.call(thread.querySelectorAll('.turn'), function(t){ return !t.classList.contains('noconv'); }); }
+  function turnIndex(turn){ return realTurns().indexOf(turn); }
+  /* remove `turn` (if inclusive) and every turn after it — incl. stray error boxes */
+  function removeTurnsFrom(turn, inclusive){
+    var all=Array.prototype.slice.call(thread.querySelectorAll('.turn'));
+    var from=all.indexOf(turn); if(from<0) return;
+    all.slice(inclusive?from:from+1).forEach(function(n){ n.remove(); });
+  }
 
   function attachRetry(turn, btn){ var r=turn.querySelector('.retry'); if(!r) return;
     r.addEventListener('click', function(){ if(generating) return;
@@ -289,13 +299,14 @@
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true;
+    liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
     /* Incremental render: completed tool blocks + the text before them are committed ONCE
        (permanent DOM); the trailing text node is re-rendered as markdown each token so
        formatting appears live (progressive, like OpenWebUI). liveBox stays the last child
        and is the anchor we insert committed blocks before, so the tool blocks never get
        rebuilt/re-collapsed mid-stream. */
     function onContent(piece){
-      acc+=piece;
+      acc+=piece; liveAcc=acc;
       if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
         liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
         caretEl=document.createElement('span'); caretEl.className='caret'; }
@@ -314,7 +325,7 @@
     function finalize(){
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
-      convo.push({role:'assistant', content:acc});
+      convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive();
       finishGen(btn); maybeScroll();
       if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
@@ -348,6 +359,8 @@
       return pump();
     }).catch(function(err){
       if(err && err.name==='AbortError'){ return; } /* stop button owns the UI */
+      liveAcc='';
+      turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
       turn.innerHTML=errboxHTML(); attachRetry(turn, btn);
       finishGen(btn); maybeScroll();
     }).then(function(){ if(currentAbort===ac) currentAbort=null; });
@@ -406,8 +419,12 @@
   }
 
   function stopGen(btn){ if(currentAbort){ currentAbort.abort(); currentAbort=null; } clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
-    var th=thread.querySelector('.thinking'); if(th){ th.closest('.turn').remove(); return; }
+    var th=thread.querySelector('.thinking'); if(th){ th.closest('.turn').remove(); liveAcc=''; return; }
     var turn=thread.querySelector('.turn.a:last-child'); if(!turn) return;
+    /* the partial answer stays visible in the thread, so it must enter the history
+       too — otherwise the turn↔convo mapping drifts and later regen/edit misalign */
+    if(liveAcc.replace(/\s/g,'')){ convo.push({role:'assistant', content:liveAcc}); saveActive(); }
+    liveAcc='';
     var c=turn.querySelector('.caret'); if(c) c.remove();
     /* stopped mid tool-call: freeze the running ripple into a neutral head */
     var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head) head.innerHTML='<span class="tag">WebSearch</span> · остановлено'; }
@@ -472,8 +489,9 @@
   function regenTurn(turn){ if(generating) return;
     var idx=turnIndex(turn); if(idx<0) return;
     var btn=dlgSend(); if(!btn) return;
-    /* drop this answer and everything after it, in both the thread and the history */
-    while(thread.children.length>idx) thread.removeChild(thread.lastChild);
+    /* drop this answer and everything after it, in both the thread and the history
+       (convo index = position among real turns; DOM removal also sweeps error boxes) */
+    removeTurnsFrom(turn, true);
     convo=convo.slice(0, idx);
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
     generate(btn);
@@ -493,7 +511,7 @@
     acts.querySelector('.esave').onclick=function(){ var nv=(ta.value||'').trim()||orig; restore(nv);
       var idx=turnIndex(turn); if(idx<0) return;
       /* keep this (edited) user turn, drop everything after; rewrite history from here */
-      while(thread.children.length>idx+1) thread.removeChild(thread.lastChild);
+      removeTurnsFrom(turn, false);
       convo=convo.slice(0, idx); convo.push({role:'user', content:nv});
       var btn=dlgSend(); if(!btn) return;
       generating=true; setSend(btn,true); setItemGenerating(activeItem,true);

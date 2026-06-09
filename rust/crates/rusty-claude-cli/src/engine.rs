@@ -224,6 +224,11 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
 /// state, or other terminal-only UI concerns.
 pub(crate) struct ClawEngineSession {
     model: String,
+    // Whether the runtime exposes tools to the model. Stored so every per-turn
+    // runtime rebuild (`prepare_engine_runtime`) honors it — a tools-disabled
+    // session (e.g. the UI title endpoint) must stay tools-disabled for the
+    // actual prompt run, not just for the constructor's initial runtime.
+    enable_tools: bool,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
     system_prompt: Vec<String>,
@@ -280,6 +285,7 @@ impl ClawEngineSession {
 
         Ok(Self {
             model,
+            enable_tools,
             allowed_tools,
             permission_mode,
             system_prompt,
@@ -334,7 +340,7 @@ impl EngineHost for ClawEngineSession {
             &self.session.id,
             self.model.clone(),
             self.system_prompt.clone(),
-            true,
+            self.enable_tools,
             emit_output,
             self.allowed_tools.clone(),
             self.permission_mode,

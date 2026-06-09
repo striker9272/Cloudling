@@ -517,6 +517,19 @@ fn write_env_file(
     }
     let tmp = path.with_extension("env.tmp");
     std::fs::write(&tmp, out.as_bytes()).map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        // The env file holds secrets (API key). `fs::write` creates the temp file
+        // with umask permissions (usually 0644); the rename would silently replace
+        // the installer's restrictive mode (0640) with a world-readable file.
+        // Carry over the existing file's mode, falling back to owner-only.
+        let mode = std::fs::metadata(path)
+            .map(|m| m.permissions().mode() & 0o777)
+            .unwrap_or(0o600);
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))
+            .map_err(|e| e.to_string())?;
+    }
     std::fs::rename(&tmp, path).map_err(|e| e.to_string())?;
     Ok(())
 }
