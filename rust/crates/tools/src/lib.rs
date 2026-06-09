@@ -5818,14 +5818,25 @@ fn iso8601_now() -> String {
 
 #[allow(clippy::too_many_lines)]
 fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput, String> {
-    let path = std::path::PathBuf::from(&input.notebook_path);
-    if path.extension().and_then(|ext| ext.to_str()) != Some("ipynb") {
+    if std::path::Path::new(&input.notebook_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        != Some("ipynb")
+    {
         return Err(String::from(
             "File must be a Jupyter notebook (.ipynb file).",
         ));
     }
 
-    let original_file = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    // Resolve and read through the workspace-aware layer so the path is anchored to
+    // the per-run workspace root (like read/write/edit) and the filesystem policy
+    // (filesystemMode + trustedRoots) is enforced — same as the other file tools.
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
+    let original_file =
+        read_file_in_workspace(&input.notebook_path, None, None, &workspace)
+            .map_err(|error| error.to_string())?
+            .file
+            .content;
     let mut notebook: serde_json::Value =
         serde_json::from_str(&original_file).map_err(|error| error.to_string())?;
     let language = notebook
@@ -5924,7 +5935,8 @@ fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput,
 
     let updated_file =
         serde_json::to_string_pretty(&notebook).map_err(|error| error.to_string())?;
-    std::fs::write(&path, &updated_file).map_err(|error| error.to_string())?;
+    let written = write_file_in_workspace(&input.notebook_path, &updated_file, &workspace)
+        .map_err(|error| error.to_string())?;
 
     Ok(NotebookEditOutput {
         new_source,
@@ -5933,7 +5945,7 @@ fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput,
         language,
         edit_mode: format_notebook_edit_mode(edit_mode),
         error: None,
-        notebook_path: path.display().to_string(),
+        notebook_path: written.file_path,
         original_file,
         updated_file,
     })
@@ -9557,6 +9569,12 @@ mod tests {
 
     #[test]
     fn notebook_edit_replaces_inserts_and_deletes_cells() {
+        // NotebookEdit now goes through the workspace-aware file layer; allow the
+        // absolute temp path by disabling the filesystem boundary for this test.
+        let _fs = runtime::scoped_filesystem_policy(Some(runtime::FilesystemPolicy {
+            mode: runtime::FilesystemIsolationMode::Off,
+            trusted_roots: Vec::new(),
+        }));
         let path = temp_path("notebook.ipynb");
         std::fs::write(
             &path,
@@ -9637,6 +9655,10 @@ mod tests {
 
     #[test]
     fn notebook_edit_rejects_invalid_inputs() {
+        let _fs = runtime::scoped_filesystem_policy(Some(runtime::FilesystemPolicy {
+            mode: runtime::FilesystemIsolationMode::Off,
+            trusted_roots: Vec::new(),
+        }));
         let text_path = temp_path("notebook.txt");
         fs::write(&text_path, "not a notebook").expect("write text file");
         let wrong_extension = execute_tool(
@@ -9677,6 +9699,40 @@ mod tests {
         .expect_err("delete on empty notebook should fail");
         assert!(missing_cell.contains("Notebook has no cells to edit"));
         let _ = fs::remove_file(empty_notebook);
+    }
+
+    #[test]
+    fn notebook_edit_resolves_relative_path_under_workspace_root() {
+        // Regression: NotebookEdit must anchor a relative path to the per-run
+        // workspace root (like read/write/edit), not the process cwd. Default policy
+        // (workspace-only) permits it because the resolved path stays in-workspace.
+        let dir = temp_path("nb-workspace");
+        std::fs::create_dir_all(&dir).expect("workspace dir should be created");
+        std::fs::write(
+            dir.join("nb.ipynb"),
+            r#"{"cells":[{"cell_type":"code","id":"c1","metadata":{},"source":["print(1)\n"],"outputs":[],"execution_count":null}],"metadata":{"kernelspec":{"language":"python"}},"nbformat":4,"nbformat_minor":5}"#,
+        )
+        .expect("write notebook");
+
+        let _ws = runtime::scoped_workspace_root(Some(dir.clone()));
+        let out = execute_tool(
+            "NotebookEdit",
+            &json!({
+                "notebook_path": "nb.ipynb",
+                "cell_id": "c1",
+                "new_source": "print(42)\n",
+                "edit_mode": "replace"
+            }),
+        )
+        .expect("NotebookEdit with a relative path should resolve under the workspace root");
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(parsed["cell_id"], "c1");
+
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("nb.ipynb")).expect("read"))
+                .expect("valid notebook json");
+        assert_eq!(written["cells"][0]["source"][0], "print(42)\n");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
