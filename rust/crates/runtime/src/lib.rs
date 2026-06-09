@@ -195,7 +195,11 @@ pub use worker_boot::{
     Worker, WorkerEvent, WorkerEventKind, WorkerEventPayload, WorkerFailure, WorkerFailureKind,
     WorkerPromptTarget, WorkerReadySnapshot, WorkerRegistry, WorkerStatus, WorkerTrustResolution,
 };
-pub use workspace_root::{current_workspace_root, scoped_workspace_root, WorkspaceRootGuard};
+pub use workspace_root::{
+    current_filesystem_policy, current_workspace_root, load_filesystem_policy_for,
+    scoped_filesystem_policy, scoped_workspace_root, FilesystemPolicy, FilesystemPolicyGuard,
+    WorkspaceRootGuard,
+};
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
