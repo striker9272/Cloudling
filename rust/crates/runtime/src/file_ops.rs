@@ -10,6 +10,9 @@ use regex::RegexBuilder;
 use serde::{Deserialize, Serialize};
 use walkdir::{DirEntry, WalkDir};
 
+use crate::current_filesystem_policy;
+use crate::sandbox::FilesystemIsolationMode;
+
 /// Maximum file size that can be read (10 MB).
 const MAX_READ_SIZE: u64 = 10 * 1024 * 1024;
 
@@ -51,6 +54,64 @@ fn validate_workspace_boundary(resolved: &Path, workspace_root: &Path) -> io::Re
         ));
     }
     Ok(())
+}
+
+/// Effective filesystem boundary for one file-tool call: combines the per-run
+/// [`FilesystemPolicy`](crate::FilesystemPolicy) (from the UI "Security" panel /
+/// `settings.json`) with the workspace root. This is the single seam through which
+/// read/write/edit/glob/grep honor `filesystemMode` instead of always confining to
+/// the workspace.
+struct FsBoundary {
+    mode: FilesystemIsolationMode,
+    canonical_root: PathBuf,
+    trusted_roots: Vec<PathBuf>,
+}
+
+impl FsBoundary {
+    /// Resolve the boundary for the current run from the ambient policy.
+    fn for_root(workspace_root: &Path) -> Self {
+        let policy = current_filesystem_policy();
+        Self {
+            mode: policy.mode,
+            canonical_root: canonicalize_workspace_root(workspace_root),
+            trusted_roots: policy
+                .trusted_roots
+                .iter()
+                .map(|root| canonicalize_workspace_root(root))
+                .collect(),
+        }
+    }
+
+    /// Permit or reject a resolved absolute path under the policy:
+    /// `Off` allows anything; `WorkspaceOnly` confines to the workspace root;
+    /// `AllowList` confines to the workspace root or any trusted root.
+    fn check(&self, resolved: &Path) -> io::Result<()> {
+        match self.mode {
+            FilesystemIsolationMode::Off => Ok(()),
+            FilesystemIsolationMode::WorkspaceOnly => {
+                validate_workspace_boundary(resolved, &self.canonical_root)
+            }
+            FilesystemIsolationMode::AllowList => {
+                if resolved.starts_with(&self.canonical_root)
+                    || self
+                        .trusted_roots
+                        .iter()
+                        .any(|root| resolved.starts_with(root))
+                {
+                    Ok(())
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!(
+                            "path {} escapes workspace boundary {} and the trusted roots",
+                            resolved.display(),
+                            self.canonical_root.display()
+                        ),
+                    ))
+                }
+            }
+        }
+    }
 }
 
 /// Text payload returned by file-reading operations.
@@ -313,16 +374,15 @@ pub fn glob_search(pattern: &str, path: Option<&str>) -> io::Result<GlobSearchOu
 fn glob_search_impl(
     pattern: &str,
     path: Option<&str>,
-    workspace_root: Option<&Path>,
+    boundary: Option<&FsBoundary>,
 ) -> io::Result<GlobSearchOutput> {
     let started = Instant::now();
     let base_dir = path
         .map(normalize_path)
         .transpose()?
         .unwrap_or(std::env::current_dir()?);
-    let canonical_root = workspace_root.map(canonicalize_workspace_root);
-    if let Some(root) = canonical_root.as_deref() {
-        validate_workspace_boundary(&base_dir, root)?;
+    if let Some(boundary) = boundary {
+        boundary.check(&base_dir)?;
     }
     let search_pattern = if Path::new(pattern).is_absolute() {
         pattern.to_owned()
@@ -341,11 +401,11 @@ fn glob_search_impl(
         let compiled = Pattern::new(pat)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let walk_root = derive_glob_walk_root(pat);
-        if let Some(root) = canonical_root.as_deref() {
+        if let Some(boundary) = boundary {
             let canonical_walk_root = walk_root
                 .canonicalize()
                 .unwrap_or_else(|_| walk_root.clone());
-            validate_workspace_boundary(&canonical_walk_root, root)?;
+            boundary.check(&canonical_walk_root)?;
         }
         let entries = WalkDir::new(&walk_root)
             .into_iter()
@@ -356,9 +416,9 @@ fn glob_search_impl(
                 && compiled.matches_path(candidate)
                 && seen.insert(candidate.to_path_buf())
             {
-                if let Some(root) = canonical_root.as_deref() {
+                if let Some(boundary) = boundary {
                     let canonical_candidate = candidate.canonicalize()?;
-                    validate_workspace_boundary(&canonical_candidate, root)?;
+                    boundary.check(&canonical_candidate)?;
                 }
                 matches.push(candidate.to_path_buf());
             }
@@ -394,7 +454,7 @@ pub fn grep_search(input: &GrepSearchInput) -> io::Result<GrepSearchOutput> {
 
 fn grep_search_impl(
     input: &GrepSearchInput,
-    workspace_root: Option<&Path>,
+    boundary: Option<&FsBoundary>,
 ) -> io::Result<GrepSearchOutput> {
     let base_path = input
         .path
@@ -402,9 +462,8 @@ fn grep_search_impl(
         .map(normalize_path)
         .transpose()?
         .unwrap_or(std::env::current_dir()?);
-    let canonical_root = workspace_root.map(canonicalize_workspace_root);
-    if let Some(root) = canonical_root.as_deref() {
-        validate_workspace_boundary(&base_path, root)?;
+    if let Some(boundary) = boundary {
+        boundary.check(&base_path)?;
     }
 
     let regex = RegexBuilder::new(&input.pattern)
@@ -431,9 +490,9 @@ fn grep_search_impl(
     let mut total_matches = 0usize;
 
     for file_path in collect_search_files(&base_path)? {
-        if let Some(root) = canonical_root.as_deref() {
+        if let Some(boundary) = boundary {
             let canonical_file = file_path.canonicalize()?;
-            validate_workspace_boundary(&canonical_file, root)?;
+            boundary.check(&canonical_file)?;
         }
         if !matches_optional_filters(&file_path, glob_filter.as_ref(), file_type) {
             continue;
@@ -682,8 +741,7 @@ pub fn read_file_in_workspace(
     workspace_root: &Path,
 ) -> io::Result<ReadFileOutput> {
     let absolute_path = normalize_path(path)?;
-    let canonical_root = canonicalize_workspace_root(workspace_root);
-    validate_workspace_boundary(&absolute_path, &canonical_root)?;
+    FsBoundary::for_root(workspace_root).check(&absolute_path)?;
     read_file(path, offset, limit)
 }
 
@@ -695,8 +753,7 @@ pub fn write_file_in_workspace(
     workspace_root: &Path,
 ) -> io::Result<WriteFileOutput> {
     let absolute_path = normalize_path_allow_missing(path)?;
-    let canonical_root = canonicalize_workspace_root(workspace_root);
-    validate_workspace_boundary(&absolute_path, &canonical_root)?;
+    FsBoundary::for_root(workspace_root).check(&absolute_path)?;
     write_file(path, content)
 }
 
@@ -710,8 +767,7 @@ pub fn edit_file_in_workspace(
     workspace_root: &Path,
 ) -> io::Result<EditFileOutput> {
     let absolute_path = normalize_path(path)?;
-    let canonical_root = canonicalize_workspace_root(workspace_root);
-    validate_workspace_boundary(&absolute_path, &canonical_root)?;
+    FsBoundary::for_root(workspace_root).check(&absolute_path)?;
     edit_file(path, old_string, new_string, replace_all)
 }
 
@@ -722,7 +778,8 @@ pub fn glob_search_in_workspace(
     path: Option<&str>,
     workspace_root: &Path,
 ) -> io::Result<GlobSearchOutput> {
-    glob_search_impl(pattern, path, Some(workspace_root))
+    let boundary = FsBoundary::for_root(workspace_root);
+    glob_search_impl(pattern, path, Some(&boundary))
 }
 
 /// Search file contents with workspace boundary enforcement.
@@ -731,7 +788,8 @@ pub fn grep_search_in_workspace(
     input: &GrepSearchInput,
     workspace_root: &Path,
 ) -> io::Result<GrepSearchOutput> {
-    grep_search_impl(input, Some(workspace_root))
+    let boundary = FsBoundary::for_root(workspace_root);
+    grep_search_impl(input, Some(&boundary))
 }
 
 /// Check whether a path is a symlink that resolves outside the workspace.
@@ -856,6 +914,56 @@ mod tests {
         let error = result.unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
         assert!(error.to_string().contains("escapes workspace"));
+    }
+
+    #[test]
+    fn filesystem_mode_off_allows_paths_outside_workspace() {
+        let workspace = temp_path("fs-off-workspace");
+        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
+        let outside = temp_path("fs-off-outside.txt");
+
+        let _policy = crate::scoped_filesystem_policy(Some(crate::FilesystemPolicy {
+            mode: crate::FilesystemIsolationMode::Off,
+            trusted_roots: Vec::new(),
+        }));
+
+        let result = write_file_in_workspace(outside.to_string_lossy().as_ref(), "ok", &workspace);
+        assert!(
+            result.is_ok(),
+            "filesystemMode=off must allow writes outside the workspace: {result:?}"
+        );
+        let _ = std::fs::remove_file(&outside);
+        let _ = std::fs::remove_dir_all(&workspace);
+    }
+
+    #[test]
+    fn filesystem_mode_allow_list_permits_only_trusted_roots() {
+        let workspace = temp_path("fs-allow-workspace");
+        let trusted = temp_path("fs-allow-trusted");
+        std::fs::create_dir_all(&workspace).expect("workspace dir should be created");
+        std::fs::create_dir_all(&trusted).expect("trusted dir should be created");
+
+        let _policy = crate::scoped_filesystem_policy(Some(crate::FilesystemPolicy {
+            mode: crate::FilesystemIsolationMode::AllowList,
+            trusted_roots: vec![trusted.clone()],
+        }));
+
+        // Inside a trusted root → allowed.
+        let trusted_file = trusted.join("ok.txt");
+        let allowed =
+            write_file_in_workspace(trusted_file.to_string_lossy().as_ref(), "ok", &workspace);
+        assert!(allowed.is_ok(), "trusted root must be writable: {allowed:?}");
+
+        // Outside workspace and trusted roots → rejected.
+        let outside = temp_path("fs-allow-outside.txt");
+        let denied = write_file_in_workspace(outside.to_string_lossy().as_ref(), "no", &workspace);
+        assert!(
+            denied.is_err(),
+            "allow-list must reject paths outside the workspace and trusted roots"
+        );
+
+        let _ = std::fs::remove_dir_all(&trusted);
+        let _ = std::fs::remove_dir_all(&workspace);
     }
 
     #[test]

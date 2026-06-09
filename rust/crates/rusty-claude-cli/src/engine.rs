@@ -190,8 +190,13 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
     let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
     let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
 
-    let _workspace_guard =
-        runtime::scoped_workspace_root(host.workspace_root().map(Path::to_path_buf));
+    let workspace_root = host.workspace_root().map(Path::to_path_buf);
+    let _workspace_guard = runtime::scoped_workspace_root(workspace_root.clone());
+    // Resolve the filesystem policy (Security panel `filesystemMode` + trustedRoots)
+    // once per run so the dedicated file tools honor it, not just the bash sandbox.
+    let _fs_policy_guard = runtime::scoped_filesystem_policy(Some(
+        runtime::load_filesystem_policy_for(workspace_root.as_deref()),
+    ));
 
     let result = match event_sink {
         Some(sink) => {

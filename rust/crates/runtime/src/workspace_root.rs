@@ -7,7 +7,9 @@
 //! `std::env::current_dir` and transparently fall back to the process cwd when no
 //! root is active (CLI, tests, subagents).
 use std::cell::RefCell;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+use crate::sandbox::FilesystemIsolationMode;
 
 thread_local! {
     static ACTIVE_WORKSPACE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
@@ -46,6 +48,84 @@ pub fn current_workspace_root() -> std::io::Result<PathBuf> {
         return Ok(root);
     }
     std::env::current_dir()
+}
+
+/// Filesystem-access policy for the dedicated file tools (read/write/edit/glob/
+/// grep), resolved per run from the merged sandbox config — the same
+/// `settings.json` the bash sandbox and the UI "Security" panel use. This is what
+/// makes `filesystemMode` govern the file tools, not just bash.
+#[derive(Debug, Clone)]
+pub struct FilesystemPolicy {
+    pub mode: FilesystemIsolationMode,
+    pub trusted_roots: Vec<PathBuf>,
+}
+
+impl Default for FilesystemPolicy {
+    fn default() -> Self {
+        // Safe default = today's behavior: confine the file tools to the workspace.
+        Self {
+            mode: FilesystemIsolationMode::WorkspaceOnly,
+            trusted_roots: Vec::new(),
+        }
+    }
+}
+
+thread_local! {
+    static ACTIVE_FS_POLICY: RefCell<Option<FilesystemPolicy>> = const { RefCell::new(None) };
+}
+
+/// RAII guard that restores the previously active filesystem policy on drop.
+#[must_use]
+pub struct FilesystemPolicyGuard {
+    previous: Option<FilesystemPolicy>,
+}
+
+impl Drop for FilesystemPolicyGuard {
+    fn drop(&mut self) {
+        let previous = self.previous.take();
+        ACTIVE_FS_POLICY.with(|cell| {
+            *cell.borrow_mut() = previous;
+        });
+    }
+}
+
+/// Sets the active filesystem policy for the current thread until the returned
+/// guard is dropped. Mirrors [`scoped_workspace_root`]; each serve request runs on
+/// its own thread, so this gives a per-run policy without global state.
+pub fn scoped_filesystem_policy(policy: Option<FilesystemPolicy>) -> FilesystemPolicyGuard {
+    let previous = ACTIVE_FS_POLICY.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        std::mem::replace(&mut *slot, policy)
+    });
+    FilesystemPolicyGuard { previous }
+}
+
+/// Returns the active per-run filesystem policy, or the safe default
+/// (workspace-only) when none is set (CLI, tests, subagents).
+#[must_use]
+pub fn current_filesystem_policy() -> FilesystemPolicy {
+    ACTIVE_FS_POLICY
+        .with(|cell| cell.borrow().clone())
+        .unwrap_or_default()
+}
+
+/// Resolve the filesystem policy from the merged config for a directory context.
+/// Reads `settings.json` the same way the bash sandbox does, so changes from the
+/// UI "Security" panel apply on the next request without a restart. Falls back to
+/// the safe default if the config can't be loaded.
+#[must_use]
+pub fn load_filesystem_policy_for(cwd: Option<&Path>) -> FilesystemPolicy {
+    let cwd = match cwd {
+        Some(path) => path.to_path_buf(),
+        None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    };
+    match crate::config::ConfigLoader::default_for(cwd).load() {
+        Ok(config) => FilesystemPolicy {
+            mode: config.sandbox().filesystem_mode.unwrap_or_default(),
+            trusted_roots: config.trusted_roots().iter().map(PathBuf::from).collect(),
+        },
+        Err(_) => FilesystemPolicy::default(),
+    }
 }
 
 #[cfg(test)]
