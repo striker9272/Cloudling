@@ -4238,12 +4238,18 @@ fn run_agent_job_blocking(
     // per-conversation workspace root into the thread so the sub-agent's file tools
     // stay isolated to this conversation (the root guard is thread-local).
     let parent_root = runtime::current_workspace_root().ok();
+    // Carry the parent's filesystem policy too: both ambient scopes are
+    // thread-local, so without this the sub-agent thread would fall back to the
+    // workspace-only default even when the parent run allows more (`off` /
+    // `allow-list` from the Security panel).
+    let parent_fs_policy = runtime::current_filesystem_policy();
     let outcome_for_thread = std::sync::Arc::clone(outcome);
     let thread_name = format!("clab-agent-{}", job.manifest.agent_id);
     let handle = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
             let _guard = runtime::scoped_workspace_root(parent_root);
+            let _fs_policy_guard = runtime::scoped_filesystem_policy(Some(parent_fs_policy));
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_turn(&job)));
             let recorded = match result {
