@@ -249,6 +249,7 @@ mod tests {
             args: vec!["mcp-server".to_string()],
             env: BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
             tool_call_timeout_ms: None,
+            framing: crate::config::McpStdioFraming::default(),
         });
         assert_eq!(
             mcp_server_signature(&stdio),

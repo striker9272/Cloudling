@@ -627,6 +627,67 @@
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
   });
 
+  /* ---------- tools section: MCP servers (settings.json mcpServers, no restart) ---------- */
+  var mcpServers=[]; /* [{name, command, args[], framing, timeout}] — DOM is source of truth after render */
+  function mcpRow(s){
+    var d=document.createElement('div'); d.className='mcpsrv';
+    d.innerHTML=
+      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">Имя сервера</div><input class="m-name" placeholder="например, kora" /><button class="m-del" type="button" title="Удалить сервер" aria-label="Удалить сервер">✕</button></div>'+
+      '<div class="fld"><div class="lab">Команда</div><input class="m-cmd" placeholder="python3" /></div>'+
+      '<div class="fld"><div class="lab">Аргументы — по одному на строку</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
+      '<div class="fld"><div class="lab">Фрейминг <span class="env">framing</span></div><select class="m-framing"><option value="newline">стандартный MCP (newline)</option><option value="content-length">legacy (content-length)</option></select></div>'+
+      '<div class="fld"><div class="lab">Таймаут вызова, мс <span class="env">toolCallTimeoutMs</span></div><input class="m-timeout" type="number" min="1" placeholder="60000" /></div>';
+    d.querySelector('.m-name').value=s.name||'';
+    d.querySelector('.m-cmd').value=s.command||'';
+    d.querySelector('.m-args').value=(s.args||[]).join('\n');
+    d.querySelector('.m-framing').value=(s.framing==='content-length')?'content-length':'newline';
+    if(s.timeout) d.querySelector('.m-timeout').value=s.timeout;
+    d.querySelector('.m-del').addEventListener('click', function(){ d.remove(); mcpToggleEmpty(); });
+    return d;
+  }
+  function mcpToggleEmpty(){
+    var list=document.getElementById('mcpList');
+    var empty=list.querySelector('.mcpempty');
+    var has=!!list.querySelector('.mcpsrv');
+    if(!has && !empty){ var e=document.createElement('div'); e.className='mcpempty'; e.textContent='Серверы не настроены.'; list.appendChild(e); }
+    if(has && empty) empty.remove();
+  }
+  function renderMcp(){
+    var list=document.getElementById('mcpList'); list.innerHTML='';
+    mcpServers.forEach(function(s){ list.appendChild(mcpRow(s)); });
+    mcpToggleEmpty();
+  }
+  function mcpStatus(ok,text){ var m=document.getElementById('mcpMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2400); }
+  document.getElementById('mcpAdd').addEventListener('click', function(){
+    var list=document.getElementById('mcpList');
+    list.appendChild(mcpRow({name:'', command:'', args:[], framing:'newline'}));
+    mcpToggleEmpty();
+  });
+  document.getElementById('mcpSave').addEventListener('click', function(){
+    var btn=this; document.getElementById('mcpMsg').hidden=true;
+    var out={}, err=null;
+    document.querySelectorAll('#mcpList .mcpsrv').forEach(function(d){
+      if(err) return;
+      var name=(d.querySelector('.m-name').value||'').trim();
+      var cmd=(d.querySelector('.m-cmd').value||'').trim();
+      if(!name && !cmd) return; /* пустая карточка — игнорируем */
+      if(!name || !cmd){ err='У каждого сервера должны быть и имя, и команда.'; return; }
+      if(!/^[A-Za-z0-9_-]+$/.test(name)){ err='Имя сервера — только латиница, цифры, дефис, подчёркивание: «'+name+'»'; return; }
+      if(out[name]){ err='Имена серверов должны быть уникальны: «'+name+'»'; return; }
+      var entry={ command: cmd };
+      var args=linesToArray(d.querySelector('.m-args').value); if(args.length) entry.args=args;
+      if(d.querySelector('.m-framing').value==='content-length') entry.framing='content-length';
+      var to=parseInt(d.querySelector('.m-timeout').value,10); if(to>0) entry.toolCallTimeoutMs=to;
+      out[name]=entry;
+    });
+    if(err){ mcpStatus(false, err); return; }
+    btn.disabled=true;
+    uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mcpServers:out})})
+      .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
+      .then(function(){ btn.disabled=false; mcpStatus(true,'Сохранено — применится со следующего сообщения'); })
+      .catch(function(e){ btn.disabled=false; mcpStatus(false,'Не удалось сохранить: '+((e&&e.message)||'')); });
+  });
+
   /* ---------- security section: settings.json-backed config (no restart) ---------- */
   function cfgSandboxFields(){ return document.querySelectorAll('.drawer.right [data-sb]'); }
   function linesToArray(s){ return (s||'').split('\n').map(function(x){ return x.trim(); }).filter(function(x){ return x.length; }); }
@@ -645,6 +706,10 @@
       var perm=c.permissions||{};
       document.getElementById('cfgAllow').value=(perm.allow||[]).join('\n');
       document.getElementById('cfgDeny').value=(perm.deny||[]).join('\n');
+      var ms=c.mcpServers||{};
+      mcpServers=Object.keys(ms).map(function(n){ var e=ms[n]||{};
+        return { name:n, command:e.command||'', args:e.args||[], framing:e.framing||'newline', timeout:e.toolCallTimeoutMs }; });
+      renderMcp();
     }).catch(function(){});
   }
   function cfgMsg(ok,text){ var m=document.getElementById('cfgMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2400); }

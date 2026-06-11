@@ -18,7 +18,6 @@ use runtime::{
     check_freshness, dedupe_superseded_commit_events, edit_file_in_workspace, execute_bash,
     glob_search_in_workspace, grep_search_in_workspace, load_system_prompt,
     lsp_client::LspRegistry,
-    mcp_tool_bridge::McpToolRegistry,
     permission_enforcer::{EnforcementResult, PermissionEnforcer},
     read_file_in_workspace,
     summary_compression::compress_summary_text,
@@ -40,12 +39,6 @@ fn global_lsp_registry() -> &'static LspRegistry {
     use std::sync::OnceLock;
     static REGISTRY: OnceLock<LspRegistry> = OnceLock::new();
     REGISTRY.get_or_init(LspRegistry::new)
-}
-
-fn global_mcp_registry() -> &'static McpToolRegistry {
-    use std::sync::OnceLock;
-    static REGISTRY: OnceLock<McpToolRegistry> = OnceLock::new();
-    REGISTRY.get_or_init(McpToolRegistry::new)
 }
 
 fn global_team_registry() -> &'static TeamRegistry {
@@ -1104,45 +1097,13 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
             }),
             required_permission: PermissionMode::ReadOnly,
         },
-        ToolSpec {
-            name: "ListMcpResources",
-            description: "List available resources from connected MCP servers.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" }
-                },
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::ReadOnly,
-        },
-        ToolSpec {
-            name: "ReadMcpResource",
-            description: "Read a specific resource from an MCP server by URI.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" },
-                    "uri": { "type": "string" }
-                },
-                "required": ["uri"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::ReadOnly,
-        },
-        ToolSpec {
-            name: "McpAuth",
-            description: "Authenticate with an MCP server that requires OAuth or credentials.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" }
-                },
-                "required": ["server"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::DangerFullAccess,
-        },
+        // NOTE: the former static MCP tools (`MCP`, `ListMcpResources`, `ReadMcpResource`,
+        // `McpAuth`) were removed (2026-06-11): they queried a process-global registry
+        // that the serve path never populates, so they always answered "server not
+        // found" while the REAL MCP path (per-request `RuntimeMcpState` →
+        // `mcp__server__tool` + `MCPTool`/`ListMcpResourcesTool`/`ReadMcpResourceTool`
+        // in CliToolExecutor) worked beside them — the dead twins only confused the
+        // model. `RemoteTrigger` stays: it is a plain HTTP client, independent of MCP.
         ToolSpec {
             name: "RemoteTrigger",
             description: "Trigger a remote action or webhook endpoint.",
@@ -1155,21 +1116,6 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "body": { "type": "string" }
                 },
                 "required": ["url"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::DangerFullAccess,
-        },
-        ToolSpec {
-            name: "MCP",
-            description: "Execute a tool provided by a connected MCP server.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" },
-                    "tool": { "type": "string" },
-                    "arguments": { "type": "object" }
-                },
-                "required": ["server", "tool"],
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
@@ -1386,13 +1332,7 @@ fn execute_tool_with_enforcer(
         "CronDelete" => from_value::<CronDeleteInput>(input).and_then(run_cron_delete),
         "CronList" => run_cron_list(input.clone()),
         "LSP" => from_value::<LspInput>(input).and_then(run_lsp),
-        "ListMcpResources" => {
-            from_value::<McpResourceInput>(input).and_then(run_list_mcp_resources)
-        }
-        "ReadMcpResource" => from_value::<McpResourceInput>(input).and_then(run_read_mcp_resource),
-        "McpAuth" => from_value::<McpAuthInput>(input).and_then(run_mcp_auth),
         "RemoteTrigger" => from_value::<RemoteTriggerInput>(input).and_then(run_remote_trigger),
-        "MCP" => from_value::<McpToolInput>(input).and_then(run_mcp_tool),
         "TestingPermission" => {
             from_value::<TestingPermissionInput>(input).and_then(run_testing_permission)
         }
@@ -1788,77 +1728,6 @@ fn run_lsp(input: LspInput) -> Result<String, String> {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn run_list_mcp_resources(input: McpResourceInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let server = input.server.as_deref().unwrap_or("default");
-    match registry.list_resources(server) {
-        Ok(resources) => {
-            let items: Vec<_> = resources
-                .iter()
-                .map(|r| {
-                    json!({
-                        "uri": r.uri,
-                        "name": r.name,
-                        "description": r.description,
-                        "mime_type": r.mime_type,
-                    })
-                })
-                .collect();
-            to_pretty_json(json!({
-                "server": server,
-                "resources": items,
-                "count": items.len()
-            }))
-        }
-        Err(e) => to_pretty_json(json!({
-            "server": server,
-            "resources": [],
-            "error": e
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_read_mcp_resource(input: McpResourceInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let uri = input.uri.as_deref().unwrap_or("");
-    let server = input.server.as_deref().unwrap_or("default");
-    match registry.read_resource(server, uri) {
-        Ok(resource) => to_pretty_json(json!({
-            "server": server,
-            "uri": resource.uri,
-            "name": resource.name,
-            "description": resource.description,
-            "mime_type": resource.mime_type
-        })),
-        Err(e) => to_pretty_json(json!({
-            "server": server,
-            "uri": uri,
-            "error": e
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_mcp_auth(input: McpAuthInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    match registry.get_server(&input.server) {
-        Some(state) => to_pretty_json(json!({
-            "server": input.server,
-            "status": state.status,
-            "server_info": state.server_info,
-            "tool_count": state.tools.len(),
-            "resource_count": state.resources.len()
-        })),
-        None => to_pretty_json(json!({
-            "server": input.server,
-            "status": "disconnected",
-            "message": "Server not registered. Use MCP tool to connect first."
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
 fn run_remote_trigger(input: RemoteTriggerInput) -> Result<String, String> {
     let method = input.method.unwrap_or_else(|| "GET".to_string());
     let client = Client::new();
@@ -1918,26 +1787,6 @@ fn run_remote_trigger(input: RemoteTriggerInput) -> Result<String, String> {
             "method": method,
             "error": e.to_string(),
             "success": false
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_mcp_tool(input: McpToolInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let args = input.arguments.unwrap_or(serde_json::json!({}));
-    match registry.call_tool(&input.server, &input.tool, &args) {
-        Ok(result) => to_pretty_json(json!({
-            "server": input.server,
-            "tool": input.tool,
-            "result": result,
-            "status": "success"
-        })),
-        Err(e) => to_pretty_json(json!({
-            "server": input.server,
-            "tool": input.tool,
-            "error": e,
-            "status": "error"
         })),
     }
 }
@@ -2901,19 +2750,6 @@ struct LspInput {
 }
 
 #[derive(Debug, Deserialize)]
-struct McpResourceInput {
-    #[serde(default)]
-    server: Option<String>,
-    #[serde(default)]
-    uri: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpAuthInput {
-    server: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct RemoteTriggerInput {
     url: String,
     #[serde(default)]
@@ -2922,14 +2758,6 @@ struct RemoteTriggerInput {
     headers: Option<Value>,
     #[serde(default)]
     body: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpToolInput {
-    server: String,
-    tool: String,
-    #[serde(default)]
-    arguments: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]

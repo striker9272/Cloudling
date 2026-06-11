@@ -62,7 +62,18 @@
       <div class="note">Сворачиваемый блок с рассуждениями reasoning-модели. Применяется со следующего сообщения; если у модели нет этого режима — блока просто не будет.</div>
     </div>
   </details>
-  <div class="acc soon"><span>Инструменты</span><span class="soon-tag">скоро</span></div>
+  <details class="acc">
+    <summary>Инструменты <span class="chev">▾</span></summary>
+    <div class="body">
+      <div class="subhead" style="margin-top:10px;">Серверы MCP <span class="env">mcpServers</span></div>
+      <div class="note" style="margin-top:0;">MCP-сервер — внешняя программа, которая добавляет модели новые инструменты (в чате они видны как <b>mcp__имя__*</b>). Поддерживается транспорт stdio: указанная команда запускается на время каждого ответа.</div>
+      <div id="mcpList"></div>
+      <div class="acts"><button id="mcpAdd" type="button">+ Добавить сервер</button></div>
+      <div class="note">Применяется со следующего сообщения — перезапуск не нужен.</div>
+      <div class="acts"><button class="primary" id="mcpSave">Сохранить</button></div>
+      <div class="savemsg" id="mcpMsg" hidden></div>
+    </div>
+  </details>
   <details class="acc">
     <summary>Безопасность <span class="chev">▾</span></summary>
     <div class="body">
