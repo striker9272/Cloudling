@@ -3188,7 +3188,7 @@ fn normalize_fetch_url(url: &str) -> Result<String, String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
     if parsed.scheme() == "http" {
         let host = parsed.host_str().unwrap_or_default();
-        if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+        if !host_is_local(host) {
             let mut upgraded = parsed;
             upgraded
                 .set_scheme("https")
@@ -3197,6 +3197,39 @@ fn normalize_fetch_url(url: &str) -> Result<String, String> {
         }
     }
     Ok(parsed.to_string())
+}
+
+/// Hosts we leave on plain `http` instead of upgrading to `https`: loopback,
+/// private/LAN, and link-local addresses, plus local-only hostnames. A home-lab
+/// fetches these over http and there is no public https endpoint to upgrade to,
+/// so forcing https would just break the request.
+fn host_is_local(host: &str) -> bool {
+    use std::net::IpAddr;
+    // `host_str()` keeps IPv6 literals bracketed (e.g. "[::1]"); strip them.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return match ip {
+            IpAddr::V4(v4) => {
+                v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+            }
+            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified() || ipv6_is_local(&v6),
+        };
+    }
+    let host = host.to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with(".lan")
+        // single-label intranet host (no dot), e.g. "combsrv"
+        || !host.contains('.')
+}
+
+/// IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`). The equivalent
+/// `Ipv6Addr` helpers are unstable on this toolchain, so check the prefix by hand.
+fn ipv6_is_local(v6: &std::net::Ipv6Addr) -> bool {
+    let seg0 = v6.segments()[0];
+    (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
 }
 
 fn build_search_url(query: &str) -> Result<reqwest::Url, String> {
@@ -3982,8 +4015,33 @@ fn parse_skill_frontmatter_value(contents: &str, key: &str) -> Option<String> {
 }
 
 const DEFAULT_AGENT_MODEL: &str = "claude-opus-4-6";
-const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
 const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
+
+/// The current UTC date as `YYYY-MM-DD` for the sub-agent system prompt. Computed
+/// from the system clock so it is never stale, without pulling in a date crate.
+fn current_utc_date() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    date_from_unix_secs(secs)
+}
+
+/// Civil date (`YYYY-MM-DD`, UTC) from a Unix timestamp, via Howard Hinnant's
+/// days-to-civil algorithm. Pure arithmetic — kept separate so it is testable.
+fn date_from_unix_secs(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = if month <= 2 { year + 1 } else { year };
+    format!("{year:04}-{month:02}-{day:02}")
+}
 
 fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
     // Run the sub-agent synchronously and reflect its outcome onto the returned
@@ -4192,7 +4250,7 @@ fn build_agent_system_prompt(subagent_type: &str, model: &str) -> Result<Vec<Str
     let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     let mut prompt = load_system_prompt(
         cwd,
-        DEFAULT_AGENT_SYSTEM_DATE.to_string(),
+        current_utc_date(),
         std::env::consts::OS,
         "unknown",
         model_family_identity_for(model),
@@ -7810,6 +7868,48 @@ mod tests {
         assert!(summary.contains("Visible body text"));
         assert!(summary.contains("Real summary here"));
         assert!(!summary.contains("do-not-leak-this-js"));
+    }
+
+    #[test]
+    fn normalize_fetch_url_upgrades_only_public_http_hosts() {
+        // Public hosts: http is upgraded to https.
+        assert_eq!(
+            super::normalize_fetch_url("http://example.com/page").unwrap(),
+            "https://example.com/page"
+        );
+        // https is left untouched.
+        assert_eq!(
+            super::normalize_fetch_url("https://example.com/").unwrap(),
+            "https://example.com/"
+        );
+
+        // Loopback, private/LAN, and link-local stay on http (no public https to reach).
+        for url in [
+            "http://localhost:8080/x",
+            "http://127.0.0.1/x",
+            "http://[::1]/x",
+            "http://192.168.1.10/x",
+            "http://10.0.0.5/x",
+            "http://172.16.4.4/x",
+            "http://169.254.1.2/x",
+            "http://nas.local/x",
+            "http://combsrv/x",
+        ] {
+            assert_eq!(
+                super::normalize_fetch_url(url).unwrap(),
+                url,
+                "host should stay on http: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn date_from_unix_secs_matches_known_dates() {
+        assert_eq!(super::date_from_unix_secs(0), "1970-01-01");
+        // 1700000000 = 2023-11-14T22:13:20Z
+        assert_eq!(super::date_from_unix_secs(1_700_000_000), "2023-11-14");
+        // leap day
+        assert_eq!(super::date_from_unix_secs(1_582_934_400), "2020-02-29");
     }
 
     #[test]

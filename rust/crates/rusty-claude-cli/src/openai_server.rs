@@ -956,7 +956,7 @@ async fn chat_completions(
     let total_tokens = engine_response.usage.input_tokens + engine_response.usage.output_tokens;
 
     Json(ChatCompletionResponse {
-        id: format!("chatcmpl-{created}"),
+        id: next_completion_id(created),
         object: "chat.completion",
         created,
         model: request
@@ -1006,7 +1006,7 @@ fn stream_chat_completions(
         .map(|value| value.trim() != "false")
         .unwrap_or(true);
     let created = now_unix();
-    let id = format!("chatcmpl-{created}");
+    let id = next_completion_id(created);
 
     let (sender, receiver) = mpsc::unbounded_channel::<Result<Event, Infallible>>();
     let stream = UnboundedReceiverStream::new(receiver);
@@ -1584,4 +1584,12 @@ fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
+}
+
+/// A unique completion id. `created` is second-resolution, so concurrent requests
+/// in the same second would otherwise collide; a process-wide counter disambiguates.
+fn next_completion_id(created: u64) -> String {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("chatcmpl-{created}-{seq}")
 }

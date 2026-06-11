@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 
 const SCHEMA: &str = r"
@@ -149,7 +149,8 @@ impl DialogStore {
                     ))
                 },
             )
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
         Ok(row.map(|(id, title, created_ms, updated_ms, messages_json)| {
             let messages = serde_json::from_str(&messages_json)
                 .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()));
@@ -264,7 +265,8 @@ impl DialogStore {
                 params![key],
                 |r| r.get::<_, String>(0),
             )
-            .ok();
+            .optional()
+            .map_err(|e| e.to_string())?;
         Ok(value)
     }
 

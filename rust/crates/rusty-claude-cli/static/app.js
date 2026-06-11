@@ -68,7 +68,12 @@
     t=mathToUnicode(t);
     t=t.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
     t=t.replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<em>$2</em>');
-    t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,function(_,label,url){
+      /* only allow safe schemes; neutralize javascript:/data:/vbscript: etc. */
+      var ok=/^(https?:|mailto:|\/|#)/i.test(url.trim());
+      return ok ? '<a href="'+url+'" target="_blank" rel="noopener">'+label+'</a>'
+                : '<a>'+label+'</a>';
+    });
     t=t.replace(/\uE000(\d+)\uE000/g,function(_,i){ return '<code>'+codes[+i]+'</code>'; });
     return t;
   }
@@ -95,6 +100,16 @@
   function fallback(t){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);}
   function copyText(t,btn){ var flash=function(){if(!btn)return;var o=btn.innerHTML;btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':'');setTimeout(function(){btn.innerHTML=o;},1100);};
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(flash,function(){fallback(t);flash();});} else {fallback(t);flash();} }
+
+  /* ---------- transient error toast ---------- */
+  var toastTimer=null;
+  function toast(msg){
+    var el=document.getElementById('toast');
+    if(!el){ el=document.createElement('div'); el.id='toast'; document.body.appendChild(el); }
+    el.textContent=msg; el.classList.add('show');
+    if(toastTimer) clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){ el.classList.remove('show'); }, 3200);
+  }
 
   /* ---------- UI auth: /ui/* endpoints are token-gated (CLAW_UI_TOKEN) ----------
      The stored token is attached as Authorization: Bearer to every /ui/* call.
@@ -160,8 +175,9 @@
   }
   function apiList(){ return dlgApi('GET','').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; }); }
   function apiGet(id){ return dlgApi('GET','/'+encodeURIComponent(id)).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }); }
-  function apiSave(id,title,messages){ return dlgApi('PUT','/'+encodeURIComponent(id),{title:title,messages:messages}).catch(function(){}); }
-  function apiDelete(id){ return dlgApi('DELETE','/'+encodeURIComponent(id)).catch(function(){}); }
+  /* surface save/delete failures (token gate already handles 401/403) instead of swallowing them */
+  function apiSave(id,title,messages){ return dlgApi('PUT','/'+encodeURIComponent(id),{title:title,messages:messages}).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast('Не удалось сохранить диалог'); return r; },function(){ toast('Не удалось сохранить диалог'); }); }
+  function apiDelete(id){ return dlgApi('DELETE','/'+encodeURIComponent(id)).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast('Не удалось удалить диалог'); return r; },function(){ toast('Не удалось удалить диалог'); }); }
 
   var viewHome=document.getElementById('view-home');
   var viewDlg=document.getElementById('view-dialog');
