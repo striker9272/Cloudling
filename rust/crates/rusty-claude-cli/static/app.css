@@ -139,6 +139,11 @@ body.open-right .drawer.right{transform:translateX(0);}
 .acts button.primary:hover{filter:brightness(1.08);}
 .fieldrow{position:relative;}
 .fieldrow input{padding-right:40px;}
+/* MCP server cards (settings → Инструменты) */
+.mcpsrv{border:1px solid var(--line); border-radius:12px; padding:4px 12px 12px; margin-top:10px; background:var(--card);}
+.mcpsrv .m-del{position:absolute; right:5px; top:4px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:var(--muted); cursor:pointer; border-radius:8px; font-size:15px; transition:background .12s,color .12s;}
+.mcpsrv .m-del:hover{background:#2c2129; color:#d97b7b;}
+.mcpempty{color:var(--faint); font-size:13px; padding:10px 2px 2px;}
 .verify{position:absolute; right:5px; top:4px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:var(--muted); cursor:pointer; border-radius:8px; transition:background .12s,color .12s;}
 .verify:hover{background:#1c1c22; color:var(--text);}
 .verify.spin svg{animation:spin360 .9s linear infinite;}

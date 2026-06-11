@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::config::{McpOAuthConfig, McpServerConfig, ScopedMcpServerConfig};
+use crate::config::{McpOAuthConfig, McpServerConfig, McpStdioFraming, ScopedMcpServerConfig};
 use crate::mcp::{mcp_server_signature, mcp_tool_prefix, normalize_name_for_mcp};
 
 pub const DEFAULT_MCP_TOOL_CALL_TIMEOUT_MS: u64 = 60_000;
@@ -21,6 +21,7 @@ pub struct McpStdioTransport {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub tool_call_timeout_ms: Option<u64>,
+    pub framing: McpStdioFraming,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,7 @@ impl McpClientTransport {
                 args: config.args.clone(),
                 env: config.env.clone(),
                 tool_call_timeout_ms: config.tool_call_timeout_ms,
+                framing: config.framing,
             }),
             McpServerConfig::Sse(config) => Self::Sse(McpRemoteTransport {
                 url: config.url.clone(),
@@ -150,6 +152,7 @@ mod tests {
                 args: vec!["mcp-server".to_string()],
                 env: BTreeMap::from([("TOKEN".to_string(), "secret".to_string())]),
                 tool_call_timeout_ms: Some(15_000),
+                framing: crate::config::McpStdioFraming::default(),
             }),
         };
 

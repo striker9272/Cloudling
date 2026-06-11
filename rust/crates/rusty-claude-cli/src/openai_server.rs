@@ -706,8 +706,11 @@ fn merge_json_value(base: &mut Value, overlay: &Value) {
     }
 }
 
-/// Keys the security UI section owns inside `settings.json`.
+/// Keys the security UI section owns inside `settings.json` (deep-merged on save).
 const UI_CONFIG_KEYS: &[&str] = &["sandbox", "trustedRoots", "permissions"];
+/// Keys the UI owns wholesale: replaced, not merged, on save. `mcpServers` must be
+/// replaceable because a deep merge can never DELETE a server entry.
+const UI_CONFIG_REPLACE_KEYS: &[&str] = &["mcpServers"];
 
 async fn ui_config_get() -> Response {
     let existing = read_settings_object(&config_settings_path());
@@ -727,6 +730,13 @@ async fn ui_config_get() -> Response {
         "permissions".to_string(),
         existing.get("permissions").cloned().unwrap_or(Value::Null),
     );
+    out.insert(
+        "mcpServers".to_string(),
+        existing
+            .get("mcpServers")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+    );
     Json(Value::Object(out)).into_response()
 }
 
@@ -738,6 +748,11 @@ async fn ui_config_save(Json(incoming): Json<Value>) -> Response {
         for key in UI_CONFIG_KEYS {
             if let Some(value) = incoming_map.get(*key) {
                 merge_json_value(root_map.entry((*key).to_string()).or_insert(Value::Null), value);
+            }
+        }
+        for key in UI_CONFIG_REPLACE_KEYS {
+            if let Some(value) = incoming_map.get(*key) {
+                root_map.insert((*key).to_string(), value.clone());
             }
         }
     }
