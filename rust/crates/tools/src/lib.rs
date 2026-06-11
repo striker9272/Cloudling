@@ -1181,11 +1181,12 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "GitStatus",
-            description: "Show the working tree status (branch, staged, unstaged, untracked). Equivalent to 'git status --short --branch'. Use this instead of running git status via bash to get structured, parseable output.",
+            description: "Show the working tree status (branch, staged, unstaged, untracked). Equivalent to 'git status --short --branch'. Use this instead of running git status via bash to get structured, parseable output. Set 'directory' to the repository path (the default workspace directory is usually not a git repository).",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "short": { "type": "boolean" }
+                    "short": { "type": "boolean" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1200,7 +1201,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "path": { "type": "string" },
                     "staged": { "type": "boolean" },
                     "commit": { "type": "string" },
-                    "commit2": { "type": "string" }
+                    "commit2": { "type": "string" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1217,7 +1219,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "oneline": { "type": "boolean" },
                     "author": { "type": "string" },
                     "since": { "type": "string" },
-                    "until": { "type": "string" }
+                    "until": { "type": "string" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1231,7 +1234,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "properties": {
                     "commit": { "type": "string" },
                     "path": { "type": "string" },
-                    "stat": { "type": "boolean" }
+                    "stat": { "type": "boolean" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "required": ["commit"],
                 "additionalProperties": false
@@ -1246,7 +1250,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "properties": {
                     "path": { "type": "string" },
                     "start_line": { "type": "integer", "minimum": 1 },
-                    "end_line": { "type": "integer", "minimum": 1 }
+                    "end_line": { "type": "integer", "minimum": 1 },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "required": ["path"],
                 "additionalProperties": false
@@ -1933,15 +1938,7 @@ fn run_git_status(input: GitStatusInput) -> Result<String, String> {
         args.push("--short");
         args.push("--branch");
     }
-    match git_stdout(&args) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git status failed. Ensure the current directory is inside a git repository."
-                .to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &args).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1964,14 +1961,7 @@ fn run_git_diff(input: GitDiffInput) -> Result<String, String> {
         args.push(path.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git diff failed. Ensure the current directory is inside a git repository.".to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1998,14 +1988,7 @@ fn run_git_log(input: GitLogInput) -> Result<String, String> {
         args.push(path.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git log failed. Ensure the current directory is inside a git repository.".to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -2022,15 +2005,7 @@ fn run_git_show(input: GitShowInput) -> Result<String, String> {
         args.push(input.commit.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(format!(
-            "git show {} failed. Ensure the commit exists.",
-            input.commit
-        )),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -2042,12 +2017,7 @@ fn run_git_blame(input: GitBlameInput) -> Result<String, String> {
     }
     args.push(input.path.clone());
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(format!("git blame {} failed. Ensure the file exists and the directory is inside a git repository.", input.path)),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 fn from_value<T: for<'de> Deserialize<'de>>(input: &Value) -> Result<T, String> {
@@ -2256,6 +2226,49 @@ fn git_stdout(args: &[&str]) -> Option<String> {
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!stdout.is_empty()).then_some(stdout)
+}
+
+/// Run `git` for the Git* tools, anchored to a directory the same way the file tools
+/// are: the optional `directory` input (absolute, or relative to the per-run workspace
+/// root) is resolved and checked against the ambient filesystem policy; with no
+/// `directory` the per-run workspace root itself is used (NOT the process cwd — under
+/// serve that is a shared neutral dir, see the NotebookEdit fix for the same class of
+/// bug). Success with empty stdout is a valid result (e.g. `git diff` with no changes),
+/// not a failure; on failure git's stderr is surfaced so the model sees the real reason.
+fn git_stdout_in(directory: Option<&str>, args: &[&str]) -> Result<String, String> {
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
+    let dir = match directory {
+        Some(path) => runtime::resolve_dir_in_workspace(path, &workspace)
+            .map_err(|error| format!("directory {path}: {error}"))?,
+        None => workspace,
+    };
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(&dir)
+        .output()
+        .map_err(|error| format!("failed to run git: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("git {} failed in {}", args.first().unwrap_or(&""), dir.display())
+        } else {
+            format!("git {} failed in {}: {stderr}", args.first().unwrap_or(&""), dir.display())
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Wrap a successful git stdout into the tools' JSON envelope, making an empty
+/// result explicit instead of an error.
+fn git_output_json(output: String) -> Result<String, String> {
+    if output.is_empty() {
+        to_pretty_json(json!({
+            "output": "",
+            "note": "command succeeded with empty output (e.g. no changes)"
+        }))
+    } else {
+        to_pretty_json(json!({ "output": output }))
+    }
 }
 
 fn branch_divergence_output(
@@ -2909,6 +2922,10 @@ struct GitStatusInput {
     #[serde(default)]
     /// If true, use --short --branch format. Defaults to true.
     short: Option<bool>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitDiff tool: shows changes between commits, index, and working tree.
@@ -2927,6 +2944,10 @@ struct GitDiffInput {
     #[serde(default)]
     /// A second commit for range diffs (commit...commit2).
     commit2: Option<String>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitLog tool: shows commit history.
@@ -2951,6 +2972,10 @@ struct GitLogInput {
     #[serde(default)]
     /// Filter commits until date.
     until: Option<String>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitShow tool: shows a commit, tag, or tree object.
@@ -2964,6 +2989,10 @@ struct GitShowInput {
     #[serde(default)]
     /// If true, show diffstat summary instead of full diff.
     stat: Option<bool>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitBlame tool: shows per-line author/revision info for a file.
@@ -2979,6 +3008,10 @@ struct GitBlameInput {
     #[serde(default)]
     /// End of line range (1-based). Only used if start_line is also set.
     end_line: Option<usize>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -9739,6 +9772,71 @@ mod tests {
                 .expect("valid notebook json");
         assert_eq!(written["cells"][0]["source"][0], "print(42)\n");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn git_tools_anchor_to_workspace_root_and_accept_directory() {
+        // Regression: the Git* tools must run against the per-run workspace root (or
+        // the explicit `directory` input), not the process cwd — under serve the cwd
+        // is a shared neutral dir that is never a repository.
+        let repo = temp_path("git-workspace");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        init_git_repo(&repo);
+
+        let _ws = runtime::scoped_workspace_root(Some(repo.clone()));
+
+        // No directory input → the workspace root (the repo) is used.
+        let status = execute_tool("GitStatus", &json!({})).expect("GitStatus in workspace repo");
+        let parsed: serde_json::Value = serde_json::from_str(&status).expect("json");
+        assert!(
+            parsed["output"].as_str().expect("output").starts_with("##"),
+            "expected branch line, got: {parsed}"
+        );
+
+        // Relative `directory` resolves under the workspace root too.
+        let log = execute_tool(
+            "GitLog",
+            &json!({ "count": 1, "oneline": true, "directory": "." }),
+        )
+        .expect("GitLog with relative directory");
+        let parsed: serde_json::Value = serde_json::from_str(&log).expect("json");
+        assert!(parsed["output"].as_str().expect("output").contains("init"));
+
+        // Empty stdout is success, not failure: clean repo → empty `git diff`.
+        let diff = execute_tool("GitDiff", &json!({})).expect("empty git diff should succeed");
+        let parsed: serde_json::Value = serde_json::from_str(&diff).expect("json");
+        assert_eq!(parsed["output"], "");
+        assert!(parsed["note"]
+            .as_str()
+            .expect("note")
+            .contains("empty output"));
+
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn git_directory_outside_boundary_is_rejected_by_default_policy() {
+        // Default filesystem policy is workspace-only: a `directory` pointing outside
+        // the per-run root must be rejected, mirroring the file tools.
+        let workspace = temp_path("git-ws-confined");
+        let outside_repo = temp_path("git-outside-repo");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        std::fs::create_dir_all(&outside_repo).expect("outside dir");
+        init_git_repo(&outside_repo);
+
+        let _ws = runtime::scoped_workspace_root(Some(workspace.clone()));
+        let error = execute_tool(
+            "GitStatus",
+            &json!({ "directory": outside_repo.to_string_lossy() }),
+        )
+        .expect_err("directory outside the workspace boundary should be rejected");
+        assert!(
+            error.to_string().contains("escapes workspace boundary"),
+            "unexpected error: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(&workspace);
+        let _ = std::fs::remove_dir_all(&outside_repo);
     }
 
     #[test]
