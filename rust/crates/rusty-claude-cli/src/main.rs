@@ -9948,6 +9948,10 @@ struct AnthropicRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     reasoning_effort: Option<String>,
+    /// Cooperative cancellation shared by the turn loop (see
+    /// `ConversationRuntime::with_hook_abort_signal`): checked between stream chunks so
+    /// "Stop" / client disconnect also interrupts an in-flight generation.
+    hook_abort_signal: Option<runtime::HookAbortSignal>,
 }
 
 impl AnthropicRuntimeClient {
@@ -10013,6 +10017,7 @@ impl AnthropicRuntimeClient {
             tool_registry,
             progress_reporter,
             reasoning_effort: None,
+            hook_abort_signal: None,
         })
     }
 
@@ -10041,6 +10046,10 @@ impl ApiClient for AnthropicRuntimeClient {
         event_sink: &mut dyn FnMut(&AssistantEvent),
     ) -> Result<Vec<AssistantEvent>, RuntimeError> {
         self.stream_with_optional_event_sink(request, Some(event_sink))
+    }
+
+    fn set_hook_abort_signal(&mut self, signal: runtime::HookAbortSignal) {
+        self.hook_abort_signal = Some(signal);
     }
 }
 
@@ -10136,8 +10145,20 @@ impl AnthropicRuntimeClient {
         let mut block_has_thinking_summary = false;
         let mut saw_stop = false;
         let mut received_any_event = false;
+        let mut aborted = false;
 
         loop {
+            // Mid-flight cancellation ("Stop" / client disconnect): checked between
+            // stream chunks. Returning early drops `stream`, which closes the HTTP
+            // connection to the backend and stops the generation there.
+            if self
+                .hook_abort_signal
+                .as_ref()
+                .is_some_and(runtime::HookAbortSignal::is_aborted)
+            {
+                aborted = true;
+                break;
+            }
             let next = if apply_stall_timeout && !received_any_event {
                 match tokio::time::timeout(POST_TOOL_STALL_TIMEOUT, stream.next_event()).await {
                     Ok(inner) => inner.map_err(|error| {
@@ -10284,6 +10305,21 @@ impl AnthropicRuntimeClient {
         }
 
         push_prompt_cache_record(&self.client, &mut events);
+
+        if aborted {
+            // Cancelled mid-flight: return whatever was streamed so far. A synthetic
+            // MessageStop keeps downstream consumers (session append, SSE finish)
+            // well-formed. Crucially, do NOT fall through to the non-stream fallback
+            // below — that would launch a fresh full generation right after the user
+            // cancelled this one.
+            if !events
+                .iter()
+                .any(|event| matches!(event, AssistantEvent::MessageStop))
+            {
+                emit_assistant_event(&mut events, &mut event_sink, AssistantEvent::MessageStop);
+            }
+            return Ok(events);
+        }
 
         if !saw_stop
             && events.iter().any(|event| {

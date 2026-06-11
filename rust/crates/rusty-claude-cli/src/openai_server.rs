@@ -1,6 +1,7 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Request, State},
     http::StatusCode,
+    middleware::{self, Next},
     response::{
         sse::{Event, KeepAlive, Sse},
         IntoResponse, Response,
@@ -30,6 +31,12 @@ struct OpenAiServerState {
     /// Dialog persistence for the built-in UI. `Some` only when `--ui` is on and the
     /// store opened successfully; the chat path never touches it.
     dialog_store: Option<Arc<crate::dialog_store::DialogStore>>,
+    /// Shared secret guarding the `/ui/*` data endpoints (`CLAW_UI_TOKEN`). `None` means
+    /// no token is configured; then those endpoints are open on loopback binds only.
+    ui_token: Option<String>,
+    /// Whether the listen address is loopback. Decides the no-token default: open on
+    /// localhost (dev convenience), disabled anywhere else (fail closed).
+    bind_is_loopback: bool,
 }
 
 #[derive(Serialize)]
@@ -174,12 +181,25 @@ async fn serve(
         None
     };
 
+    let ui_token = std::env::var("CLAW_UI_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty());
+    if ui && ui_token.is_none() && !addr.ip().is_loopback() {
+        eprintln!(
+            "claw openai-serve: CLAW_UI_TOKEN is not set and the bind is not loopback; \
+             /ui/* endpoints are disabled (the chat API and static page still work)"
+        );
+    }
+
     let state = Arc::new(OpenAiServerState {
         backend_model: model,
         served_model_id,
         allowed_tools,
         permission_mode,
         dialog_store,
+        ui_token,
+        bind_is_loopback: addr.ip().is_loopback(),
     });
 
     // API routes are always present. The built-in web UI is opt-in via `--ui`, so the
@@ -189,10 +209,15 @@ async fn serve(
         .route("/v1/models", get(models))
         .route("/v1/chat/completions", post(chat_completions));
     if ui {
+        // Static assets stay open: they contain no secrets and the page itself is the
+        // place where the user enters the token.
         app = app
             .route("/", get(ui_index))
             .route("/app.css", get(ui_css))
-            .route("/app.js", get(ui_js))
+            .route("/app.js", get(ui_js));
+        // Data/settings endpoints can read the API key, rewrite the env file, and
+        // disable the sandbox — gate them behind `CLAW_UI_TOKEN` (see ui_auth_decision).
+        let ui_api = Router::new()
             .route("/ui/dialogs", get(ui_dialogs_list))
             .route(
                 "/ui/dialogs/{id}",
@@ -205,7 +230,13 @@ async fn serve(
             .route("/ui/settings/save-restart", post(ui_settings_save_restart))
             .route("/ui/config", get(ui_config_get))
             .route("/ui/config/save", post(ui_config_save))
-            .route("/ui/title", post(ui_title));
+            .route("/ui/check-backend", post(ui_check_backend))
+            .route("/ui/title", post(ui_title))
+            .route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                ui_auth_middleware,
+            ));
+        app = app.merge(ui_api);
     }
     let app = app.with_state(state);
 
@@ -282,6 +313,76 @@ async fn ui_css() -> Response {
 }
 async fn ui_js() -> Response {
     ui_response(&UI_JS)
+}
+
+// ---- UI auth (`/ui/*` data endpoints) ----
+//
+// Threat model: the server often binds beyond loopback (docker bridge, LAN), where any
+// neighbour process can reach the port. The `/ui/*` endpoints expose the API key
+// (`/ui/settings`), the sandbox/permission config (`/ui/config/save`), and a
+// rewrite-env-and-exit path (`/ui/settings/save-restart`) — so they are gated behind a
+// shared secret (`CLAW_UI_TOKEN`, any operator-chosen string in the service env file).
+// The browser UI stores the entered token and sends `Authorization: Bearer <token>`.
+// No token configured → open on loopback binds only; anywhere else the endpoints are
+// disabled with 403 (fail closed). The chat API (`/v1/*`) is intentionally not gated.
+
+#[derive(Debug, PartialEq)]
+enum UiAuthDecision {
+    Allow,
+    /// 401 — a token is configured and the request lacks a matching one.
+    Unauthorized,
+    /// 403 — no token configured while the bind is reachable beyond loopback.
+    Disabled,
+}
+
+fn ui_auth_decision(
+    configured_token: Option<&str>,
+    bind_is_loopback: bool,
+    authorization: Option<&str>,
+) -> UiAuthDecision {
+    match configured_token {
+        Some(expected) => {
+            let presented = authorization
+                .and_then(|header| header.strip_prefix("Bearer "))
+                .map(str::trim);
+            if presented == Some(expected) {
+                UiAuthDecision::Allow
+            } else {
+                UiAuthDecision::Unauthorized
+            }
+        }
+        None if bind_is_loopback => UiAuthDecision::Allow,
+        None => UiAuthDecision::Disabled,
+    }
+}
+
+async fn ui_auth_middleware(
+    State(state): State<Arc<OpenAiServerState>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let authorization = request
+        .headers()
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    match ui_auth_decision(
+        state.ui_token.as_deref(),
+        state.bind_is_loopback,
+        authorization.as_deref(),
+    ) {
+        UiAuthDecision::Allow => next.run(request).await,
+        UiAuthDecision::Unauthorized => (
+            StatusCode::UNAUTHORIZED,
+            "missing or invalid UI token (send Authorization: Bearer <CLAW_UI_TOKEN>)",
+        )
+            .into_response(),
+        UiAuthDecision::Disabled => (
+            StatusCode::FORBIDDEN,
+            "UI endpoints are disabled: set CLAW_UI_TOKEN to use them on a non-loopback bind",
+        )
+            .into_response(),
+    }
 }
 
 // ---- Dialog persistence endpoints (served only with `--ui`) ----
@@ -547,6 +648,18 @@ async fn ui_settings_save_restart(
                 .into_response()
         }
     };
+    // A value with a line break would inject arbitrary extra lines (= arbitrary env
+    // vars) into the env file; reject control characters outright.
+    if let Some((key, _)) = updates
+        .iter()
+        .find(|(_, value)| value.chars().any(char::is_control))
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("invalid value for {key}: control characters are not allowed"),
+        )
+            .into_response();
+    }
     if let Err(error) = write_env_file(std::path::Path::new(&path), &updates) {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("write env: {error}")).into_response();
     }
@@ -663,6 +776,45 @@ async fn ui_config_save(Json(incoming): Json<Value>) -> Response {
             .into_response();
     }
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+#[derive(Deserialize)]
+struct CheckBackendRequest {
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+}
+
+/// Probe an OpenAI-compatible backend (`GET <base>/models`) with the values currently
+/// typed into the settings form, before they are saved. Done server-side because the
+/// browser cannot reach the backend itself (CORS; the backend may only be visible from
+/// the server's network). Gated behind the UI auth like the rest of `/ui/*` — it can
+/// probe arbitrary URLs from the server.
+async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -> Response {
+    let base = request.base_url.trim().trim_end_matches('/').to_string();
+    if base.is_empty() || !(base.starts_with("http://") || base.starts_with("https://")) {
+        return Json(serde_json::json!({ "ok": false, "error": "invalid URL" })).into_response();
+    }
+    let url = format!("{base}/models");
+    let client = api::build_http_client_or_default();
+    let mut probe = client.get(&url).timeout(std::time::Duration::from_secs(5));
+    let key = request.api_key.trim();
+    if !key.is_empty() {
+        probe = probe.bearer_auth(key);
+    }
+    match probe.send().await {
+        Ok(response) if response.status().is_success() => {
+            Json(serde_json::json!({ "ok": true })).into_response()
+        }
+        Ok(response) => Json(serde_json::json!({
+            "ok": false,
+            "error": format!("HTTP {}", response.status()),
+        }))
+        .into_response(),
+        Err(error) => {
+            Json(serde_json::json!({ "ok": false, "error": error.to_string() })).into_response()
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -1165,6 +1317,51 @@ fn openai_sse_done() -> Result<Event, Infallible> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_auth_token_configured_requires_exact_bearer() {
+        let token = Some("home-secret");
+        assert_eq!(
+            ui_auth_decision(token, false, Some("Bearer home-secret")),
+            UiAuthDecision::Allow
+        );
+        // Loopback does not bypass a configured token.
+        assert_eq!(
+            ui_auth_decision(token, true, None),
+            UiAuthDecision::Unauthorized
+        );
+        assert_eq!(
+            ui_auth_decision(token, false, Some("Bearer wrong")),
+            UiAuthDecision::Unauthorized
+        );
+        assert_eq!(
+            ui_auth_decision(token, false, Some("home-secret")),
+            UiAuthDecision::Unauthorized
+        );
+        assert_eq!(
+            ui_auth_decision(token, false, None),
+            UiAuthDecision::Unauthorized
+        );
+    }
+
+    #[test]
+    fn ui_auth_no_token_open_on_loopback_only() {
+        assert_eq!(ui_auth_decision(None, true, None), UiAuthDecision::Allow);
+        // Fail closed beyond loopback, even if the client volunteers a header.
+        assert_eq!(ui_auth_decision(None, false, None), UiAuthDecision::Disabled);
+        assert_eq!(
+            ui_auth_decision(None, false, Some("Bearer anything")),
+            UiAuthDecision::Disabled
+        );
+    }
+
+    #[test]
+    fn ui_auth_bearer_value_is_trimmed() {
+        assert_eq!(
+            ui_auth_decision(Some("tok"), false, Some("Bearer  tok ")),
+            UiAuthDecision::Allow
+        );
+    }
 
     fn sample_messages() -> Vec<ChatMessage> {
         vec![

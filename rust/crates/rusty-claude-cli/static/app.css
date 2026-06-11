@@ -219,6 +219,15 @@ body.open-right .drawer.right{transform:translateX(0);}
 .modal .mcancel:hover{background:#262630;}
 .modal .mdel{background:#7a2b2b; border:1px solid #9a3636; color:#fff; font:inherit; font-size:13px; font-weight:500; padding:9px 16px; border-radius:10px; cursor:pointer;}
 .modal .mdel:hover{background:#8a3232;}
+.modal .minput{width:100%; box-sizing:border-box; background:var(--input); border:1px solid var(--line); color:var(--text); font:inherit; font-size:13.5px; padding:9px 12px; border-radius:10px; margin-bottom:18px; outline:none;}
+.modal .minput:focus{border-color:var(--accent);}
+.modal .minput[hidden]{display:none;}
+.modal .merr{color:#d97b7b; font-size:12.5px; line-height:1.45; margin:-10px 0 12px;}
+.modal .merr[hidden]{display:none;}
+.modal .msave{background:var(--accent); border:1px solid var(--accent); color:#fff; font:inherit; font-size:13px; font-weight:500; padding:9px 16px; border-radius:10px; cursor:pointer;}
+.modal .msave:disabled{opacity:.55; cursor:default;}
+.modal .msave:hover{filter:brightness(1.12);}
+.modal .msave[hidden]{display:none;}
 
 .turn{display:flex; flex-direction:column;}
 .turn.u{align-items:flex-end;}
