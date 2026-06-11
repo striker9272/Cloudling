@@ -699,9 +699,17 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "StructuredOutput",
-            description: "Return structured output in the requested format.",
+            description: "Return structured output in the requested format. Pass the structured data JSON-encoded in the 'result' string.",
+            // A declared property matters: with a bare `additionalProperties` schema
+            // grammar-constrained backends (llama.cpp) emit `{}` for every call, so the
+            // tool always failed with "payload must not be empty" (live, 2026-06-11).
+            // `result` is a STRING (JSON-encoded, decoded by the tool) because those
+            // same backends also cannot fill a free-form nested object (they emit {}).
             input_schema: json!({
                 "type": "object",
+                "properties": {
+                    "result": { "type": "string", "description": "The structured data to return, as a JSON-encoded string, e.g. \"{\\\"answer\\\": 42}\"." }
+                },
                 "additionalProperties": true
             }),
             required_permission: PermissionMode::ReadOnly,
@@ -1421,7 +1429,21 @@ fn maybe_enforce_permission_check_with_mode(
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
-    use std::io::{self, BufRead, Write};
+    use std::io::{self, BufRead, IsTerminal, Write};
+
+    // Without an interactive terminal (openai-serve under systemd: stdin is
+    // /dev/null) reading stdin yields instant EOF, which used to be reported as
+    // `status: "answered"` with an empty answer — misleading the model. Return an
+    // honest "unavailable" so the model asks in the chat instead.
+    if !io::stdin().is_terminal() {
+        return to_pretty_json(json!({
+            "question": input.question,
+            "answer": Value::Null,
+            "status": "unavailable",
+            "message": "Interactive input is not available in this environment \
+                        (stdin is not a terminal). Ask the user directly in the chat."
+        }));
+    }
 
     // Display the question to the user via stdout
     let stdout = io::stdout();
@@ -6291,12 +6313,23 @@ fn execute_exit_plan_mode(_input: ExitPlanModeInput) -> Result<PlanModeOutput, S
 fn execute_structured_output(
     input: StructuredOutputInput,
 ) -> Result<StructuredOutputResult, String> {
-    if input.0.is_empty() {
+    let mut payload = input.0;
+    // Accept the payload JSON-encoded in `result` (see the schema note: grammar-
+    // constrained backends can pass an arbitrary string but not a free-form object)
+    // and decode it back into the structured map.
+    if payload.len() == 1 {
+        if let Some(Value::String(raw)) = payload.get("result") {
+            if let Ok(Value::Object(decoded)) = serde_json::from_str::<Value>(raw) {
+                payload = decoded.into_iter().collect();
+            }
+        }
+    }
+    if payload.is_empty() {
         return Err(String::from("structured output payload must not be empty"));
     }
     Ok(StructuredOutputResult {
         data: String::from("Structured output provided successfully"),
-        structured_output: input.0,
+        structured_output: payload,
     })
 }
 
@@ -6545,7 +6578,12 @@ fn normalize_config_value(spec: ConfigSettingSpec, value: ConfigValue) -> Result
 fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, String> {
     let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     Ok(match scope {
-        ConfigScope::Global => config_home_dir()?.join("settings.json"),
+        // NOT `settings.json`: that file is schema-validated on every runtime build
+        // (runtime/config_validate.rs), and the Config tool's global keys (`theme`,
+        // `editorMode`, ...) are not in its schema — writing one there used to brick
+        // every subsequent request with "unknown key" (verified live 2026-06-11).
+        // The tool's keys are read by nobody else, so they get their own file.
+        ConfigScope::Global => config_home_dir()?.join("tool-config.json"),
         ConfigScope::Settings => cwd.join(".claw").join("settings.local.json"),
     })
 }
@@ -10306,11 +10344,14 @@ mod tests {
         let cwd = root.join("cwd");
         std::fs::create_dir_all(home.join(".claw")).expect("home dir");
         std::fs::create_dir_all(cwd.join(".claw")).expect("cwd dir");
+        // Global-scope Config keys live in `tool-config.json`, NOT `settings.json`:
+        // the latter is schema-validated on every runtime build and rejects them
+        // (writing `verbose` there bricked the live service — see config_file_for_scope).
         std::fs::write(
-            home.join(".claw").join("settings.json"),
+            home.join(".claw").join("tool-config.json"),
             r#"{"verbose":false}"#,
         )
-        .expect("write global settings");
+        .expect("write global tool config");
 
         let original_home = std::env::var("HOME").ok();
         let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();
