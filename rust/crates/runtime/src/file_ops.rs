@@ -794,6 +794,28 @@ pub fn grep_search_in_workspace(
 
 /// Check whether a path is a symlink that resolves outside the workspace.
 #[allow(dead_code)]
+/// Resolve a directory argument against the per-run workspace root and enforce the
+/// ambient filesystem policy on it. For tools that anchor a subprocess to a directory
+/// (e.g. the Git* tools' `directory` input), so the argument obeys the same boundary
+/// rules as the file tools: `off` → anything, `allow-list` → workspace root ∪ trusted
+/// roots, `workspace-only` → workspace root.
+pub fn resolve_dir_in_workspace(path: &str, workspace_root: &Path) -> io::Result<PathBuf> {
+    let candidate = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        workspace_root.join(path)
+    };
+    let resolved = candidate.canonicalize()?;
+    if !resolved.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a directory", resolved.display()),
+        ));
+    }
+    FsBoundary::for_root(workspace_root).check(&resolved)?;
+    Ok(resolved)
+}
+
 pub fn is_symlink_escape(path: &Path, workspace_root: &Path) -> io::Result<bool> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_symlink() {
