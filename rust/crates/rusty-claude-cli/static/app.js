@@ -29,12 +29,47 @@
   /* ---------- markdown ---------- */
   var EMOJI={smile:'😊',fire:'🔥',rocket:'🚀',check:'✅',bulb:'💡',warning:'⚠️',tada:'🎉',thumbsup:'👍',eyes:'👀',sparkles:'✨'};
   function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+  /* ---- lightweight LaTeX → Unicode (no math engine) ----
+     The built-in chat has no KaTeX, so models that emit inline LaTeX (`$\leftrightarrow$`)
+     used to show raw. We map common commands to Unicode and strip the `$` delimiters.
+     Only spans that look like math (contain a backslash, ^ or _) are touched, so plain
+     `$5` / `$PATH` are left alone. Complex formulas degrade gracefully to text. */
+  var MATHMAP={'\\leftrightarrow':'↔','\\Leftrightarrow':'⇔','\\rightarrow':'→','\\Rightarrow':'⇒','\\to':'→','\\mapsto':'↦','\\leftarrow':'←','\\Leftarrow':'⇐','\\uparrow':'↑','\\downarrow':'↓',
+    '\\times':'×','\\cdot':'·','\\div':'÷','\\pm':'±','\\mp':'∓','\\ast':'∗','\\star':'⋆','\\circ':'∘','\\bullet':'•',
+    '\\leq':'≤','\\le':'≤','\\geq':'≥','\\ge':'≥','\\neq':'≠','\\ne':'≠','\\approx':'≈','\\equiv':'≡','\\sim':'∼','\\simeq':'≃','\\cong':'≅','\\propto':'∝','\\ll':'≪','\\gg':'≫',
+    '\\infty':'∞','\\partial':'∂','\\nabla':'∇','\\sum':'∑','\\prod':'∏','\\int':'∫','\\sqrt':'√','\\angle':'∠','\\perp':'⊥','\\parallel':'∥','\\degree':'°',
+    '\\forall':'∀','\\exists':'∃','\\nexists':'∄','\\in':'∈','\\notin':'∉','\\subset':'⊂','\\subseteq':'⊆','\\supset':'⊃','\\supseteq':'⊇','\\cup':'∪','\\cap':'∩','\\emptyset':'∅','\\setminus':'∖',
+    '\\land':'∧','\\lor':'∨','\\lnot':'¬','\\neg':'¬','\\oplus':'⊕','\\otimes':'⊗','\\ldots':'…','\\dots':'…','\\cdots':'⋯','\\langle':'⟨','\\rangle':'⟩',
+    '\\alpha':'α','\\beta':'β','\\gamma':'γ','\\delta':'δ','\\epsilon':'ε','\\varepsilon':'ε','\\zeta':'ζ','\\eta':'η','\\theta':'θ','\\vartheta':'ϑ','\\iota':'ι','\\kappa':'κ','\\lambda':'λ','\\mu':'μ','\\nu':'ν','\\xi':'ξ','\\pi':'π','\\rho':'ρ','\\sigma':'σ','\\tau':'τ','\\upsilon':'υ','\\phi':'φ','\\varphi':'φ','\\chi':'χ','\\psi':'ψ','\\omega':'ω',
+    '\\Gamma':'Γ','\\Delta':'Δ','\\Theta':'Θ','\\Lambda':'Λ','\\Xi':'Ξ','\\Pi':'Π','\\Sigma':'Σ','\\Phi':'Φ','\\Psi':'Ψ','\\Omega':'Ω'};
+  var SUP={'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','n':'ⁿ','i':'ⁱ'};
+  var SUB={'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','n':'ₙ'};
+  function renderMath(x){
+    x=x.replace(/\\(left|right|big|bigg|Big|Bigg|displaystyle|textstyle|mathrm|mathbf|mathit|mathcal|operatorname|text|mbox)\b\s*/g,'');
+    x=x.replace(/\\[a-zA-Z]+/g,function(c){ return (c in MATHMAP)?MATHMAP[c]:c.slice(1); });
+    x=x.replace(/\\[,;!: ]/g,' ').replace(/[{}]/g,'');
+    x=x.replace(/\^([0-9ni]+)/g,function(_,p){return p.replace(/./g,function(d){return SUP[d]||d;});});
+    x=x.replace(/_([0-9n]+)/g,function(_,p){return p.replace(/./g,function(d){return SUB[d]||d;});});
+    x=x.replace(/[\^_]/g,'');
+    return x.replace(/\s+/g,' ').trim();
+  }
+  function mathToUnicode(t){
+    if(t.indexOf('\\')<0 && t.indexOf('$')<0) return t; /* fast path: nothing math-like */
+    t=t.replace(/\\\(([\s\S]+?)\\\)/g,function(_,x){return renderMath(x);});
+    t=t.replace(/\\\[([\s\S]+?)\\\]/g,function(_,x){return renderMath(x);});
+    t=t.replace(/\$\$([\s\S]+?)\$\$/g,function(m,x){return /[\\^_]/.test(x)?renderMath(x):m;});
+    t=t.replace(/\$([^$\n]+?)\$/g,function(m,x){return /[\\^_]/.test(x)?renderMath(x):m;});
+    return t;
+  }
   function inline(t){ t=esc(t);
+    /* protect inline code so math/format rules don't touch its contents */
+    var codes=[]; t=t.replace(/`([^`]+)`/g,function(_,c){ codes.push(c); return '\uE000'+(codes.length-1)+'\uE000'; });
     t=t.replace(/:([a-z_]+):/g,function(m,n){return EMOJI[n]||m;});
-    t=t.replace(/`([^`]+)`/g,'<code>$1</code>');
+    t=mathToUnicode(t);
     t=t.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
     t=t.replace(/(^|[^*])\*([^*\s][^*]*)\*/g,'$1<em>$2</em>');
     t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+    t=t.replace(/\uE000(\d+)\uE000/g,function(_,i){ return '<code>'+codes[+i]+'</code>'; });
     return t;
   }
   function codeBlock(lang,code){ return '<div class="code"><div class="chead"><span class="lang">'+(lang||'код')+'</span><button class="copy" type="button">'+IC.copy+'<span>Копировать</span></button></div><pre>'+esc(code)+'</pre></div>'; }
