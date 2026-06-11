@@ -169,7 +169,7 @@
   }, 800); }
   function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
   function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
-    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); }
+    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); refreshTaskbar(); }
 
   function fmtDate(ms){ if(!ms) return ''; var d=new Date(ms), now=new Date();
     if(d.toDateString()===now.toDateString()) return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
@@ -236,7 +236,7 @@
   }
   function newDialog(){
     var wasDialog=(viewDlg.hidden===false);
-    document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[];
+    document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[]; refreshTaskbar();
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); });
     /* dialog → new chat: dissolve the dialog to reveal home, fade the hero in */
     if(wasDialog && viewDlg.animate){
@@ -308,6 +308,8 @@
   function blockEl(kind, attrs, inner){
     if(kind==='reasoning') return buildReasonEl(inner);
     var name=(attrs.match(/\bname="([^"]*)"/)||[])[1]||'';
+    /* TodoWrite is shown in the task bar under the header, not as an inline plate */
+    if(name==='TodoWrite') return null;
     return buildToolEl(name, inner);
   }
   function buildToolEl(name, inner){
@@ -343,7 +345,7 @@
     }
     if(pos<raw.length) segs.push({t:'text', v:raw.slice(pos)});
     segs.forEach(function(s, i){
-      if(s.t==='block'){ turn.appendChild(blockEl(s.kind, s.attrs, s.inner)); return; }
+      if(s.t==='block'){ var bel=blockEl(s.kind, s.attrs, s.inner); if(bel) turn.appendChild(bel); return; }
       if(!s.v.replace(/\s/g,'')) return; /* skip whitespace-only gaps between blocks */
       var box=document.createElement('div'); box.className='md';
       var isLast=(i===segs.length-1);
@@ -352,6 +354,60 @@
     });
     if(streaming){ var c=document.createElement('span'); c.className='caret'; turn.appendChild(c); }
   }
+
+  /* ---- task bar (TodoWrite) ----
+     The model's TodoWrite calls stream as tool_calls blocks but are not drawn inline
+     (blockEl returns null for them). Instead the LATEST list feeds a collapsible bar under
+     the dialog header. Persistence is free: the blocks live in the saved transcript, so on
+     dialog open we just scan `convo` for the last TodoWrite. */
+  var taskbar=document.getElementById('taskbar'), taskbarOpen=false;
+  var TODO_RE=/<details type="tool_calls"[^>]*\bname="TodoWrite"[^>]*>([\s\S]*?)<\/details>/g;
+  var TB_IC={
+    done:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8.5 12l2.4 2.4 4.6-5"/></svg>',
+    active:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.4" fill="currentColor" stroke="none"/></svg>',
+    pending:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>'
+  };
+  /* a TodoWrite block body is the tool output JSON-encoded as a string, HTML-escaped;
+     decode once → JSON string, parse twice → {oldTodos, newTodos, ...} */
+  function todosFromBlock(inner){ try{
+    var body=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
+    var s=JSON.parse(decodeEntities(body));
+    var obj=(typeof s==='string')?JSON.parse(s):s;
+    if(obj && Array.isArray(obj.newTodos)) return obj.newTodos;
+  }catch(e){} return null; }
+  function latestTodos(raw){ if(!raw) return null; var m, last=null; TODO_RE.lastIndex=0;
+    while((m=TODO_RE.exec(raw))!==null){ var t=todosFromBlock(m[1]); if(t!==null) last=t; } return last; }
+  /* current list = the streaming turn if it has one, else the last across stored history */
+  function currentTodos(){
+    var t=latestTodos(liveAcc); if(t!==null) return t;
+    for(var i=convo.length-1;i>=0;i--){ if(convo[i].role==='assistant'){ var h=latestTodos(convo[i].content||''); if(h!==null) return h; } }
+    return null;
+  }
+  function todoCls(s){ return s==='completed'?'done':(s==='in_progress'?'active':'pending'); }
+  function renderTaskbar(todos){
+    if(!todos || !todos.length){ taskbar.hidden=true; taskbar.innerHTML=''; taskbar.classList.remove('open'); return; }
+    var total=todos.length, done=0, active=null;
+    todos.forEach(function(t){ if(t.status==='completed') done++; else if(t.status==='in_progress' && !active) active=t; });
+    var pct=Math.round(done/total*100), allDone=(done===total);
+    var nowTxt=active ? (active.activeForm||active.content||'') : (allDone?'Готово':'');
+    var head='<button class="tb-head" type="button" aria-expanded="'+(taskbarOpen?'true':'false')+'">'+
+      '<span class="tb-ic">'+TB_IC.active+'</span><span class="tb-title">Задачи</span>'+
+      '<span class="tb-count">'+done+'/'+total+'</span>'+
+      '<span class="tb-prog"><i style="width:'+pct+'%"></i></span>'+
+      (nowTxt?'<span class="tb-now">'+esc(nowTxt)+'</span>':'')+
+      '<span class="tb-chev">▾</span></button>';
+    var items=todos.map(function(t){ var c=todoCls(t.status);
+      return '<div class="tb-item '+c+'"><span class="tb-mk">'+TB_IC[c]+'</span><span class="tb-tx">'+esc(t.content||'')+'</span></div>'; }).join('');
+    taskbar.innerHTML=head+'<div class="tb-list"'+(taskbarOpen?'':' hidden')+'>'+items+'</div>';
+    taskbar.classList.toggle('open', taskbarOpen);
+    taskbar.hidden=false;
+  }
+  function refreshTaskbar(){ renderTaskbar(currentTodos()); }
+  taskbar.addEventListener('click', function(e){ if(!e.target.closest('.tb-head')) return;
+    taskbarOpen=!taskbarOpen; var list=taskbar.querySelector('.tb-list'); if(list) list.hidden=!taskbarOpen;
+    var h=taskbar.querySelector('.tb-head'); if(h) h.setAttribute('aria-expanded', taskbarOpen?'true':'false');
+    taskbar.classList.toggle('open', taskbarOpen);
+  });
 
   /* Tasks #7–#8: stream the answer and render inline tool-call blocks. */
   function generate(btn){
@@ -371,14 +427,16 @@
       if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
         liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
         caretEl=document.createElement('span'); caretEl.className='caret'; }
-      var m; BLOCK_RE.lastIndex=0;
+      var m, todoTouched=false; BLOCK_RE.lastIndex=0;
       while((m=BLOCK_RE.exec(acc))!==null){
         if(m.index < committed) continue;
         var pre=acc.slice(committed, m.index);
         if(pre.replace(/\s/g,'')){ var b=document.createElement('div'); b.className='md'; b.innerHTML=md(pre); turn.insertBefore(b, liveBox); }
-        turn.insertBefore(blockEl(m[1], m[2], m[3]), liveBox);
+        var cel=blockEl(m[1], m[2], m[3]);
+        if(cel){ turn.insertBefore(cel, liveBox); } else { todoTouched=true; } /* null = suppressed TodoWrite → feed the bar */
         committed=m.index+m[0].length;
       }
+      if(todoTouched) refreshTaskbar();
       liveBox.innerHTML=md(acc.slice(committed));            /* progressive markdown */
       (liveBox.lastElementChild || liveBox).appendChild(caretEl);  /* caret at end of last line */
       maybeScroll();
@@ -387,7 +445,7 @@
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
-      saveActive();
+      saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
       if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
     }
@@ -465,7 +523,7 @@
       var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
-      activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[];
+      activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[]; refreshTaskbar();
       viewDlg.hidden=false; updateDialogList(); leaveHome();
       btn = dlgSend() || btn; /* we switched to the dialog view — drive stop/send on its (visible) button */
       if(fromRect) dockMorph(fromRect); /* slide the composer from center down into the dock */
@@ -492,6 +550,7 @@
     if(!turn.querySelector('.stopped')){ var s=document.createElement('div'); s.className='stopped'; s.innerHTML='⏹ Остановлено'; turn.appendChild(s); }
     var mdbox=turn.querySelector('.md');
     if(mdbox && mdbox.textContent.trim() && !turn.querySelector('.row-acts')){ turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>'); }
+    refreshTaskbar();
   }
 
   function wireComposer(scope){ var ta=scope.querySelector('textarea'); var btn=scope.querySelector('.send');
@@ -553,7 +612,7 @@
     /* drop this answer and everything after it, in both the thread and the history
        (convo index = position among real turns; DOM removal also sweeps error boxes) */
     removeTurnsFrom(turn, true);
-    convo=convo.slice(0, idx);
+    convo=convo.slice(0, idx); refreshTaskbar();
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
     generate(btn);
   }
@@ -573,7 +632,7 @@
       var idx=turnIndex(turn); if(idx<0) return;
       /* keep this (edited) user turn, drop everything after; rewrite history from here */
       removeTurnsFrom(turn, false);
-      convo=convo.slice(0, idx); convo.push({role:'user', content:nv});
+      convo=convo.slice(0, idx); convo.push({role:'user', content:nv}); refreshTaskbar();
       var btn=dlgSend(); if(!btn) return;
       generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
       generate(btn);
