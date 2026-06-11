@@ -74,6 +74,12 @@ pub trait ApiClient {
         }
         Ok(events)
     }
+
+    /// Install a cooperative cancellation signal. Streaming clients should check it
+    /// between chunks and stop consuming the backend stream once it trips, so a
+    /// cancelled turn does not keep generating mid-flight. The default is a no-op for
+    /// clients that cannot interrupt an in-flight response.
+    fn set_hook_abort_signal(&mut self, _signal: HookAbortSignal) {}
 }
 
 /// Trait implemented by tool dispatchers that execute model-requested tools.
@@ -224,6 +230,11 @@ where
 
     #[must_use]
     pub fn with_hook_abort_signal(mut self, hook_abort_signal: HookAbortSignal) -> Self {
+        // Share the signal with the API client so it can also stop an in-flight
+        // backend stream between chunks (mid-flight cancellation), not only the
+        // turn loop between steps.
+        self.api_client
+            .set_hook_abort_signal(hook_abort_signal.clone());
         self.hook_abort_signal = hook_abort_signal;
         self
     }

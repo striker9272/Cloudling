@@ -154,6 +154,16 @@
   </div>
 </div>
 
+<div class="modal-scrim" id="tokenScrim" hidden>
+  <div class="modal">
+    <div class="mtitle" id="tokenTitle">Нужен токен доступа</div>
+    <div class="mtext" id="tokenText">Сервер защищает служебные функции интерфейса токеном. Введи значение CLAW_UI_TOKEN из файла настроек сервиса — браузер запомнит его.</div>
+    <input class="minput" id="tokenInput" type="password" placeholder="Токен" autocomplete="off" />
+    <div class="merr" id="tokenErr" hidden></div>
+    <div class="mact"><button class="msave" id="tokenOk">Войти</button></div>
+  </div>
+</div>
+
 <script src="/app.js"></script>
 </body>
 </html>

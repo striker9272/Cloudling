@@ -61,11 +61,63 @@
   function copyText(t,btn){ var flash=function(){if(!btn)return;var o=btn.innerHTML;btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':'');setTimeout(function(){btn.innerHTML=o;},1100);};
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(flash,function(){fallback(t);flash();});} else {fallback(t);flash();} }
 
+  /* ---------- UI auth: /ui/* endpoints are token-gated (CLAW_UI_TOKEN) ----------
+     The stored token is attached as Authorization: Bearer to every /ui/* call.
+     401 → ask for the token (saved to localStorage, then reload); 403 → the server
+     has no token configured on a non-loopback bind: endpoints are off, explain why. */
+  var uiToken=null; try{ uiToken=localStorage.getItem('clab_ui_token')||null; }catch(e){}
+  var tokenGateShown=false;
+  function showTokenGate(forbidden){
+    if(tokenGateShown) return; tokenGateShown=true;
+    var scrim=document.getElementById('tokenScrim'), input=document.getElementById('tokenInput'),
+        ok=document.getElementById('tokenOk'), text=document.getElementById('tokenText'),
+        title=document.getElementById('tokenTitle');
+    if(forbidden){
+      title.textContent='Служебные функции отключены';
+      text.textContent='На сервере не задан CLAW_UI_TOKEN, а адрес доступен не только с localhost — диалоги и настройки отключены. Задай CLAW_UI_TOKEN в файле настроек сервиса и перезапусти его.';
+      input.hidden=true; ok.hidden=true;
+    }
+    scrim.hidden=false;
+    if(!forbidden){
+      var err=document.getElementById('tokenErr');
+      var fail=function(msg){ ok.disabled=false; err.textContent=msg; err.hidden=false; input.select(); };
+      /* verify the token BEFORE saving/reloading: a wrong value must show an error,
+         not silently reload into the same modal (endless loop) */
+      var submit=function(){ var v=(input.value||'').trim(); if(!v) return;
+        ok.disabled=true; err.hidden=true;
+        fetch('/ui/dialogs',{headers:{'Authorization':'Bearer '+v}}).then(function(r){
+          if(r.status===401){ fail('Токен не подошёл. Нужно значение CLAW_UI_TOKEN из настроек сервера.'); return; }
+          if(!r.ok){ fail('Сервер ответил '+r.status+'.'); return; }
+          var saved=false;
+          try{ localStorage.setItem('clab_ui_token', v); saved=(localStorage.getItem('clab_ui_token')===v); }catch(e){}
+          if(saved){ location.reload(); return; }
+          /* localStorage blocked (private mode / site-data settings): work with the
+             token in memory for this page; it will be asked again after a reload */
+          uiToken=v; tokenGateShown=false; scrim.hidden=true;
+          refreshSidebar(); loadSettings(); loadDlgToks(); loadPresets();
+        }).catch(function(){ fail('Сервер недоступен.'); });
+      };
+      ok.addEventListener('click', submit);
+      input.addEventListener('keydown', function(e){ if(e.key==='Enter') submit(); });
+      input.focus();
+    }
+  }
+  function uiFetch(url, opts){
+    opts=opts||{}; var h=opts.headers||{};
+    if(uiToken) h['Authorization']='Bearer '+uiToken;
+    opts.headers=h;
+    return fetch(url, opts).then(function(r){
+      if(r.status===401) showTokenGate(false);
+      else if(r.status===403) showTokenGate(true);
+      return r;
+    });
+  }
+
   /* ---------- dialog storage (server-backed: GET/PUT/DELETE /ui/dialogs) ---------- */
   var activeId=null;
   function genId(){ return 'd-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,8); }
   function dlgApi(method, path, body){
-    return fetch('/ui/dialogs'+path, {
+    return uiFetch('/ui/dialogs'+path, {
       method:method,
       headers: body ? {'Content-Type':'application/json'} : undefined,
       body: body ? JSON.stringify(body) : undefined
@@ -106,6 +158,15 @@
   /* context-token counter: prompt_tokens from the final usage chunk = size of the context
      the model received last turn. Cleared on dialog switch (no usage for stored history). */
   var dlgToks={}; /* last context-token count per dialog id, so the counter survives chat switches */
+  /* persisted server-side as one ui_kv JSON map, so the counter also survives page reloads */
+  var dlgToksTimer=null;
+  function loadDlgToks(){ pFetchJSON('/ui/kv/dlg_toks').then(function(d){
+    if(!d||!d.value) return;
+    try{ var m=JSON.parse(d.value); if(m&&typeof m==='object'){ Object.keys(m).forEach(function(k){ if(!(k in dlgToks)) dlgToks[k]=m[k]; }); if(activeId) setCtxToks(dlgToks[activeId]); } }catch(e){}
+  }); }
+  function saveDlgToks(){ clearTimeout(dlgToksTimer); dlgToksTimer=setTimeout(function(){
+    uiFetch('/ui/kv/dlg_toks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(dlgToks)})}).catch(function(){});
+  }, 800); }
   function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
   function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
     convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); }
@@ -131,7 +192,7 @@
     var firstAsst=stripBlocks((convo[1]&&convo[1].content)||'').slice(0,400);
     if(!firstUser) return;
     var text='Сообщение: '+firstUser+(firstAsst?('\nОтвет: '+firstAsst):'');
-    fetch('/ui/title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
+    uiFetch('/ui/title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
       .then(function(r){ return r.ok?r.json():null; })
       .then(function(d){
         var t=(d&&d.title)||'';
@@ -350,7 +411,7 @@
             try{ var chunk=JSON.parse(payload);
               var delta=chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
               if(delta && delta.content){ onContent(delta.content); }
-              if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId) dlgToks[activeId]=pt; setCtxToks(pt); }
+              if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId){ dlgToks[activeId]=pt; saveDlgToks(); } setCtxToks(pt); }
             }catch(e){ /* ignore keep-alives / partial chunks */ }
           });
           return pump();
@@ -427,7 +488,7 @@
     liveAcc='';
     var c=turn.querySelector('.caret'); if(c) c.remove();
     /* stopped mid tool-call: freeze the running ripple into a neutral head */
-    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head) head.innerHTML='<span class="tag">WebSearch</span> · остановлено'; }
+    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head){ var tag=head.querySelector('.tag'); var tname=tag?tag.textContent:'Инструмент'; head.innerHTML='<span class="tag">'+esc(tname)+'</span> · остановлено'; } }
     if(!turn.querySelector('.stopped')){ var s=document.createElement('div'); s.className='stopped'; s.innerHTML='⏹ Остановлено'; turn.appendChild(s); }
     var mdbox=turn.querySelector('.md');
     if(mdbox && mdbox.textContent.trim() && !turn.querySelector('.row-acts')){ turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>'); }
@@ -473,7 +534,7 @@
   var pendingDel=null, confirmScrim=document.getElementById('confirmScrim');
   function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent='«'+item.querySelector('.t').textContent.trim()+'» будет удалён без возможности восстановления.'; confirmScrim.hidden=false; }
   function closeConfirm(){ confirmScrim.hidden=true; pendingDel=null; }
-  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id) apiDelete(id); pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
+  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
   document.getElementById('confirmCancel').addEventListener('click', closeConfirm);
   confirmScrim.addEventListener('click', function(e){ if(e.target===confirmScrim) closeConfirm(); });
 
@@ -531,7 +592,7 @@
   /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
   function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
   function loadSettings(){
-    return fetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
+    return uiFetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
       if(!s) return;
       settingsFields().forEach(function(el){ var k=el.getAttribute('data-key'); if(k in s) el.value=s[k]||''; });
       var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
@@ -560,7 +621,7 @@
     var btn=this, o=btn.innerHTML; document.getElementById('saveMsg').hidden=true; btn.disabled=true;
     var body={}; settingsFields().forEach(function(el){ body[el.getAttribute('data-key')]=el.value||''; });
     btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Перезапуск ядра…</span>';
-    fetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ waitForRestart(btn,o); })
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
@@ -570,7 +631,7 @@
   function cfgSandboxFields(){ return document.querySelectorAll('.drawer.right [data-sb]'); }
   function linesToArray(s){ return (s||'').split('\n').map(function(x){ return x.trim(); }).filter(function(x){ return x.length; }); }
   function loadConfig(){
-    return fetch('/ui/config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
+    return uiFetch('/ui/config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
       if(!c) return;
       var sb=c.sandbox||{};
       var defaults={enabled:true, filesystemMode:'workspace-only', networkIsolation:false, namespaceRestrictions:true};
@@ -595,7 +656,7 @@
       sandbox[k]=(v==='true')?true:(v==='false')?false:v;
     });
     var body={ sandbox:sandbox, trustedRoots:linesToArray(document.getElementById('cfgTrusted').value), permissions:{ allow:linesToArray(document.getElementById('cfgAllow').value), deny:linesToArray(document.getElementById('cfgDeny').value) } };
-    fetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ btn.disabled=false; cfgMsg(true,'Сохранено — применится со следующего сообщения'); })
       .catch(function(err){ btn.disabled=false; cfgMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
@@ -605,29 +666,38 @@
   /* ---------- reasoning display toggle (ui_kv show_reasoning, default ON) ---------- */
   (function(){
     var sel=document.getElementById('showReason'); if(!sel) return;
-    fetch('/ui/kv/show_reasoning').then(function(r){ return r.ok?r.json():null; }).then(function(d){
+    uiFetch('/ui/kv/show_reasoning').then(function(r){ return r.ok?r.json():null; }).then(function(d){
       if(d && d.value==='false') sel.value='false';
     }).catch(function(){});
     sel.addEventListener('change', function(){
-      fetch('/ui/kv/show_reasoning',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.value})}).catch(function(){});
+      uiFetch('/ui/kv/show_reasoning',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.value})}).catch(function(){});
     });
   })();
 
-  /* ---------- backend connection check (like OWUI) ---------- */
+  /* ---------- backend connection check (like OWUI) ----------
+     Real probe via the server (POST /ui/check-backend → GET <base>/models): the browser
+     can't reach the backend directly (CORS / server-only network). Uses the values
+     currently typed into the form, before saving. */
   function setConnDot(state){ document.querySelectorAll('.entry .model .dot').forEach(function(d){ d.style.background = state==='err' ? '#d97b7b' : (state==='ok' ? '#5fa97e' : '#8a8b91'); }); }
   document.getElementById('checkBackend').addEventListener('click', function(){
     var btn=this, st=document.getElementById('checkStatus');
     var url=(btn.closest('.fieldrow').querySelector('input').value||'').trim();
+    var keyEl=document.querySelector('input[data-key="OPENAI_API_KEY"]');
+    var key=keyEl?(keyEl.value||'').trim():'';
     btn.classList.add('spin'); st.hidden=true;
-    setTimeout(function(){
-      btn.classList.remove('spin'); st.hidden=false;
-      if(/^https?:\/\/.+/i.test(url)){
-        st.className='cstatus ok'; st.innerHTML='<span class="d"></span><span>Подключено</span>'; setConnDot('ok');
-        if(!configured){ configured=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; }
-      } else {
-        st.className='cstatus err'; st.innerHTML='<span class="d"></span><span>Не удалось подключиться</span>'; setConnDot('err');
-      }
-    }, 1000);
+    uiFetch('/ui/check-backend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base_url:url, api_key:key})})
+      .then(function(r){ return r.ok?r.json():null; })
+      .catch(function(){ return null; })
+      .then(function(d){
+        btn.classList.remove('spin'); st.hidden=false;
+        if(d && d.ok){
+          st.className='cstatus ok'; st.innerHTML='<span class="d"></span><span>Подключено</span>'; setConnDot('ok');
+          if(!configured){ configured=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; }
+        } else {
+          var why=(d&&d.error)?(' — '+esc(String(d.error)).slice(0,120)):'';
+          st.className='cstatus err'; st.innerHTML='<span class="d"></span><span>Не удалось подключиться'+why+'</span>'; setConnDot('err');
+        }
+      });
   });
 
   /* ---------- dialog list: search filter + empty states ---------- */
@@ -665,10 +735,10 @@
     {name:'Кодер', prompt:'Ты — старший инженер. Пиши идиоматичный код, кратко поясняй решения, предлагай тесты. Ответы — на русском, код и комментарии — на английском.'},
     {name:'Краткий', prompt:'Отвечай максимально кратко — одно-два предложения, без воды.'}
   ];
-  function pFetchJSON(url){ return fetch(url).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
-  function savePreset(id,name,prompt){ return fetch('/ui/presets/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,prompt:prompt})}).catch(function(){}); }
-  function deletePresetReq(id){ return fetch('/ui/presets/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){}); }
-  function setActivePreset(id){ activePresetId=id||null; return fetch('/ui/kv/active_preset',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id||''})}).catch(function(){}); }
+  function pFetchJSON(url){ return uiFetch(url).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
+  function savePreset(id,name,prompt){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,prompt:prompt})}).catch(function(){}); }
+  function deletePresetReq(id){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){}); }
+  function setActivePreset(id){ activePresetId=id||null; return uiFetch('/ui/kv/active_preset',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id||''})}).catch(function(){}); }
   function activePresetPrompt(){ for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId) return presets[i].prompt||''; } return ''; }
   /* what we actually send: active preset's prompt prepended as a system message (or just convo) */
   function stripReasoning(t){ return (t||'').replace(/<details type="reasoning"[\s\S]*?<\/details>/g,'').replace(/\n{3,}/g,'\n\n'); }
@@ -735,5 +805,6 @@
   /* first run → setup screen; otherwise land on home (new dialog) */
   refreshSidebar();
   loadSettings();
+  loadDlgToks();
   if(configured){ newDialog(); } else { showSetup(); }
 })();
