@@ -9290,13 +9290,21 @@ fn short_tool_id(id: &str) -> String {
 }
 
 fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    Ok(load_system_prompt(
+    let mut prompt = load_system_prompt(
         env::current_dir()?,
         DEFAULT_DATE,
         env::consts::OS,
         "unknown",
         model_family_identity_for(model),
-    )?)
+    )?;
+    // Nudge the model to keep a visible plan; the built-in UI renders TodoWrite as a task bar.
+    prompt.push(
+        "For multi-step tasks, keep a short plan with the TodoWrite tool and update each item's \
+         status (pending → in_progress → completed) as you progress, including on follow-up \
+         requests."
+            .to_string(),
+    );
+    Ok(prompt)
 }
 
 struct PluginsCommandPayload {
