@@ -279,17 +279,19 @@ body.open-right .drawer.right{transform:translateX(0);}
 .act:hover{background:#1c1c22; color:var(--text);}
 .act.on{color:var(--accent);}
 
-.tool{margin:0 0 12px; border:1px solid var(--line); border-radius:10px; background:#101013; font-size:12.5px;}
-.tool .head{padding:8px 11px; color:var(--muted); display:flex; gap:9px; align-items:center;}
-.tool .tag{color:var(--link); font-weight:500;}
-.tool.fail{border-color:#4a2626;}
-.tool.fail .tag{color:#e08a8a;}
+/* tool-call block: flat with a thin left accent rail (green ok / red fail / gray reasoning),
+   neutral tool name — replaces the old blue-tag card so it sits in the black-gray theme */
+.tool{margin:0 0 12px; border-left:2px solid var(--ok); padding-left:12px; font-size:12.5px;}
+.tool .head{padding:4px 0; color:#9aa0a8; display:flex; gap:9px; align-items:center;}
+.tool .tag{color:#dadde2; font-weight:500;}
+.tool.fail{border-left-color:#c07d7d;}
+.tool.fail .head{color:#c49a9a;}
 details.tool>summary.head{cursor:pointer; list-style:none;}
 details.tool>summary.head::-webkit-details-marker{display:none;}
 details.tool>summary.head::after{content:"▾"; margin-left:auto; color:var(--faint); font-size:11px; transition:transform .15s;}
 details.tool[open]>summary.head::after{transform:rotate(180deg);}
-.toolout{margin:0; padding:10px 12px; border-top:1px solid var(--line); background:#0c0c0e; font-family:var(--mono); font-size:12px; line-height:1.5; max-height:280px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#c9ccd3;}
-.tool.reason{border-style:dashed;}
+.toolout{margin:6px 0 0; padding:8px 10px; border:1px solid #1f1f24; border-radius:6px; background:#0e0e11; font-family:var(--mono); font-size:12px; line-height:1.5; max-height:280px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#c4c7cd;}
+.tool.reason{border-left-color:var(--line2);}
 .tool.reason .tag{color:var(--faint); font-weight:500;}
 .tool.reason .toolout{font-family:inherit; color:var(--muted);}
 .errbox{border:1px solid #4a2626; background:#1f1414; border-radius:12px; padding:12px 14px; margin-top:2px;}
