@@ -114,6 +114,11 @@ struct ChatCompletionChunk {
     // omitted from every content chunk. The UI reads `prompt_tokens` as the live context size.
     #[serde(skip_serializing_if = "Option::is_none")]
     usage: Option<ChatCompletionUsage>,
+    // Set only on the error chunk. Lets the built-in UI render its error box; the same
+    // chunk also carries the message in `delta.content`, so plain OpenAI clients (Open
+    // WebUI included) still show the error as assistant text instead of a blank turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ErrorBody>,
 }
 
 #[derive(Serialize)]
@@ -917,7 +922,7 @@ async fn chat_completions(
 
     let state_for_task = state.clone();
     let result = tokio::task::spawn_blocking(
-        move || -> Result<crate::engine::ClawEngineResponse, String> {
+        move || -> Result<(crate::engine::ClawEngineResponse, u32), String> {
             let StatelessConversation {
                 input,
                 history,
@@ -931,29 +936,53 @@ async fn chat_completions(
                 (history, system_additions),
             )
             .map_err(|error| error.to_string())?;
-            session
-                .run_prompt_json(&input)
-                .map_err(|error| error.to_string())
+            // Capture the LAST model call's context size (evaluated input + cache), the same
+            // figure the streaming path reports, so the token counter matches across modes.
+            // `response.usage` is cumulative across the agentic loop and over-counts here.
+            let last_ctx = std::rc::Rc::new(std::cell::Cell::new(0u32));
+            let last_ctx_sink = last_ctx.clone();
+            let mut event_sink = |event: &AssistantEvent| {
+                if let AssistantEvent::Usage(u) = event {
+                    last_ctx_sink.set(
+                        u.input_tokens
+                            .saturating_add(u.cache_creation_input_tokens)
+                            .saturating_add(u.cache_read_input_tokens),
+                    );
+                }
+            };
+            let response = session
+                .run_prompt_json_with_event_sink(&input, &mut event_sink)
+                .map_err(|error| error.to_string())?;
+            Ok((response, last_ctx.get()))
         },
     )
     .await;
 
-    let engine_response = match result {
-        Ok(Ok(response)) => response,
+    let (engine_response, last_ctx) = match result {
+        Ok(Ok(pair)) => pair,
         Ok(Err(error)) => {
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error, "engine_error")
+            eprintln!("claw openai-serve: engine error: {error}");
+            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error, "engine_error");
         }
         Err(error) => {
+            eprintln!("claw openai-serve: task error: {error}");
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &error.to_string(),
                 "task_error",
-            )
+            );
         }
     };
 
     let created = now_unix();
-    let total_tokens = engine_response.usage.input_tokens + engine_response.usage.output_tokens;
+    // Mirror the streaming counter: prefer the last call's context size; fall back to the
+    // cumulative input figure if no Usage event was observed this turn.
+    let prompt_tokens = if last_ctx > 0 {
+        last_ctx
+    } else {
+        engine_response.usage.input_tokens
+    };
+    let total_tokens = prompt_tokens + engine_response.usage.output_tokens;
 
     Json(ChatCompletionResponse {
         id: next_completion_id(created),
@@ -971,7 +1000,7 @@ async fn chat_completions(
             finish_reason: "stop",
         }],
         usage: ChatCompletionUsage {
-            prompt_tokens: engine_response.usage.input_tokens,
+            prompt_tokens,
             completion_tokens: engine_response.usage.output_tokens,
             total_tokens,
         },
@@ -1033,7 +1062,13 @@ fn stream_chat_completions(
             ) {
                 Ok(session) => session,
                 Err(error) => {
-                    let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+                    eprintln!("claw openai-serve: stream session error: {error}");
+                    let _ = sender.send(openai_sse_error_chunk(
+                        &id,
+                        created,
+                        &response_model,
+                        &error.to_string(),
+                    ));
                     let _ = sender.send(openai_sse_done());
                     return;
                 }
@@ -1092,7 +1127,13 @@ fn stream_chat_completions(
                 ));
             }
             Err(error) => {
-                let _ = sender.send(openai_sse_error_chunk(&error.to_string()));
+                eprintln!("claw openai-serve: stream engine error: {error}");
+                let _ = sender.send(openai_sse_error_chunk(
+                    &id,
+                    created,
+                    &response_model,
+                    &error.to_string(),
+                ));
             }
         }
 
@@ -1286,6 +1327,7 @@ fn openai_sse_chunk_with_delta(
             finish_reason,
         }],
         usage: None,
+        error: None,
     })
 }
 
@@ -1313,15 +1355,39 @@ fn openai_sse_usage_chunk(
             completion_tokens,
             total_tokens: prompt_tokens.saturating_add(completion_tokens),
         }),
+        error: None,
     })
 }
 
-fn openai_sse_error_chunk(message: &str) -> Result<Event, Infallible> {
-    sse_json_event(&ErrorEnvelope {
-        error: ErrorBody {
+/// Error chunk for the streaming path. Shaped as a normal `chat.completion.chunk` so no
+/// client drops it: the message rides in `delta.content` (visible in Open WebUI and any
+/// OpenAI client) and in the `error` field (the built-in UI renders its error box). This
+/// replaces an off-shape `{error:{…}}` envelope that the UI silently ignored, which left a
+/// blank turn whenever the backend was down or a token limit was hit.
+fn openai_sse_error_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    message: &str,
+) -> Result<Event, Infallible> {
+    sse_json_event(&ChatCompletionChunk {
+        id: id.to_string(),
+        object: "chat.completion.chunk",
+        created,
+        model: model.to_string(),
+        choices: vec![ChatCompletionChunkChoice {
+            index: 0,
+            delta: ChatCompletionDelta {
+                role: None,
+                content: Some(format!("\u{26a0} {message}")),
+            },
+            finish_reason: Some("stop"),
+        }],
+        usage: None,
+        error: Some(ErrorBody {
             message: message.to_string(),
             kind: "engine_error",
-        },
+        }),
     })
 }
 
