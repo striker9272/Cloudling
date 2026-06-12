@@ -207,7 +207,17 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
 
     hook_abort_monitor.stop();
 
-    let summary = result?;
+    let summary = match result {
+        Ok(summary) => summary,
+        Err(error) => {
+            // On the success path `replace_engine_runtime` shuts down the OLD runtime's
+            // plugins; on an errored turn that swap never happens and this freshly built
+            // runtime is dropped instead. Shut its plugins down here so a failed turn
+            // doesn't leak plugin processes (one per failed request otherwise).
+            let _ = runtime.shutdown_plugins();
+            return Err(error.into());
+        }
+    };
     host.replace_engine_runtime(runtime)?;
     host.persist_engine_session()?;
 

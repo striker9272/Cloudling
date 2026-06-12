@@ -319,7 +319,7 @@
 
   function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); }
 
-  function errboxHTML(){ return '<div class="errbox"><div class="ehead">'+IC.warn+'Не удалось получить ответ</div><div class="emsg">Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>'; }
+  function errboxHTML(msg){ var detail = msg ? esc(String(msg)) : 'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.'; return '<div class="errbox"><div class="ehead">'+IC.warn+'Не удалось получить ответ</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>'; }
 
   /* ---------- real chat ----------
      The page is the client: it holds the dialog history and re-sends it every turn
@@ -466,14 +466,23 @@
     turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
-    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true;
+    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false;
     liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
+    /* Backend error mid-stream (engine down / token limit): clab sends a chunk with an
+       `error` field. Show the error box with the reason instead of a blank turn. */
+    function showError(msg){
+      errored=true; liveAcc='';
+      turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
+      turn.innerHTML=errboxHTML(msg); attachRetry(turn, btn);
+      finishGen(btn); maybeScroll();
+    }
     /* Incremental render: completed tool blocks + the text before them are committed ONCE
        (permanent DOM); the trailing text node is re-rendered as markdown each token so
        formatting appears live (progressive, like OpenWebUI). liveBox stays the last child
        and is the anchor we insert committed blocks before, so the tool blocks never get
        rebuilt/re-collapsed mid-stream. */
     function onContent(piece){
+      if(errored) return;
       acc+=piece; liveAcc=acc;
       if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
         liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
@@ -493,6 +502,7 @@
       maybeScroll();
     }
     function finalize(){
+      if(errored) return; /* error box already shown — don't overwrite with an empty turn */
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
@@ -518,6 +528,7 @@
             var payload=line.slice(5).trim();
             if(payload==='' || payload==='[DONE]') return;
             try{ var chunk=JSON.parse(payload);
+              if(chunk.error){ showError((chunk.error&&chunk.error.message)||chunk.error); return; }
               var delta=chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
               if(delta && delta.content){ onContent(delta.content); }
               if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId){ dlgToks[activeId]=pt; saveDlgToks(); } setCtxToks(pt); }
