@@ -169,6 +169,18 @@ pub struct McpStdioServerConfig {
     pub args: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub tool_call_timeout_ms: Option<u64>,
+    pub framing: McpStdioFraming,
+}
+
+/// Wire framing for stdio MCP servers. The MCP specification uses newline-delimited
+/// JSON messages (the default); `content-length` keeps the LSP-style header framing
+/// for legacy servers written against clab's previous transport. Reads auto-detect
+/// both formats; this setting only controls what the client writes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum McpStdioFraming {
+    #[default]
+    Newline,
+    ContentLength,
 }
 
 /// Configuration for an MCP server reached over HTTP or SSE.
@@ -1212,6 +1224,16 @@ fn parse_mcp_server_config(
             args: optional_string_array(object, "args", context)?.unwrap_or_default(),
             env: optional_string_map(object, "env", context)?.unwrap_or_default(),
             tool_call_timeout_ms: optional_u64(object, "toolCallTimeoutMs", context)?,
+            framing: match optional_string(object, "framing", context)? {
+                None | Some("newline") => McpStdioFraming::Newline,
+                Some("content-length") => McpStdioFraming::ContentLength,
+                Some(other) => {
+                    return Err(ConfigError::Parse(format!(
+                        "{context}: unsupported MCP stdio framing for {server_name}: \
+                         {other} (expected \"newline\" or \"content-length\")"
+                    )))
+                }
+            },
         })),
         "sse" => Ok(McpServerConfig::Sse(parse_mcp_remote_server_config(
             object, context,

@@ -107,6 +107,21 @@ pub enum InputContentBlock {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         is_error: bool,
     },
+    /// An image part, OpenAI shape `{"type":"image_url","image_url":{"url":...}}`.
+    /// `openai_compat::translate_message` assembles the wire JSON manually, but the
+    /// explicit rename keeps direct serde round-trips consistent with that shape.
+    #[serde(rename = "image_url")]
+    Image {
+        image_url: ImageUrl,
+    },
+}
+
+/// The `image_url` payload of an OpenAI image content part.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ImageUrl {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

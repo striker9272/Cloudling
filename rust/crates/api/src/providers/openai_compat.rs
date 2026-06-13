@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::http_client::build_http_client_or_default;
+use crate::http_client::{build_http_client_or_default, RetryPolicy};
 use crate::types::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
@@ -22,9 +22,6 @@ pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_DASHSCOPE_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
-const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(128);
-const DEFAULT_MAX_RETRIES: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiCompatConfig {
@@ -119,14 +116,15 @@ impl OpenAiCompatClient {
     }
     #[must_use]
     pub fn new(api_key: impl Into<String>, config: OpenAiCompatConfig) -> Self {
+        let retry = RetryPolicy::from_env();
         Self {
             http: build_http_client_or_default(),
             api_key: api_key.into(),
             config,
             base_url: read_base_url(config),
-            max_retries: DEFAULT_MAX_RETRIES,
-            initial_backoff: DEFAULT_INITIAL_BACKOFF,
-            max_backoff: DEFAULT_MAX_BACKOFF,
+            max_retries: retry.max_retries,
+            initial_backoff: retry.initial_backoff,
+            max_backoff: retry.max_backoff,
         }
     }
 
@@ -256,14 +254,35 @@ impl OpenAiCompatClient {
         request: &MessageRequest,
     ) -> Result<reqwest::Response, ApiError> {
         let mut attempts = 0;
+        // Owned working copy so we can drop image parts and retry once when the backend has no
+        // vision support. Otherwise an image a text-only model can't read errors on EVERY turn
+        // (the client re-sends the whole history), blocking the conversation. Graceful
+        // degradation: replace images with a note, retry, let the text answer come back.
+        let mut working = request.clone();
+        let mut stripped_images = false;
 
         let last_error = loop {
             attempts += 1;
-            let retryable_error = match self.send_raw_request(request).await {
+            let retryable_error = match self.send_raw_request(&working).await {
                 Ok(response) => match expect_success(response).await {
                     Ok(response) => return Ok(response),
-                    Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => error,
-                    Err(error) => return Err(error),
+                    Err(error) => {
+                        if !stripped_images
+                            && apierror_is_unsupported_media(&error)
+                            && strip_images_from_request(&mut working)
+                        {
+                            // Retry immediately with a text-only request (no backoff, no budget
+                            // consumed): this attempt only discovered the backend lacks vision.
+                            stripped_images = true;
+                            attempts -= 1;
+                            continue;
+                        }
+                        if error.is_retryable() && attempts <= self.max_retries + 1 {
+                            error
+                        } else {
+                            return Err(error);
+                        }
+                    }
                 },
                 Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => error,
                 Err(error) => return Err(error),
@@ -1183,6 +1202,8 @@ pub fn translate_message(message: &InputMessage, model: &str) -> Vec<Value> {
                         }
                     })),
                     InputContentBlock::ToolResult { .. } => {}
+                    // Assistant turns don't carry image inputs; ignore for exhaustiveness.
+                    InputContentBlock::Image { .. } => {}
                 }
             }
             let include_reasoning =
@@ -1205,34 +1226,88 @@ pub fn translate_message(message: &InputMessage, model: &str) -> Vec<Value> {
                 vec![msg]
             }
         }
-        _ => message
-            .content
-            .iter()
-            .filter_map(|block| match block {
-                InputContentBlock::Text { text } => Some(json!({
-                    "role": "user",
-                    "content": text,
-                })),
-                InputContentBlock::ToolResult {
-                    tool_use_id,
-                    content,
-                    is_error,
-                } => {
-                    let mut msg = json!({
-                        "role": "tool",
-                        "tool_call_id": tool_use_id,
-                        "content": flatten_tool_result_content(content),
-                    });
-                    // Only include is_error for models that support it.
-                    // kimi models reject this field with 400 Bad Request.
-                    if supports_is_error {
-                        msg["is_error"] = json!(is_error);
+        _ => {
+            // When the message carries image parts, vision backends expect ONE user
+            // message whose `content` is an array of {type:text}/{type:image_url} parts
+            // (text and image together). Without images we keep the original behavior of
+            // one user message per text block. ToolResult blocks always emit as separate
+            // `tool` messages either way.
+            let has_image = message
+                .content
+                .iter()
+                .any(|block| matches!(block, InputContentBlock::Image { .. }));
+            if has_image {
+                let mut parts: Vec<Value> = Vec::new();
+                let mut tool_messages: Vec<Value> = Vec::new();
+                for block in &message.content {
+                    match block {
+                        InputContentBlock::Text { text } => {
+                            parts.push(json!({ "type": "text", "text": text }));
+                        }
+                        InputContentBlock::Image { image_url } => {
+                            let mut payload = json!({ "url": image_url.url });
+                            if let Some(detail) = &image_url.detail {
+                                payload["detail"] = json!(detail);
+                            }
+                            parts.push(json!({ "type": "image_url", "image_url": payload }));
+                        }
+                        InputContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } => {
+                            let mut msg = json!({
+                                "role": "tool",
+                                "tool_call_id": tool_use_id,
+                                "content": flatten_tool_result_content(content),
+                            });
+                            if supports_is_error {
+                                msg["is_error"] = json!(is_error);
+                            }
+                            tool_messages.push(msg);
+                        }
+                        InputContentBlock::Thinking { .. } | InputContentBlock::ToolUse { .. } => {}
                     }
-                    Some(msg)
                 }
-                InputContentBlock::Thinking { .. } | InputContentBlock::ToolUse { .. } => None,
-            })
-            .collect(),
+                let mut out = Vec::new();
+                if !parts.is_empty() {
+                    out.push(json!({ "role": "user", "content": parts }));
+                }
+                out.extend(tool_messages);
+                out
+            } else {
+                message
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        InputContentBlock::Text { text } => Some(json!({
+                            "role": "user",
+                            "content": text,
+                        })),
+                        InputContentBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                            is_error,
+                        } => {
+                            let mut msg = json!({
+                                "role": "tool",
+                                "tool_call_id": tool_use_id,
+                                "content": flatten_tool_result_content(content),
+                            });
+                            // Only include is_error for models that support it.
+                            // kimi models reject this field with 400 Bad Request.
+                            if supports_is_error {
+                                msg["is_error"] = json!(is_error);
+                            }
+                            Some(msg)
+                        }
+                        InputContentBlock::Thinking { .. }
+                        | InputContentBlock::ToolUse { .. }
+                        | InputContentBlock::Image { .. } => None,
+                    })
+                    .collect()
+            }
+        }
     }
 }
 
@@ -1636,7 +1711,11 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
     let request_id = request_id_from_headers(response.headers());
     let body = response.text().await.unwrap_or_default();
     let parsed_error = serde_json::from_str::<ErrorEnvelope>(&body).ok();
-    let retryable = is_retryable_status(status);
+    // A backend without vision support (no mmproj) rejects image input with a 500 whose body
+    // says "image input is not supported" / "mmproj". That is a permanent capability mismatch,
+    // not a transient server error, so it must NOT be retried — otherwise the large image is
+    // re-sent on every backoff attempt and looks like an endless loop. Surface it once.
+    let retryable = is_retryable_status(status) && !is_unsupported_media_error(&body);
 
     let suggested_action = suggested_action_for_status(status);
 
@@ -1657,6 +1736,43 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
 
 const fn is_retryable_status(status: reqwest::StatusCode) -> bool {
     matches!(status.as_u16(), 408 | 409 | 429 | 500 | 502 | 503 | 504)
+}
+
+/// Detects a backend rejecting image/multimodal input because it has no vision support
+/// (llama.cpp returns a 500 with "image input is not supported" / a "mmproj" hint). Such an
+/// error is permanent for that backend, so it should be treated as fatal rather than retried.
+fn is_unsupported_media_error(body: &str) -> bool {
+    let lowered = body.to_ascii_lowercase();
+    lowered.contains("image input is not supported") || lowered.contains("mmproj")
+}
+
+/// True when an [`ApiError`] is the backend rejecting image input for lack of vision support.
+fn apierror_is_unsupported_media(error: &ApiError) -> bool {
+    match error {
+        ApiError::Api { body, message, .. } => {
+            is_unsupported_media_error(body)
+                || message.as_deref().is_some_and(is_unsupported_media_error)
+        }
+        _ => false,
+    }
+}
+
+/// Replace every image content block with a short text note, in place. Returns true if any
+/// image was stripped. Used to retry once against a text-only backend so an attached image
+/// doesn't block the conversation (the original image stays in the client's history).
+fn strip_images_from_request(request: &mut MessageRequest) -> bool {
+    let mut changed = false;
+    for message in &mut request.messages {
+        for block in &mut message.content {
+            if matches!(block, InputContentBlock::Image { .. }) {
+                *block = InputContentBlock::Text {
+                    text: "[image omitted: this backend has no vision support]".to_string(),
+                };
+                changed = true;
+            }
+        }
+    }
+    changed
 }
 
 /// Generate a suggested user action based on the HTTP status code and error context.
@@ -1700,19 +1816,55 @@ impl StringExt for String {
 mod tests {
     use super::{
         build_chat_completion_request, chat_completions_endpoint, is_reasoning_model,
-        model_requires_reasoning_content_in_history, normalize_finish_reason, normalize_response,
-        openai_tool_choice, parse_tool_arguments, OpenAiCompatClient, OpenAiCompatConfig,
-        StreamState,
+        is_unsupported_media_error, model_requires_reasoning_content_in_history,
+        normalize_finish_reason, normalize_response, openai_tool_choice, parse_tool_arguments,
+        translate_message, OpenAiCompatClient, OpenAiCompatConfig, StreamState,
     };
     use crate::error::ApiError;
     use crate::types::{
         ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
-        InputContentBlock, InputMessage, MessageRequest, OutputContentBlock, StreamEvent,
+        ImageUrl, InputContentBlock, InputMessage, MessageRequest, OutputContentBlock, StreamEvent,
         ToolChoice, ToolDefinition, ToolResultContentBlock,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::sync::{Mutex, OnceLock};
+
+    #[test]
+    fn unsupported_media_error_is_detected() {
+        assert!(is_unsupported_media_error(
+            "{\"error\":{\"message\":\"image input is not supported - hint: provide the mmproj\"}}"
+        ));
+        assert!(is_unsupported_media_error("you may need to provide the MMPROJ"));
+        assert!(!is_unsupported_media_error("internal server error"));
+    }
+
+    #[test]
+    fn image_block_translates_to_one_user_message_with_content_array() {
+        let messages = translate_message(
+            &InputMessage {
+                role: "user".to_string(),
+                content: vec![
+                    InputContentBlock::Text {
+                        text: "what is this".to_string(),
+                    },
+                    InputContentBlock::Image {
+                        image_url: ImageUrl {
+                            url: "data:image/png;base64,AAAA".to_string(),
+                            detail: None,
+                        },
+                    },
+                ],
+            },
+            "gemma-3",
+        );
+        assert_eq!(messages.len(), 1);
+        let content = &messages[0]["content"];
+        assert!(content.is_array());
+        assert_eq!(content[0]["type"], "text");
+        assert_eq!(content[1]["type"], "image_url");
+        assert_eq!(content[1]["image_url"]["url"], "data:image/png;base64,AAAA");
+    }
 
     #[test]
     fn request_translation_uses_openai_compatible_shape() {

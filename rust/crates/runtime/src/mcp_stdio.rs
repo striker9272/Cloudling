@@ -1164,6 +1164,7 @@ pub struct McpStdioProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
+    framing: crate::config::McpStdioFraming,
 }
 
 impl McpStdioProcess {
@@ -1190,6 +1191,7 @@ impl McpStdioProcess {
             child,
             stdin,
             stdout: BufReader::new(stdout),
+            framing: transport.framing,
         })
     }
 
@@ -1232,8 +1234,39 @@ impl McpStdioProcess {
         self.flush().await
     }
 
+    /// Read one JSON-RPC message, auto-detecting the framing regardless of the
+    /// configured write framing: a line starting with `Content-Length:` opens an
+    /// LSP-style header block (legacy clab framing), anything else is treated as a
+    /// newline-delimited JSON message (the MCP specification). Blank lines between
+    /// messages are tolerated.
     pub async fn read_frame(&mut self) -> io::Result<Vec<u8>> {
-        let mut content_length = None;
+        let first_line = loop {
+            let mut line = String::new();
+            let bytes_read = self.stdout.read_line(&mut line).await?;
+            if bytes_read == 0 {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "MCP stdio stream closed while reading a message",
+                ));
+            }
+            if line.trim_end_matches(['\r', '\n']).trim().is_empty() {
+                continue;
+            }
+            break line;
+        };
+
+        let first_header = first_line.trim_end_matches(['\r', '\n']);
+        let is_content_length_header = first_header
+            .split_once(':')
+            .is_some_and(|(name, _)| name.trim().eq_ignore_ascii_case("Content-Length"));
+        if !is_content_length_header {
+            // Newline-delimited JSON: the whole line is the message.
+            return Ok(first_header.as_bytes().to_vec());
+        }
+
+        let mut content_length = first_header
+            .split_once(':')
+            .and_then(|(_, value)| value.trim().parse::<usize>().ok());
         loop {
             let mut line = String::new();
             let bytes_read = self.stdout.read_line(&mut line).await?;
@@ -1243,7 +1276,7 @@ impl McpStdioProcess {
                     "MCP stdio stream closed while reading headers",
                 ));
             }
-            if line == "\r\n" {
+            if line == "\r\n" || line == "\n" {
                 break;
             }
             let header = line.trim_end_matches(['\r', '\n']);
@@ -1269,7 +1302,17 @@ impl McpStdioProcess {
     pub async fn write_jsonrpc_message<T: Serialize>(&mut self, message: &T) -> io::Result<()> {
         let body = serde_json::to_vec(message)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
-        self.write_frame(&body).await
+        match self.framing {
+            // MCP specification: one compact JSON message per line (serde_json's
+            // compact encoding never contains raw newlines).
+            crate::config::McpStdioFraming::Newline => {
+                self.write_all(&body).await?;
+                self.write_all(b"\n").await?;
+                self.flush().await
+            }
+            // Legacy clab framing (LSP-style headers) for servers written against it.
+            crate::config::McpStdioFraming::ContentLength => self.write_frame(&body).await,
+        }
     }
 
     pub async fn read_jsonrpc_message<T: DeserializeOwned>(&mut self) -> io::Result<T> {
@@ -1792,6 +1835,7 @@ mod tests {
                 args: vec![script_path.to_string_lossy().into_owned()],
                 env: BTreeMap::from([("MCP_TEST_TOKEN".to_string(), "secret-value".to_string())]),
                 tool_call_timeout_ms: None,
+                framing: crate::config::McpStdioFraming::ContentLength,
             }),
         };
         McpClientBootstrap::from_scoped_config("stdio server", &config)
@@ -1810,6 +1854,7 @@ mod tests {
             args: vec![script_path.to_string_lossy().into_owned()],
             env,
             tool_call_timeout_ms: None,
+            framing: crate::config::McpStdioFraming::ContentLength,
         }
     }
 
@@ -1860,6 +1905,7 @@ mod tests {
                 args: vec![script_path.to_string_lossy().into_owned()],
                 env,
                 tool_call_timeout_ms: None,
+                framing: crate::config::McpStdioFraming::ContentLength,
             }),
         }
     }
@@ -1942,6 +1988,96 @@ mod tests {
                     capabilities: json!({"tools": {}}),
                     server_info: McpInitializeServerInfo {
                         name: "fake-mcp".to_string(),
+                        version: "0.1.0".to_string(),
+                    },
+                })
+            );
+
+            let status = process.wait().await.expect("wait for exit");
+            assert!(status.success());
+
+            cleanup_script(&script_path);
+        });
+    }
+
+    /// Newline-framed fixture (the MCP specification's stdio transport): one JSON
+    /// message per line, no headers.
+    fn write_newline_jsonrpc_script() -> PathBuf {
+        let root = temp_dir();
+        fs::create_dir_all(&root).expect("temp dir");
+        let script_path = root.join("newline-jsonrpc-mcp.py");
+        let script = [
+            "#!/usr/bin/env python3",
+            "import json, sys",
+            "line = sys.stdin.readline()",
+            "request = json.loads(line)",
+            r"assert request['jsonrpc'] == '2.0'",
+            r"assert request['method'] == 'initialize'",
+            r"response = json.dumps({",
+            r"    'jsonrpc': '2.0',",
+            r"    'id': request['id'],",
+            r"    'result': {",
+            r"        'protocolVersion': request['params']['protocolVersion'],",
+            r"        'capabilities': {'tools': {}},",
+            r"        'serverInfo': {'name': 'newline-mcp', 'version': '0.1.0'}",
+            r"    }",
+            r"})",
+            "sys.stdout.write(response + '\\n')",
+            "sys.stdout.flush()",
+            "",
+        ]
+        .join("\n");
+        fs::write(&script_path, script).expect("write script");
+        let mut permissions = fs::metadata(&script_path).expect("metadata").permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&script_path, permissions).expect("chmod");
+        script_path
+    }
+
+    #[test]
+    fn round_trips_initialize_over_newline_framing() {
+        // Regression for real-world MCP servers: the spec's stdio transport is
+        // newline-delimited JSON. The client must write JSON lines (default framing)
+        // and auto-detect line-framed responses on read.
+        let runtime = Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        runtime.block_on(async {
+            let script_path = write_newline_jsonrpc_script();
+            let transport = crate::mcp_client::McpStdioTransport {
+                command: "python3".to_string(),
+                args: vec![script_path.to_string_lossy().into_owned()],
+                env: BTreeMap::new(),
+                tool_call_timeout_ms: None,
+                framing: crate::config::McpStdioFraming::Newline,
+            };
+            let mut process = McpStdioProcess::spawn(&transport).expect("spawn transport directly");
+
+            let response = process
+                .initialize(
+                    JsonRpcId::Number(1),
+                    McpInitializeParams {
+                        protocol_version: "2025-03-26".to_string(),
+                        capabilities: json!({"roots": {}}),
+                        client_info: McpInitializeClientInfo {
+                            name: "runtime-tests".to_string(),
+                            version: "0.1.0".to_string(),
+                        },
+                    },
+                )
+                .await
+                .expect("initialize roundtrip over newline framing");
+
+            assert_eq!(response.id, JsonRpcId::Number(1));
+            assert_eq!(response.error, None);
+            assert_eq!(
+                response.result,
+                Some(McpInitializeResult {
+                    protocol_version: "2025-03-26".to_string(),
+                    capabilities: json!({"tools": {}}),
+                    server_info: McpInitializeServerInfo {
+                        name: "newline-mcp".to_string(),
                         version: "0.1.0".to_string(),
                     },
                 })
@@ -2080,6 +2216,7 @@ mod tests {
                 args: vec![script_path.to_string_lossy().into_owned()],
                 env: BTreeMap::from([("MCP_TEST_TOKEN".to_string(), "direct-secret".to_string())]),
                 tool_call_timeout_ms: None,
+                framing: crate::config::McpStdioFraming::ContentLength,
             };
             let mut process = McpStdioProcess::spawn(&transport).expect("spawn transport directly");
             let ready = process.read_available().await.expect("read ready");
@@ -2343,6 +2480,7 @@ mod tests {
                             "200".to_string(),
                         )]),
                         tool_call_timeout_ms: Some(25),
+                        framing: crate::config::McpStdioFraming::ContentLength,
                     }),
                 },
             )]);
@@ -2397,6 +2535,7 @@ mod tests {
                             "1".to_string(),
                         )]),
                         tool_call_timeout_ms: Some(1_000),
+                        framing: crate::config::McpStdioFraming::ContentLength,
                     }),
                 },
             )]);
@@ -2733,6 +2872,7 @@ mod tests {
                             args: Vec::new(),
                             env: BTreeMap::new(),
                             tool_call_timeout_ms: None,
+                            framing: crate::config::McpStdioFraming::ContentLength,
                         }),
                     },
                 ),

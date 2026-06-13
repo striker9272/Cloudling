@@ -253,6 +253,7 @@ fn extract_file_operation(block: &ContentBlock) -> Option<(String, FileOp)> {
         }
         ContentBlock::Text { .. } => None,
         ContentBlock::Thinking { .. } => None,
+        ContentBlock::Image { .. } => None,
     }
 }
 
@@ -356,6 +357,7 @@ fn is_chatty_message(msg: &ConversationMessage) -> bool {
         .iter()
         .map(|b| match b {
             ContentBlock::Text { text } => text.len(),
+            ContentBlock::Image { url } => url.len(),
             ContentBlock::ToolUse { input, .. } => input.len(),
             ContentBlock::ToolResult { output, .. } => output.len(),
             ContentBlock::Thinking { thinking, .. } => thinking.len(),
@@ -548,6 +550,9 @@ fn fingerprint_message(index: usize, msg: &ConversationMessage) -> Option<Messag
             ContentBlock::Text { text } => {
                 text_length += text.len();
             }
+            ContentBlock::Image { url } => {
+                text_length += url.len();
+            }
             ContentBlock::Thinking { thinking, .. } => {
                 text_length += thinking.len();
             }
@@ -624,6 +629,7 @@ fn generate_cluster_summary(messages: &[&ConversationMessage]) -> String {
                 }
                 ContentBlock::Text { .. } => {}
                 ContentBlock::Thinking { .. } => {}
+                ContentBlock::Image { .. } => {}
             }
         }
     }
@@ -655,6 +661,7 @@ fn estimate_message_tokens(message: &ConversationMessage) -> usize {
         .iter()
         .map(|block| match block {
             ContentBlock::Text { text } => text.len() / 4 + 1,
+            ContentBlock::Image { url } => url.len() / 4 + 1,
             ContentBlock::ToolUse { name, input, .. } => (name.len() + input.len()) / 4 + 1,
             ContentBlock::ToolResult {
                 tool_name, output, ..
