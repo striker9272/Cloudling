@@ -32,7 +32,12 @@ In scope:
 - permission bypasses, sandbox misreporting, or unsafe tool execution;
 - credential disclosure in logs, JSON output, telemetry, docs, or examples;
 - plugin, hook, MCP, provider, or config behavior that can unexpectedly execute
-  code or leak secrets.
+  code or leak secrets;
+- built-in web UI (`--ui`) auth issues: reaching the `/ui/*` data endpoints —
+  which can read the backend API key, rewrite the service env file, and change
+  the sandbox/permission config — without the configured `CLAW_UI_TOKEN`, or the
+  fail-closed default (disabled on non-loopback binds when no token is set) not
+  holding.
 
 Out of scope:
 

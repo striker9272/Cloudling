@@ -454,6 +454,24 @@ let client = build_http_client_with(&config).expect("proxy client");
 - Empty values are treated as unset, so leaving `HTTPS_PROXY=""` in your shell will not enable a proxy.
 - If a proxy URL cannot be parsed, `clab` falls back to a direct (no-proxy) client so existing workflows keep working; double-check the URL if you expected the request to be tunnelled.
 
+## Built-in web UI
+
+`clab openai-serve --ui` serves a browser chat page on the same port as the API (the service is headless by default). Enable it with the `--ui` flag and configure it via `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints), `CLAW_UI_DATA_DIR` (dialog/preset storage), and `CLAW_OPENAI_ENV_FILE` (so the UI can save engine settings and restart the core). See [`docs/web-ui.md`](./docs/web-ui.md) for the full guide, all environment variables, and the `/ui/*` auth model.
+
+## Backend timeouts and retries
+
+The HTTP client that talks to your model backend has a tunable connect timeout and retry policy, set via optional `CLAW_BACKEND_*` environment variables. They are read when the client is built per request, so changes apply without a restart, and the defaults are sensible — an unreachable backend surfaces as an error in seconds rather than minutes.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `CLAW_BACKEND_CONNECT_TIMEOUT_SECS` | `10` | Connection-establishment timeout. `0` disables it. |
+| `CLAW_BACKEND_READ_TIMEOUT_SECS` | *(off)* | Max idle gap between response bytes. Off by default so a long/streaming reply is never cut short; `0` also means off. Enable deliberately. |
+| `CLAW_BACKEND_MAX_RETRIES` | `3` | Retries on a retryable failure (connection refused, timeout, 429, 5xx). |
+| `CLAW_BACKEND_INITIAL_BACKOFF_SECS` | `1` | Starting backoff, doubled up to the cap. |
+| `CLAW_BACKEND_MAX_BACKOFF_SECS` | `8` | Backoff ceiling. |
+
+No overall request timeout is set on purpose: a single call may stream for a long time and the agent loop makes many calls, so a wall-clock cap would cut off legitimate long replies.
+
 ## Skills
 
 Use `/skills list` in the interactive REPL or `clab skills --output-format json` from the direct CLI to inspect installed skills. For offline/local installs, install the directory that contains `SKILL.md`, then verify the discovered name before invoking it:
