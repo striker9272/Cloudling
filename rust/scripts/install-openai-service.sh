@@ -9,7 +9,10 @@
 #       wizard; pass flags for non-interactive / CI use.
 #   --uninstall          Stop and disable the service, then remove the unit,
 #       wrapper, env file, and runtime binary. By default also removes the
-#       work/sandbox directories and *.bak-* backups (use --keep-data to keep them).
+#       work/sandbox/ui-data directories and *.bak-* backups (use --keep-data to keep
+#       them). Data dir paths are read from the installed env file (source of truth),
+#       so custom locations are cleaned up; an explicit --workdir/--sandbox-dir/
+#       --ui-data-dir flag overrides what the env file says.
 #
 # Nothing here hardcodes a host: every path and name is a flag with a portable
 # claw-lab-* default, so the fork stays movable across machines.
@@ -51,6 +54,13 @@ KEEP_DATA=0
 UI_MODE=0
 UI_TOKEN=""
 UI_DATA_DIR="/var/lib/claw-lab/ui"
+# Track whether a data dir was pinned with an explicit flag. When it was not,
+# `--uninstall` discovers the real path from the installed env file (source of truth),
+# so a custom install is cleaned up without re-passing every --*-dir flag. Precedence:
+# flag > env file > built-in default.
+WORKDIR_SET=0
+SANDBOX_DIR_SET=0
+UI_DATA_DIR_SET=0
 
 usage() {
   cat <<'USAGE'
@@ -92,6 +102,8 @@ Common options:
 Uninstall:
   --uninstall                 remove the service named by --service and its files.
   --keep-data                 keep the work/sandbox directories and *.bak-* backups.
+                              (Data dir paths are read from --env-file unless pinned by
+                              an explicit --workdir/--sandbox-dir/--ui-data-dir flag.)
 
 Design:
   - Installs systemd service + env + wrapper for the OpenAI-compatible Claw Lab server.
@@ -118,10 +130,10 @@ while [ "$#" -gt 0 ]; do
     --wrapper=*) WRAPPER_PATH="${1#*=}"; shift ;;
     --env-file) ENV_FILE="${2:-}"; shift 2 ;;
     --env-file=*) ENV_FILE="${1#*=}"; shift ;;
-    --workdir) WORKDIR="${2:-}"; shift 2 ;;
-    --workdir=*) WORKDIR="${1#*=}"; shift ;;
-    --sandbox-dir) SANDBOX_DIR="${2:-}"; shift 2 ;;
-    --sandbox-dir=*) SANDBOX_DIR="${1#*=}"; shift ;;
+    --workdir) WORKDIR="${2:-}"; WORKDIR_SET=1; shift 2 ;;
+    --workdir=*) WORKDIR="${1#*=}"; WORKDIR_SET=1; shift ;;
+    --sandbox-dir) SANDBOX_DIR="${2:-}"; SANDBOX_DIR_SET=1; shift 2 ;;
+    --sandbox-dir=*) SANDBOX_DIR="${1#*=}"; SANDBOX_DIR_SET=1; shift ;;
     --tmpdir) TMPDIR_VALUE="${2:-}"; shift 2 ;;
     --tmpdir=*) TMPDIR_VALUE="${1#*=}"; shift ;;
     --bind) BIND="${2:-}"; shift 2 ;;
@@ -146,8 +158,8 @@ while [ "$#" -gt 0 ]; do
     --ui) UI_MODE=1; shift ;;
     --ui-token) UI_TOKEN="${2:-}"; shift 2 ;;
     --ui-token=*) UI_TOKEN="${1#*=}"; shift ;;
-    --ui-data-dir) UI_DATA_DIR="${2:-}"; shift 2 ;;
-    --ui-data-dir=*) UI_DATA_DIR="${1#*=}"; shift ;;
+    --ui-data-dir) UI_DATA_DIR="${2:-}"; UI_DATA_DIR_SET=1; shift 2 ;;
+    --ui-data-dir=*) UI_DATA_DIR="${1#*=}"; UI_DATA_DIR_SET=1; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "FAIL: unknown argument: $1" >&2; usage; exit 2 ;;
@@ -217,6 +229,25 @@ confirm() {  # confirm "question" -> returns 0 to proceed, else aborts
 
 do_uninstall() {
   local unit="/etc/systemd/system/$SERVICE_NAME"
+
+  # Source of truth for data dirs is the installed env file: read the real paths from
+  # it so a custom install (e.g. a relocated CLAW_UI_DATA_DIR holding dialogs.sqlite) is
+  # actually removed, not the defaults. An explicit --*-dir flag still wins; if the env
+  # file is missing/unreadable, existing_var yields empty and we keep the flag/default.
+  local from_env
+  if [ "$WORKDIR_SET" != "1" ]; then
+    from_env="$(existing_var CLAW_WORKING_DIRECTORY)"
+    [ -n "$from_env" ] && WORKDIR="$from_env"
+  fi
+  if [ "$SANDBOX_DIR_SET" != "1" ]; then
+    from_env="$(existing_var CLAW_SANDBOX_DIR)"
+    [ -n "$from_env" ] && SANDBOX_DIR="$from_env"
+  fi
+  if [ "$UI_DATA_DIR_SET" != "1" ]; then
+    from_env="$(existing_var CLAW_UI_DATA_DIR)"
+    [ -n "$from_env" ] && UI_DATA_DIR="$from_env"
+  fi
+
   echo "Uninstall plan"
   echo "  service:      $SERVICE_NAME"
   echo "  unit:         $unit"
