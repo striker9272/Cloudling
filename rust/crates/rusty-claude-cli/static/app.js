@@ -144,7 +144,7 @@
           /* localStorage blocked (private mode / site-data settings): work with the
              token in memory for this page; it will be asked again after a reload */
           uiToken=v; tokenGateShown=false; scrim.hidden=true;
-          refreshSidebar(); loadSettings(); loadDlgToks(); loadDlgErrs(); loadPresets();
+          refreshSidebar(); loadSettings(); loadDlgToks(); loadDlgErrs(); loadDlgPins(); loadPresets();
         }).catch(function(){ fail('Сервер недоступен.'); });
       };
       ok.addEventListener('click', submit);
@@ -203,7 +203,7 @@
   function assistantTurnEl(content){
     var t=document.createElement('div'); t.className='turn a';
     paintTurn(t, content||'', false);
-    t.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
+    t.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>');
     return t;
   }
   /* context-token counter: prompt_tokens from the final usage chunk = size of the context
@@ -232,6 +232,16 @@
   }, 800); }
   function setDlgErr(msg){ if(!activeId) return; dlgErrs[activeId]=String(msg||''); saveDlgErrs(); }
   function clearDlgErr(){ if(activeId && (activeId in dlgErrs)){ delete dlgErrs[activeId]; saveDlgErrs(); } }
+  /* Pinned dialog ids, persisted as a ui_kv JSON array so pins survive reloads. On unpin a
+     dialog falls back into the main list, which updateDialogList keeps sorted by date. */
+  var dlgPins={}, dlgPinsTimer=null;
+  function loadDlgPins(){ return pFetchJSON('/ui/kv/dlg_pins').then(function(d){
+    if(d && d.value){ try{ var a=JSON.parse(d.value); if(Array.isArray(a)){ a.forEach(function(id){ dlgPins[id]=1; }); } }catch(e){} }
+    refreshSidebar();
+  }); }
+  function savePins(){ clearTimeout(dlgPinsTimer); dlgPinsTimer=setTimeout(function(){
+    uiFetch('/ui/kv/dlg_pins',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(Object.keys(dlgPins))})}).catch(function(){});
+  }, 600); }
   function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
   function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
     convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); });
@@ -242,7 +252,8 @@
   function fmtDate(ms){ if(!ms) return ''; var d=new Date(ms), now=new Date();
     if(d.toDateString()===now.toDateString()) return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
     return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2); }
-  function sidebarItem(d){ var it=document.createElement('div'); it.className='item'; it.dataset.id=d.id;
+  function sidebarItem(d){ var it=document.createElement('div'); it.className='item'; it.dataset.id=d.id; it.dataset.updated=d.updated_ms||0;
+    if(dlgPins[d.id]) it.classList.add('pinned');
     it.innerHTML='<span class="t">'+esc(d.title||'Без названия')+'</span><span class="date">'+fmtDate(d.updated_ms)+'</span><button class="kebab" aria-label="Действия">⋯</button>'; return it; }
   function refreshSidebar(){ return apiList().then(function(list){
     leftDrawer.querySelectorAll('.item').forEach(function(n){ n.remove(); });
@@ -526,7 +537,7 @@
     function finalize(){
       if(errored) return; /* error box already shown — don't overwrite with an empty turn */
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
-      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+actBtn('up','Нравится')+actBtn('down','Не нравится')+'</div>');
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
@@ -669,7 +680,7 @@
       t.addEventListener('blur', function(){ t.contentEditable='false'; t.classList.remove('editing'); var nv=(t.textContent||'').trim(), id=item.dataset.id;
         if(nv && id){ if(id===activeId){ dtitle.textContent=nv; apiSave(id,nv,convo); } else { apiGet(id).then(function(d){ apiSave(id, nv, d?d.messages:[]); }); } } },{once:true});
       t.addEventListener('keydown', function(ev){ if(ev.key==='Enter'){ev.preventDefault(); t.blur();} }); }
-    else if(m==='pin'){ current.classList.toggle('pinned'); updateDialogList(); }
+    else if(m==='pin'){ var pid=current.dataset.id; var willPin=!current.classList.contains('pinned'); current.classList.toggle('pinned', willPin); if(willPin){ dlgPins[pid]=1; } else { delete dlgPins[pid]; } savePins(); updateDialogList(); }
     else if(m==='del'){ askDelete(current); }
   });
 
@@ -677,7 +688,7 @@
   var pendingDel=null, confirmScrim=document.getElementById('confirmScrim');
   function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent='«'+item.querySelector('.t').textContent.trim()+'» будет удалён без возможности восстановления.'; confirmScrim.hidden=false; }
   function closeConfirm(){ confirmScrim.hidden=true; pendingDel=null; }
-  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } if(id in dlgErrs){ delete dlgErrs[id]; saveDlgErrs(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
+  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } if(id in dlgErrs){ delete dlgErrs[id]; saveDlgErrs(); } if(id in dlgPins){ delete dlgPins[id]; savePins(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
   document.getElementById('confirmCancel').addEventListener('click', closeConfirm);
   confirmScrim.addEventListener('click', function(e){ if(e.target===confirmScrim) closeConfirm(); });
 
@@ -729,7 +740,6 @@
     if(act==='copy'){ var src=turn.querySelector('.md')||turn.querySelector('.bubble'); copyText(src.textContent, a); }
     else if(act==='regen'){ regenTurn(turn); }
     else if(act==='edit'){ editUserTurn(turn); }
-    else if(act==='up'||act==='down'){ a.classList.toggle('on'); var other=turn.querySelector('[data-act='+(act==='up'?'down':'up')+']'); if(other)other.classList.remove('on'); }
   });
 
   /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
@@ -918,6 +928,9 @@
     var all=Array.prototype.slice.call(leftDrawer.querySelectorAll('.item'));
     var pinned=all.filter(function(it){return it.classList.contains('pinned');});
     var rest=all.filter(function(it){return !it.classList.contains('pinned');});
+    /* keep both groups newest-first so an unpinned dialog drops back into its date slot */
+    function byDate(a,b){ return (parseInt(b.dataset.updated,10)||0)-(parseInt(a.dataset.updated,10)||0); }
+    pinned.sort(byDate); rest.sort(byDate);
     pinned.forEach(function(it){ leftDrawer.insertBefore(it, dlgGroup); });
     rest.forEach(function(it){ leftDrawer.insertBefore(it, emptyNone); });
     var q=(searchInput.value||'').trim().toLowerCase();
@@ -1015,5 +1028,6 @@
   loadSettings();
   loadDlgToks();
   loadDlgErrs();
+  loadDlgPins();
   if(configured){ newDialog(); } else { showSetup(); }
 })();
