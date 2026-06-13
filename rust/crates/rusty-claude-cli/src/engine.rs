@@ -177,14 +177,14 @@ impl EngineHost for crate::LiveCli {
 
 fn run_prompt_with_host<H: EngineHost>(
     host: &mut H,
-    input: &str,
+    blocks: Vec<ContentBlock>,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    run_prompt_with_host_and_event_sink(host, input, None)
+    run_prompt_with_host_and_event_sink(host, blocks, None)
 }
 
 fn run_prompt_with_host_and_event_sink<H: EngineHost>(
     host: &mut H,
-    input: &str,
+    blocks: Vec<ContentBlock>,
     event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
     let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
@@ -198,12 +198,10 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
         runtime::load_filesystem_policy_for(workspace_root.as_deref()),
     ));
 
-    let result = match event_sink {
-        Some(sink) => {
-            runtime.run_turn_with_event_sink(input, Some(&mut permission_prompter), Some(sink))
-        }
-        None => runtime.run_turn(input, Some(&mut permission_prompter)),
-    };
+    // The current turn is carried as content blocks (text + any image attachments) so a
+    // vision backend receives the images; the text-only callers wrap input in one Text block.
+    let result =
+        runtime.run_turn_blocks_with_event_sink(blocks, Some(&mut permission_prompter), event_sink);
 
     hook_abort_monitor.stop();
 
@@ -319,7 +317,7 @@ impl ClawEngineSession {
         &mut self,
         input: &str,
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-        run_prompt_with_host(self, input)
+        run_prompt_with_host(self, vec![ContentBlock::Text { text: input.to_string() }])
     }
 
     pub(crate) fn run_prompt_json_with_event_sink(
@@ -327,7 +325,21 @@ impl ClawEngineSession {
         input: &str,
         event_sink: &mut dyn FnMut(&AssistantEvent),
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-        run_prompt_with_host_and_event_sink(self, input, Some(event_sink))
+        run_prompt_with_host_and_event_sink(
+            self,
+            vec![ContentBlock::Text { text: input.to_string() }],
+            Some(event_sink),
+        )
+    }
+
+    /// Run a turn whose user message is given as explicit content blocks (text + image
+    /// attachments). Used by the OpenAI-serve path when the current turn carries images.
+    pub(crate) fn run_prompt_json_blocks_with_event_sink(
+        &mut self,
+        blocks: Vec<ContentBlock>,
+        event_sink: &mut dyn FnMut(&AssistantEvent),
+    ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+        run_prompt_with_host_and_event_sink(self, blocks, Some(event_sink))
     }
 }
 
@@ -393,7 +405,7 @@ pub(crate) fn run_cli_prompt_json(
     cli: &mut crate::LiveCli,
     input: &str,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    run_prompt_with_host(cli, input)
+    run_prompt_with_host(cli, vec![ContentBlock::Text { text: input.to_string() }])
 }
 
 #[must_use]

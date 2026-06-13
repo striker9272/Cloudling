@@ -8,7 +8,7 @@ use aspect_std::LoggingAspect;
 
 use api::{
     max_tokens_for_model, model_family_identity_for, resolve_model_alias, ApiError,
-    ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
+    ContentBlockDelta, ImageUrl, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
     OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
     ToolResultContentBlock,
 };
@@ -5445,6 +5445,12 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                             text: output.clone(),
                         }],
                         is_error: *is_error,
+                    },
+                    ContentBlock::Image { url } => InputContentBlock::Image {
+                        image_url: ImageUrl {
+                            url: url.clone(),
+                            detail: None,
+                        },
                     },
                 })
                 .filter(

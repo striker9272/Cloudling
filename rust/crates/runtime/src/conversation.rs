@@ -351,14 +351,36 @@ where
         self.run_turn_with_event_sink(user_input, prompter, None)
     }
 
-    #[allow(clippy::too_many_lines)]
     pub fn run_turn_with_event_sink(
         &mut self,
         user_input: impl Into<String>,
+        prompter: Option<&mut dyn PermissionPrompter>,
+        event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
+    ) -> Result<TurnSummary, RuntimeError> {
+        let text = user_input.into();
+        self.run_turn_blocks_with_event_sink(vec![ContentBlock::Text { text }], prompter, event_sink)
+    }
+
+    /// Like [`Self::run_turn_with_event_sink`] but the user turn is given as explicit
+    /// content blocks (text + image attachments), so a vision backend receives the
+    /// images. The text-only method above is a thin wrapper that wraps the input in a
+    /// single `Text` block, so existing callers are unchanged.
+    #[allow(clippy::too_many_lines)]
+    pub fn run_turn_blocks_with_event_sink(
+        &mut self,
+        blocks: Vec<ContentBlock>,
         mut prompter: Option<&mut dyn PermissionPrompter>,
         mut event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
     ) -> Result<TurnSummary, RuntimeError> {
-        let user_input = user_input.into();
+        // Text-only summary for tracing/logging; image blocks contribute no text.
+        let user_input = blocks
+            .iter()
+            .filter_map(|block| match block {
+                ContentBlock::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
 
         // ROADMAP #38: Session-health canary - probe if context was compacted
         if self.session.compaction.is_some() {
@@ -373,7 +395,7 @@ where
 
         self.record_turn_started(&user_input);
         self.session
-            .push_user_text(user_input)
+            .push_user_blocks(blocks)
             .map_err(|error| RuntimeError::new(error.to_string()))?;
 
         let mut assistant_messages = Vec::new();

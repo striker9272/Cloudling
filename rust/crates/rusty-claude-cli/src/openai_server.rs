@@ -925,6 +925,7 @@ async fn chat_completions(
         move || -> Result<(crate::engine::ClawEngineResponse, u32), String> {
             let StatelessConversation {
                 input,
+                input_images,
                 history,
                 system_additions,
             } = conversation;
@@ -950,9 +951,15 @@ async fn chat_completions(
                     );
                 }
             };
-            let response = session
-                .run_prompt_json_with_event_sink(&input, &mut event_sink)
-                .map_err(|error| error.to_string())?;
+            let response = if input_images.is_empty() {
+                session.run_prompt_json_with_event_sink(&input, &mut event_sink)
+            } else {
+                session.run_prompt_json_blocks_with_event_sink(
+                    current_turn_blocks(input, input_images),
+                    &mut event_sink,
+                )
+            }
+            .map_err(|error| error.to_string())?;
             Ok((response, last_ctx.get()))
         },
     )
@@ -1050,6 +1057,7 @@ fn stream_chat_completions(
         let result = {
             let StatelessConversation {
                 input,
+                input_images,
                 history,
                 system_additions,
             } = conversation;
@@ -1103,7 +1111,14 @@ fn stream_chat_completions(
                 }
             };
 
-            session.run_prompt_json_with_event_sink(&input, &mut event_sink)
+            if input_images.is_empty() {
+                session.run_prompt_json_with_event_sink(&input, &mut event_sink)
+            } else {
+                session.run_prompt_json_blocks_with_event_sink(
+                    current_turn_blocks(input, input_images),
+                    &mut event_sink,
+                )
+            }
         };
 
         match result {
@@ -1541,6 +1556,9 @@ fn sse_json_event<T: Serialize>(value: &T) -> Result<Event, Infallible> {
 
 struct StatelessConversation {
     input: String,
+    /// Image URLs attached to the current (last user) turn, in order. Carried
+    /// separately so the current turn can be sent as text + image blocks.
+    input_images: Vec<String>,
     history: Vec<ConversationMessage>,
     system_additions: Vec<String>,
 }
@@ -1564,6 +1582,7 @@ fn stateless_conversation_from_messages(
     let mut history = Vec::new();
     let mut system_additions = Vec::new();
     let mut input = String::new();
+    let mut input_images = Vec::new();
 
     for (index, message) in messages.iter().enumerate() {
         let role = message.role.trim();
@@ -1571,9 +1590,11 @@ fn stateless_conversation_from_messages(
             return Err("message role must not be empty".to_string());
         }
         let text = message_text(&message.content)?;
+        let images = content_image_urls(&message.content);
 
         if index == last_user_index {
             input = text;
+            input_images = images;
             continue;
         }
 
@@ -1582,7 +1603,20 @@ fn stateless_conversation_from_messages(
                 system_additions.push(text);
             }
         } else if role.eq_ignore_ascii_case("user") {
-            history.push(ConversationMessage::user_text(text));
+            if images.is_empty() {
+                history.push(ConversationMessage::user_text(text));
+            } else {
+                // Prior user turn carried images → preserve them as a blocks message
+                // (text + image attachments) so a vision backend still sees the images.
+                let mut blocks = Vec::new();
+                if !text.is_empty() {
+                    blocks.push(ContentBlock::Text { text });
+                }
+                for url in images {
+                    blocks.push(ContentBlock::Image { url });
+                }
+                history.push(ConversationMessage::user(blocks));
+            }
         } else if !text.trim().is_empty() {
             // assistant, tool, or any other role → plain assistant context text.
             history.push(ConversationMessage::assistant(vec![ContentBlock::Text { text }]));
@@ -1591,6 +1625,7 @@ fn stateless_conversation_from_messages(
 
     Ok(StatelessConversation {
         input,
+        input_images,
         history,
         system_additions,
     })
@@ -1631,6 +1666,49 @@ fn content_to_text(content: &Value) -> Result<String, String> {
         }
         _ => Err("message content must be a string or OpenAI content array".to_string()),
     }
+}
+
+/// Extract image URLs from an OpenAI content value: the `image_url.url` of every
+/// `{"type":"image_url","image_url":{"url":...}}` part. Empty for plain-string or
+/// imageless content. Paired with [`content_to_text`] to split a message into
+/// text + image parts.
+fn content_image_urls(content: &Value) -> Vec<String> {
+    let Value::Array(items) = content else {
+        return Vec::new();
+    };
+    let mut urls = Vec::new();
+    for item in items {
+        if item.get("type").and_then(Value::as_str) == Some("image_url") {
+            if let Some(url) = item
+                .get("image_url")
+                .and_then(|image_url| image_url.get("url"))
+                .and_then(Value::as_str)
+            {
+                if !url.is_empty() {
+                    urls.push(url.to_string());
+                }
+            }
+        }
+    }
+    urls
+}
+
+/// Build the content blocks for the current turn from its text and image URLs.
+/// Always yields at least one block (an empty `Text`) so an image-only turn still runs.
+fn current_turn_blocks(input: String, input_images: Vec<String>) -> Vec<ContentBlock> {
+    let mut blocks = Vec::new();
+    if !input.is_empty() {
+        blocks.push(ContentBlock::Text { text: input });
+    }
+    for url in input_images {
+        blocks.push(ContentBlock::Image { url });
+    }
+    if blocks.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: String::new(),
+        });
+    }
+    blocks
 }
 
 fn error_response(status: StatusCode, message: &str, kind: &'static str) -> Response {
