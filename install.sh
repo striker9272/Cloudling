@@ -84,6 +84,9 @@ Options:
   --no-setup-service  Do not run the service wizard; build only.
   --prebuilt      Download a prebuilt release binary instead of building.
   --prebuilt-tag TAG  Release tag to download (default: latest).
+  --              Pass every following argument through to the service installer
+                  (rust/scripts/install-openai-service.sh). Implies service setup.
+                  Example: ./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart
   -h, --help      Show this help text and exit.
 
 Environment overrides:
@@ -106,6 +109,8 @@ INSTALL_DEPS="${CLAW_INSTALL_DEPS:-ask}"
 SETUP_SERVICE="${CLAW_SETUP_SERVICE:-ask}"
 PREBUILT="${CLAW_PREBUILT:-0}"
 PREBUILT_TAG="${CLAW_PREBUILT_TAG:-}"
+# Arguments after a literal `--` are forwarded verbatim to install-openai-service.sh.
+SERVICE_ARGS=()
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -140,6 +145,11 @@ while [ "$#" -gt 0 ]; do
         --prebuilt-tag=*)
             PREBUILT_TAG="${1#*=}"
             ;;
+        --)
+            shift
+            SERVICE_ARGS=("$@")
+            break
+            ;;
         -h|--help)
             print_usage
             exit 0
@@ -164,6 +174,12 @@ esac
 # Release artifacts are built in release profile; align the binary path for --prebuilt.
 if [ "${PREBUILT}" = "1" ]; then
     BUILD_PROFILE="release"
+fi
+
+# Forwarded service args (after `--`) only make sense during service setup, so their
+# presence implies it — unless the user explicitly opted in or out already.
+if [ "${#SERVICE_ARGS[@]}" -gt 0 ] && [ "${SETUP_SERVICE}" = "ask" ]; then
+    SETUP_SERVICE="yes"
 fi
 
 # ---------------------------------------------------------------------------
@@ -687,9 +703,10 @@ fi
 if [ "${DO_SETUP}" = "1" ]; then
     info "launching service setup: scripts/install-openai-service.sh"
     # Hand the freshly built binary to the installer so it gets placed at the
-    # runtime path without a manual copy step. Run with no flags, the installer
-    # drops into its interactive wizard.
-    CLAB_RUNTIME_BIN_SRC="${CLAW_BIN}" bash "${SETUP_SCRIPT}"
+    # runtime path without a manual copy step. With no forwarded args the installer
+    # drops into its interactive wizard; args after `--` are passed through verbatim
+    # (e.g. --ui ...) for a non-interactive setup.
+    CLAB_RUNTIME_BIN_SRC="${CLAW_BIN}" bash "${SETUP_SCRIPT}" ${SERVICE_ARGS[@]+"${SERVICE_ARGS[@]}"}
     ok "service setup finished"
 else
     info "you can run it later with: bash ${SETUP_SCRIPT}"

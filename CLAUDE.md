@@ -96,7 +96,12 @@ interactively.
   the **upstream** project (MIT attribution requirement — `LICENSE` must stay intact).
 - **Language:** code, commits, and public docs in English; conversation with Alexander
   in Russian.
-- **CI:** GitHub Actions (`.github/workflows/rust-ci.yml`) runs doc checks, fmt, clippy,
-  tests, build. Keep `rust/` source and `tests/` in sync when behavior changes.
+- **CI:** GitHub Actions does **not** gate on the build. `.github/workflows/rust-ci.yml`
+  (push/PR to `main`) runs only the docs source-of-truth job — two Python checks
+  (`check_doc_source_of_truth.py` for branding/links and `check_release_readiness.py`);
+  it does **not** run fmt, clippy, tests, or build. `.github/workflows/release.yml` builds
+  the platform binaries only on a `v*` tag. The real build/test signal is `cargo build`
+  (and the commands above) on combsrv — keep `rust/` source and `tests/` in sync when
+  behavior changes.
 - Prefer small, reviewable changes. Reserve machine-local overrides for
   `.claude/settings.local.json`; keep shared defaults in `.claude.json`.

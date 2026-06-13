@@ -28,11 +28,16 @@ ENV_FILE="/etc/claw-lab/openai.env"
 WORKDIR="/var/lib/claw-lab/work"
 SANDBOX_DIR="/var/lib/claw-lab/sandbox"
 TMPDIR_VALUE=""
-BIND="127.0.0.1:4097"
+# bind / served-id / permission resolve with precedence later (flag > existing env
+# > built-in default); start empty so we can tell "flag passed" from "use existing".
+DEFAULT_BIND="127.0.0.1:4097"
+DEFAULT_SERVED_MODEL_ID="clab-agent"
+DEFAULT_PERMISSION_MODE="read-only"
+BIND=""
 OPENAI_BASE_URL=""
 BACKEND_MODEL=""
-SERVED_MODEL_ID="clab-agent"
-PERMISSION_MODE="read-only"
+SERVED_MODEL_ID=""
+PERMISSION_MODE=""
 WEBSEARCH_URL=""
 API_KEY=""
 ENABLE_SERVICE=0
@@ -219,10 +224,11 @@ do_uninstall() {
   echo "  env-file:     $ENV_FILE"
   echo "  runtime-bin:  $RUNTIME_BIN"
   if [ "$KEEP_DATA" = "1" ]; then
-    echo "  data:         kept (workdir, sandbox, and *.bak-* backups left in place)"
+    echo "  data:         kept (workdir, sandbox, ui-data, and *.bak-* backups left in place)"
   else
     echo "  workdir:      $WORKDIR (removed)"
     echo "  sandbox-dir:  $SANDBOX_DIR (removed)"
+    echo "  ui-data-dir:  $UI_DATA_DIR (removed if present)"
     echo "  backups:      *.bak-* for unit/wrapper/env/bin (removed)"
   fi
   echo "  dry-run:      $DRY_RUN"
@@ -247,7 +253,7 @@ do_uninstall() {
 
   if [ "$KEEP_DATA" != "1" ]; then
     local d
-    for d in "$WORKDIR" "$SANDBOX_DIR"; do
+    for d in "$WORKDIR" "$SANDBOX_DIR" "$UI_DATA_DIR"; do
       if [ -d "$d" ]; then
         run "${SUDO[@]}" rm -rf "$d"
       fi
@@ -364,6 +370,17 @@ run_wizard() {
   confirm "Proceed?"
 }
 
+# Resolve bind / served-id / permission with precedence: an explicit flag wins,
+# else carry over the value from an existing env file (so re-running the installer
+# never silently resets a configured service), else the built-in default. Resolved
+# before the wizard so its prompts show the effective default too.
+[ -n "$BIND" ]            || BIND="$(existing_var CLAW_OPENAI_BIND)"
+[ -n "$BIND" ]            || BIND="$DEFAULT_BIND"
+[ -n "$SERVED_MODEL_ID" ] || SERVED_MODEL_ID="$(existing_var CLAW_SERVED_MODEL_ID)"
+[ -n "$SERVED_MODEL_ID" ] || SERVED_MODEL_ID="$DEFAULT_SERVED_MODEL_ID"
+[ -n "$PERMISSION_MODE" ] || PERMISSION_MODE="$(existing_var CLAW_PERMISSION_MODE)"
+[ -n "$PERMISSION_MODE" ] || PERMISSION_MODE="$DEFAULT_PERMISSION_MODE"
+
 if [ "$UI_MODE" != "1" ] && [ -z "$OPENAI_BASE_URL" ] && [ -t 0 ]; then
   run_wizard
 fi
@@ -399,6 +416,13 @@ fi
 
 if [ -z "$WEBSEARCH_URL" ]; then
   WEBSEARCH_URL="$(existing_var CLAWD_WEB_SEARCH_BASE_URL)"
+fi
+
+# UI mode: the engine is optional here (it can be set in the browser), but on a
+# re-run carry over an already-configured engine so --ui alone doesn't drop it.
+if [ "$UI_MODE" = "1" ]; then
+  [ -n "$OPENAI_BASE_URL" ] || OPENAI_BASE_URL="$(existing_var OPENAI_BASE_URL)"
+  [ -n "$BACKEND_MODEL" ]   || BACKEND_MODEL="$(existing_var OPENAI_MODEL)"
 fi
 
 # UI mode: reuse an existing token on re-runs, otherwise generate one.
