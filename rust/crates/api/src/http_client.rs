@@ -1,8 +1,158 @@
+use std::time::Duration;
+
 use crate::error::ApiError;
 
 const HTTP_PROXY_KEYS: [&str; 2] = ["HTTP_PROXY", "http_proxy"];
 const HTTPS_PROXY_KEYS: [&str; 2] = ["HTTPS_PROXY", "https_proxy"];
 const NO_PROXY_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
+
+/// Env var bounding how long we wait to *establish* a connection to the model
+/// backend. Guards against an unreachable host hanging the request forever.
+/// A value of `0` disables it; unset falls back to [`DEFAULT_CONNECT_TIMEOUT`].
+const CONNECT_TIMEOUT_ENV: &str = "CLAW_BACKEND_CONNECT_TIMEOUT_SECS";
+/// Env var bounding the maximum *idle* time between received bytes of a
+/// response (not the total response time). Disabled by default so long or
+/// slow streaming generations — and the multi-call tool/agent loop — are never
+/// cut off; set a positive value to opt into stall detection. `0` also disables.
+const READ_TIMEOUT_ENV: &str = "CLAW_BACKEND_READ_TIMEOUT_SECS";
+/// Default connect timeout when [`CONNECT_TIMEOUT_ENV`] is unset.
+const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Timeouts applied to the outbound model-backend HTTP client. Kept separate
+/// from [`ProxyConfig`] and resolved from the environment up front so the
+/// parsing is unit-testable without touching the process environment.
+///
+/// We deliberately never set a *total* request timeout: a single backend call
+/// can stream tokens for a long time, and the agent loop issues many such
+/// calls, so a wall-clock cap would truncate legitimate long answers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimeoutConfig {
+    /// Max time to establish the TCP/TLS connection. `None` disables it.
+    pub connect_timeout: Option<Duration>,
+    /// Max idle time between response bytes. `None` (default) disables it.
+    pub read_timeout: Option<Duration>,
+}
+
+impl Default for TimeoutConfig {
+    fn default() -> Self {
+        Self {
+            connect_timeout: Some(DEFAULT_CONNECT_TIMEOUT),
+            read_timeout: None,
+        }
+    }
+}
+
+impl TimeoutConfig {
+    /// Resolve timeouts from the live process environment.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::from_lookup(|key| std::env::var(key).ok())
+    }
+
+    fn from_lookup<F>(mut lookup: F) -> Self
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        Self {
+            connect_timeout: parse_timeout_secs(
+                lookup(CONNECT_TIMEOUT_ENV).as_deref(),
+                Some(DEFAULT_CONNECT_TIMEOUT),
+            ),
+            read_timeout: parse_timeout_secs(lookup(READ_TIMEOUT_ENV).as_deref(), None),
+        }
+    }
+}
+
+/// Parse a whole-seconds timeout env value. Empty/missing → `default`,
+/// `0` → `None` (explicitly disabled), positive integer → that many seconds,
+/// unparseable garbage → `default` (so a typo never silently removes a guard).
+fn parse_timeout_secs(raw: Option<&str>, default: Option<Duration>) -> Option<Duration> {
+    match raw {
+        None => default,
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                return default;
+            }
+            match trimmed.parse::<u64>() {
+                Ok(0) => None,
+                Ok(secs) => Some(Duration::from_secs(secs)),
+                Err(_) => default,
+            }
+        }
+    }
+}
+
+/// Env var: maximum number of retries for a retryable backend failure
+/// (connection refused, timeout, 429/5xx). Unset → [`DEFAULT_MAX_RETRIES`].
+const MAX_RETRIES_ENV: &str = "CLAW_BACKEND_MAX_RETRIES";
+/// Env var: initial backoff in whole seconds (doubled each attempt up to the
+/// cap). Unset → [`DEFAULT_INITIAL_BACKOFF`].
+const INITIAL_BACKOFF_ENV: &str = "CLAW_BACKEND_INITIAL_BACKOFF_SECS";
+/// Env var: maximum backoff cap in whole seconds. Unset → [`DEFAULT_MAX_BACKOFF`].
+const MAX_BACKOFF_ENV: &str = "CLAW_BACKEND_MAX_BACKOFF_SECS";
+
+/// Retry budget defaults tuned so a *down* backend surfaces an error to the
+/// user in seconds, not minutes: 3 retries with a 1s→8s capped backoff means a
+/// connection-refused failure is reported in roughly 7–15s (vs the previous
+/// 8 retries / 128s cap that took 4–8 minutes). Transient 429/5xx are still
+/// retried. All three are overridable via the `CLAW_BACKEND_*` env vars.
+const DEFAULT_MAX_RETRIES: u32 = 3;
+const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
+const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(8);
+
+/// Retry/backoff policy for backend calls, resolved from the environment.
+/// Shared so the parsing is unit-testable without the process environment.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RetryPolicy {
+    pub max_retries: u32,
+    pub initial_backoff: Duration,
+    pub max_backoff: Duration,
+}
+
+impl Default for RetryPolicy {
+    fn default() -> Self {
+        Self {
+            max_retries: DEFAULT_MAX_RETRIES,
+            initial_backoff: DEFAULT_INITIAL_BACKOFF,
+            max_backoff: DEFAULT_MAX_BACKOFF,
+        }
+    }
+}
+
+impl RetryPolicy {
+    /// Resolve the retry policy from the live process environment.
+    #[must_use]
+    pub fn from_env() -> Self {
+        Self::from_lookup(|key| std::env::var(key).ok())
+    }
+
+    fn from_lookup<F>(mut lookup: F) -> Self
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        let max_retries = lookup(MAX_RETRIES_ENV)
+            .and_then(|value| value.trim().parse::<u32>().ok())
+            .unwrap_or(DEFAULT_MAX_RETRIES);
+        Self {
+            max_retries,
+            initial_backoff: parse_secs_or(
+                lookup(INITIAL_BACKOFF_ENV).as_deref(),
+                DEFAULT_INITIAL_BACKOFF,
+            ),
+            max_backoff: parse_secs_or(lookup(MAX_BACKOFF_ENV).as_deref(), DEFAULT_MAX_BACKOFF),
+        }
+    }
+}
+
+/// Parse a whole-seconds duration env value, falling back to `default` for
+/// missing/empty/unparseable input. Unlike [`parse_timeout_secs`], `0` is a
+/// valid zero-length duration (a zero backoff is meaningful; a zero timeout is
+/// not — that means "disabled").
+fn parse_secs_or(raw: Option<&str>, default: Duration) -> Duration {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(default, Duration::from_secs)
+}
 
 /// Snapshot of the proxy-related environment variables that influence the
 /// outbound HTTP client. Captured up front so callers can inspect, log, and
@@ -90,6 +240,16 @@ pub fn build_http_client_with(config: &ProxyConfig) -> Result<reqwest::Client, A
         .no_proxy()
         .user_agent("clawd-rust-tools/0.1");
 
+    // Apply backend timeouts (connect on by default, read off by default).
+    // No total request timeout — see `TimeoutConfig` docs.
+    let timeouts = TimeoutConfig::from_env();
+    if let Some(connect_timeout) = timeouts.connect_timeout {
+        builder = builder.connect_timeout(connect_timeout);
+    }
+    if let Some(read_timeout) = timeouts.read_timeout {
+        builder = builder.read_timeout(read_timeout);
+    }
+
     let no_proxy = config
         .no_proxy
         .as_deref()
@@ -131,7 +291,9 @@ where
 mod tests {
     use std::collections::HashMap;
 
-    use super::{build_http_client_with, ProxyConfig};
+    use std::time::Duration;
+
+    use super::{build_http_client_with, ProxyConfig, RetryPolicy, TimeoutConfig};
 
     fn config_from_map(pairs: &[(&str, &str)]) -> ProxyConfig {
         let map: HashMap<String, String> = pairs
@@ -139,6 +301,104 @@ mod tests {
             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
             .collect();
         ProxyConfig::from_lookup(|key| map.get(key).cloned())
+    }
+
+    fn lookup_from(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+            .collect();
+        move |key: &str| map.get(key).cloned()
+    }
+
+    #[test]
+    fn timeout_config_defaults_when_env_unset() {
+        // given / when
+        let timeouts = TimeoutConfig::from_lookup(lookup_from(&[]));
+
+        // then: connect on (10s), read disabled so long answers are never cut
+        assert_eq!(timeouts.connect_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(timeouts.read_timeout, None);
+        assert_eq!(timeouts, TimeoutConfig::default());
+    }
+
+    #[test]
+    fn timeout_config_reads_env_overrides() {
+        // given
+        let lookup = lookup_from(&[
+            ("CLAW_BACKEND_CONNECT_TIMEOUT_SECS", "3"),
+            ("CLAW_BACKEND_READ_TIMEOUT_SECS", "120"),
+        ]);
+
+        // when
+        let timeouts = TimeoutConfig::from_lookup(lookup);
+
+        // then
+        assert_eq!(timeouts.connect_timeout, Some(Duration::from_secs(3)));
+        assert_eq!(timeouts.read_timeout, Some(Duration::from_secs(120)));
+    }
+
+    #[test]
+    fn timeout_config_zero_disables_and_garbage_falls_back() {
+        // zero explicitly disables the connect timeout
+        let zero = TimeoutConfig::from_lookup(lookup_from(&[(
+            "CLAW_BACKEND_CONNECT_TIMEOUT_SECS",
+            "0",
+        )]));
+        assert_eq!(zero.connect_timeout, None);
+
+        // garbage falls back to the default rather than silently removing the guard
+        let garbage = TimeoutConfig::from_lookup(lookup_from(&[
+            ("CLAW_BACKEND_CONNECT_TIMEOUT_SECS", "abc"),
+            ("CLAW_BACKEND_READ_TIMEOUT_SECS", "  "),
+        ]));
+        assert_eq!(garbage.connect_timeout, Some(Duration::from_secs(10)));
+        assert_eq!(garbage.read_timeout, None);
+    }
+
+    #[test]
+    fn retry_policy_defaults_when_env_unset() {
+        // given / when
+        let policy = RetryPolicy::from_lookup(lookup_from(&[]));
+
+        // then: tuned to surface a down backend in seconds, not minutes
+        assert_eq!(policy.max_retries, 3);
+        assert_eq!(policy.initial_backoff, Duration::from_secs(1));
+        assert_eq!(policy.max_backoff, Duration::from_secs(8));
+        assert_eq!(policy, RetryPolicy::default());
+    }
+
+    #[test]
+    fn retry_policy_reads_env_overrides() {
+        // given
+        let lookup = lookup_from(&[
+            ("CLAW_BACKEND_MAX_RETRIES", "5"),
+            ("CLAW_BACKEND_INITIAL_BACKOFF_SECS", "2"),
+            ("CLAW_BACKEND_MAX_BACKOFF_SECS", "30"),
+        ]);
+
+        // when
+        let policy = RetryPolicy::from_lookup(lookup);
+
+        // then
+        assert_eq!(policy.max_retries, 5);
+        assert_eq!(policy.initial_backoff, Duration::from_secs(2));
+        assert_eq!(policy.max_backoff, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn retry_policy_garbage_falls_back_to_defaults() {
+        // given
+        let lookup = lookup_from(&[
+            ("CLAW_BACKEND_MAX_RETRIES", "not-a-number"),
+            ("CLAW_BACKEND_MAX_BACKOFF_SECS", ""),
+        ]);
+
+        // when
+        let policy = RetryPolicy::from_lookup(lookup);
+
+        // then
+        assert_eq!(policy, RetryPolicy::default());
     }
 
     #[test]

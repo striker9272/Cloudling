@@ -7,7 +7,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::error::ApiError;
-use crate::http_client::build_http_client_or_default;
+use crate::http_client::{build_http_client_or_default, RetryPolicy};
 use crate::types::{
     ContentBlockDelta, ContentBlockDeltaEvent, ContentBlockStartEvent, ContentBlockStopEvent,
     InputContentBlock, InputMessage, MessageDelta, MessageDeltaEvent, MessageRequest,
@@ -22,9 +22,6 @@ pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const DEFAULT_DASHSCOPE_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const REQUEST_ID_HEADER: &str = "request-id";
 const ALT_REQUEST_ID_HEADER: &str = "x-request-id";
-const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
-const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(128);
-const DEFAULT_MAX_RETRIES: u32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiCompatConfig {
@@ -119,14 +116,15 @@ impl OpenAiCompatClient {
     }
     #[must_use]
     pub fn new(api_key: impl Into<String>, config: OpenAiCompatConfig) -> Self {
+        let retry = RetryPolicy::from_env();
         Self {
             http: build_http_client_or_default(),
             api_key: api_key.into(),
             config,
             base_url: read_base_url(config),
-            max_retries: DEFAULT_MAX_RETRIES,
-            initial_backoff: DEFAULT_INITIAL_BACKOFF,
-            max_backoff: DEFAULT_MAX_BACKOFF,
+            max_retries: retry.max_retries,
+            initial_backoff: retry.initial_backoff,
+            max_backoff: retry.max_backoff,
         }
     }
 
