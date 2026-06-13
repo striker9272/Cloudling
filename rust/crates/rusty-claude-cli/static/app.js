@@ -72,7 +72,10 @@
     t=t.replace(/\[([^\]]+)\]\(([^)]+)\)/g,function(_,label,url){
       /* only allow safe schemes; neutralize javascript:/data:/vbscript: etc. */
       var ok=/^(https?:|mailto:|\/|#)/i.test(url.trim());
-      return ok ? '<a href="'+url+'" target="_blank" rel="noopener">'+label+'</a>'
+      /* esc() already neutralized &<>, but not quotes — escape them so a crafted URL
+         (e.g. https://x" onmouseover="…) can't break out of the href attribute */
+      var href=url.replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+      return ok ? '<a href="'+href+'" target="_blank" rel="noopener">'+label+'</a>'
                 : '<a>'+label+'</a>';
     });
     t=t.replace(/\uE000(\d+)\uE000/g,function(_,i){ return '<code>'+codes[+i]+'</code>'; });

@@ -7,54 +7,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
-/// Request shape for a reusable Claw engine turn.
-///
-/// This is intentionally not tied to terminal IO. The CLI, future HTTP server,
-/// and tests should be able to build this request and receive either a final
-/// response or a stream of engine events.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ClawEngineRequest {
-    pub prompt: String,
-    pub model: String,
-    pub permission_mode: String,
-    pub allowed_tools: Vec<String>,
-    pub stream: bool,
-}
-
-/// Streaming-aware engine event model.
-///
-/// The first OpenAI-compatible server slice will translate these events into
-/// SSE `chat.completion.chunk` objects for `stream=true`. Non-streaming callers
-/// can ignore this and use [`ClawEngineResponse`].
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClawEngineEvent {
-    Started {
-        model: String,
-    },
-    TextDelta {
-        text: String,
-    },
-    ToolUse {
-        id: String,
-        name: String,
-        input: String,
-    },
-    ToolResult {
-        tool_use_id: String,
-        tool_name: String,
-        output: String,
-        is_error: bool,
-    },
-    Usage {
-        usage: ClawEngineUsage,
-    },
-    Done,
-    Error {
-        message: String,
-    },
-}
-
 /// Stable usage payload shared by CLI JSON output and future HTTP responses.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClawEngineUsage {
@@ -539,16 +491,5 @@ mod tests {
         assert_eq!(response.tool_results.len(), 1);
         assert_eq!(response.usage.input_tokens, 10);
         assert_eq!(response.usage.output_tokens, 5);
-    }
-
-    #[test]
-    fn stream_event_serialization_uses_stable_type_tags() {
-        let event = ClawEngineEvent::TextDelta {
-            text: "hello".to_string(),
-        };
-
-        let value = serde_json::to_value(event).expect("serialize event");
-        assert_eq!(value["type"], "text_delta");
-        assert_eq!(value["text"], "hello");
     }
 }
