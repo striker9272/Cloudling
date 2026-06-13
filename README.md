@@ -52,6 +52,7 @@
 - **Сессии под чат** — эфемерные: историю держит фронт и присылает её целиком в каждом запросе (`messages[]`), а clab пересобирает сессию на каждый запрос. Истории не утекают между чатами.
 - **Стабильное имя модели** — фронт видит постоянный id (например `clab-agent`), а реальная модель провайдера остаётся внутренней и заменяемой.
 - **Изоляция** — живой сервис работает в нейтральной директории и не тянет в обычные чаты `CLAUDE.md`, git-статус и настройки проекта.
+- **Встроенный веб-интерфейс (необязательно)** — с флагом `--ui` тот же бинарник отдаёт на том же порту страницу чата: стрим, сворачиваемые tool-call'ы, markdown, вложения-картинки, серверное хранилище диалогов/пресетов/настроек. По умолчанию headless — UI не мешает API. Подробности — [`docs/web-ui.md`](./docs/web-ui.md).
 
 ### Быстрый старт
 
@@ -113,6 +114,8 @@ scripts/install-openai-service.sh \
 
 **Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) + рестарт сервиса.
 
+**Встроенный веб-интерфейс (необязательно).** Кроме API, `clab` может сам отдавать страницу чата — добавь флаг `--ui` к команде `openai-serve`. По умолчанию сервис headless (только API). Управляется переменными: `CLAW_UI_TOKEN` (Bearer-токен для служебных `/ui/*`-эндпоинтов; вне loopback без него они отключены), `CLAW_UI_DATA_DIR` (где хранятся диалоги/пресеты; дефолт `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (путь к env-файлу — чтобы UI мог сохранять «Основное» и перезапускать ядро). Полная инструкция и модель доступа — [`docs/web-ui.md`](./docs/web-ui.md). *(Тумблер `--ui` в мастере появится позже; сейчас флаг включается вручную в обёртке/команде запуска.)*
+
 Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
 
 ```bash
@@ -135,7 +138,7 @@ scripts/deploy-openai-server.sh \
 
 - **`rust/`** — Rust-воркспейс и бинарник `clab` (CLI + сервер); каноническая реализация
 - **`USAGE.md`** — сборка, авторизация, CLI, сессии, провайдеры
-- **`docs/`** — Windows, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры
+- **`docs/`** — Windows, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI
 - **`src/` + `tests/`** — вспомогательный референс/аудит-воркспейс; не основная среда выполнения
 
 ### Благодарности
@@ -180,6 +183,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 - **Chat-friendly sessions** — ephemeral: the frontend owns history and resends it in full on every request (`messages[]`), and clab rebuilds the session per request. No history leaks between chats.
 - **Stable model name** — the frontend sees a constant id (e.g. `clab-agent`) while the real provider model stays internal and swappable.
 - **Isolation** — the live service runs in a neutral workdir and won't pull `CLAUDE.md`, git status, or project settings into ordinary chats.
+- **Built-in web UI (optional)** — with the `--ui` flag the same binary serves a chat page on the same port: streaming, collapsible tool calls, markdown, image attachments, and server-side storage of dialogs/presets/settings. Headless by default — the UI never gets in the API's way. See [`docs/web-ui.md`](./docs/web-ui.md).
 
 ### Quick start
 
@@ -241,6 +245,8 @@ The wizard asks for:
 
 **Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) followed by a service restart.
 
+**Built-in web UI (optional).** Besides the API, `clab` can serve a chat page itself — add the `--ui` flag to the `openai-serve` command. The service is headless (API only) by default. Controlled by: `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints; off-loopback they are disabled without it), `CLAW_UI_DATA_DIR` (where dialogs/presets are stored; default `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (path to the env file, so the UI can save "General" settings and restart the core). Full guide and auth model — [`docs/web-ui.md`](./docs/web-ui.md). *(A `--ui` toggle in the wizard is planned; for now the flag is enabled manually in the wrapper/launch command.)*
+
 When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
 
 ```bash
@@ -263,7 +269,7 @@ To remove the service, use the counterpart command `uninstall.sh` (removes the u
 
 - **`rust/`** — the Rust workspace and the `clab` CLI + server binary (the canonical implementation)
 - **`USAGE.md`** — build, auth, CLI, sessions, providers
-- **`docs/`** — Windows install, local OpenAI-compatible providers, file-context, containers
+- **`docs/`** — Windows install, local OpenAI-compatible providers, file-context, containers, the built-in web UI
 - **`src/` + `tests/`** — companion reference/audit workspace; not the primary runtime
 
 ### Credits

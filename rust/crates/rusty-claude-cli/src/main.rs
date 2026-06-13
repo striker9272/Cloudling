@@ -18,6 +18,7 @@ mod input;
 mod render;
 
 mod engine;
+mod dialog_store;
 mod openai_server;
 use std::collections::BTreeSet;
 use std::env;
@@ -36,7 +37,7 @@ use log::debug;
 
 use api::{
     detect_provider_kind, model_family_identity_for, resolve_startup_auth_source, AnthropicClient,
-    AuthSource, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
+    AuthSource, ContentBlockDelta, ImageUrl, InputContentBlock, InputMessage, MessageRequest,
     MessageResponse, OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient,
     ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
     ToolResultContentBlock,
@@ -631,8 +632,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             model,
             allowed_tools,
             permission_mode,
+            ui,
         } => {
-            openai_server::serve_blocking(bind, model, allowed_tools, permission_mode)?;
+            openai_server::serve_blocking(bind, model, allowed_tools, permission_mode, ui)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
@@ -765,6 +767,9 @@ enum CliAction {
         model: String,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
+        /// Serve the built-in web UI (page + assets) alongside the API. Off by
+        /// default so the headless service is unchanged unless explicitly enabled.
+        ui: bool,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -1691,13 +1696,14 @@ fn parse_openai_serve_args(
     permission_mode: PermissionMode,
 ) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
+    let mut ui = false;
     let mut index = 0;
 
     while index < args.len() {
         match args[index].as_str() {
             "--bind" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    "missing_flag_value: missing value for --bind.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]".to_string()
+                    "missing_flag_value: missing value for --bind.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]".to_string()
                 })?;
                 bind = value.clone();
                 index += 2;
@@ -1706,15 +1712,19 @@ fn parse_openai_serve_args(
                 bind = flag[7..].to_string();
                 index += 1;
             }
+            "--ui" => {
+                ui = true;
+                index += 1;
+            }
             "--help" | "-h" => {
                 return Err(
-                    "Usage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]\nStarts the experimental OpenAI-compatible HTTP server. If --model is omitted, OPENAI_MODEL is used."
+                    "Usage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]\nStarts the experimental OpenAI-compatible HTTP server. If --model is omitted, OPENAI_MODEL is used.\n--ui also serves the built-in web UI at GET / (headless by default)."
                         .to_string(),
                 );
             }
             other => {
                 return Err(format!(
-                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097]"
+                    "unknown_option: unknown openai-serve option: {other}.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui]"
                 ));
             }
         }
@@ -1726,6 +1736,7 @@ fn parse_openai_serve_args(
         model,
         allowed_tools,
         permission_mode,
+        ui,
     })
 }
 
@@ -9033,6 +9044,7 @@ fn render_export_text(session: &Session) -> String {
         for block in &message.blocks {
             match block {
                 ContentBlock::Text { text } => lines.push(text.clone()),
+                ContentBlock::Image { .. } => lines.push("[image]".to_string()),
                 ContentBlock::Thinking { .. } => {}
                 ContentBlock::ToolUse { id, name, input } => {
                     lines.push(format!("[tool_use id={id} name={name}] {input}"));
@@ -9224,6 +9236,7 @@ fn render_session_markdown(session: &Session, session_id: &str, session_path: &P
                         lines.push(String::new());
                     }
                 }
+                ContentBlock::Image { .. } => {}
                 ContentBlock::Thinking { .. } => {}
                 ContentBlock::ToolUse { id, name, input } => {
                     lines.push(format!(
@@ -9279,13 +9292,21 @@ fn short_tool_id(id: &str) -> String {
 }
 
 fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    Ok(load_system_prompt(
+    let mut prompt = load_system_prompt(
         env::current_dir()?,
         DEFAULT_DATE,
         env::consts::OS,
         "unknown",
         model_family_identity_for(model),
-    )?)
+    )?;
+    // Nudge the model to keep a visible plan; the built-in UI renders TodoWrite as a task bar.
+    prompt.push(
+        "For multi-step tasks, keep a short plan with the TodoWrite tool and update each item's \
+         status (pending → in_progress → completed) as you progress, including on follow-up \
+         requests."
+            .to_string(),
+    );
+    Ok(prompt)
 }
 
 struct PluginsCommandPayload {
@@ -9937,6 +9958,10 @@ struct AnthropicRuntimeClient {
     tool_registry: GlobalToolRegistry,
     progress_reporter: Option<InternalPromptProgressReporter>,
     reasoning_effort: Option<String>,
+    /// Cooperative cancellation shared by the turn loop (see
+    /// `ConversationRuntime::with_hook_abort_signal`): checked between stream chunks so
+    /// "Stop" / client disconnect also interrupts an in-flight generation.
+    hook_abort_signal: Option<runtime::HookAbortSignal>,
 }
 
 impl AnthropicRuntimeClient {
@@ -10002,6 +10027,7 @@ impl AnthropicRuntimeClient {
             tool_registry,
             progress_reporter,
             reasoning_effort: None,
+            hook_abort_signal: None,
         })
     }
 
@@ -10030,6 +10056,10 @@ impl ApiClient for AnthropicRuntimeClient {
         event_sink: &mut dyn FnMut(&AssistantEvent),
     ) -> Result<Vec<AssistantEvent>, RuntimeError> {
         self.stream_with_optional_event_sink(request, Some(event_sink))
+    }
+
+    fn set_hook_abort_signal(&mut self, signal: runtime::HookAbortSignal) {
+        self.hook_abort_signal = Some(signal);
     }
 }
 
@@ -10125,8 +10155,20 @@ impl AnthropicRuntimeClient {
         let mut block_has_thinking_summary = false;
         let mut saw_stop = false;
         let mut received_any_event = false;
+        let mut aborted = false;
 
         loop {
+            // Mid-flight cancellation ("Stop" / client disconnect): checked between
+            // stream chunks. Returning early drops `stream`, which closes the HTTP
+            // connection to the backend and stops the generation there.
+            if self
+                .hook_abort_signal
+                .as_ref()
+                .is_some_and(runtime::HookAbortSignal::is_aborted)
+            {
+                aborted = true;
+                break;
+            }
             let next = if apply_stall_timeout && !received_any_event {
                 match tokio::time::timeout(POST_TOOL_STALL_TIMEOUT, stream.next_event()).await {
                     Ok(inner) => inner.map_err(|error| {
@@ -10273,6 +10315,21 @@ impl AnthropicRuntimeClient {
         }
 
         push_prompt_cache_record(&self.client, &mut events);
+
+        if aborted {
+            // Cancelled mid-flight: return whatever was streamed so far. A synthetic
+            // MessageStop keeps downstream consumers (session append, SSE finish)
+            // well-formed. Crucially, do NOT fall through to the non-stream fallback
+            // below — that would launch a fresh full generation right after the user
+            // cancelled this one.
+            if !events
+                .iter()
+                .any(|event| matches!(event, AssistantEvent::MessageStop))
+            {
+                emit_assistant_event(&mut events, &mut event_sink, AssistantEvent::MessageStop);
+            }
+            return Ok(events);
+        }
 
         if !saw_stop
             && events.iter().any(|event| {
@@ -11426,6 +11483,12 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                             text: output.clone(),
                         }],
                         is_error: *is_error,
+                    }),
+                    ContentBlock::Image { url } => Some(InputContentBlock::Image {
+                        image_url: ImageUrl {
+                            url: url.clone(),
+                            detail: None,
+                        },
                     }),
                 })
                 .collect::<Vec<_>>();

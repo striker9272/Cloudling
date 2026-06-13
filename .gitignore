@@ -16,3 +16,7 @@ status-help.txt
 # Personal notes / scratch (not for the repo)
 NOTES_*.md
 /notes/
+# Built-in UI data store (dialogs / presets / token counts) — may hold sensitive chat content
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm

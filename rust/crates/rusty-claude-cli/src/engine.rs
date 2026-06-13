@@ -177,32 +177,45 @@ impl EngineHost for crate::LiveCli {
 
 fn run_prompt_with_host<H: EngineHost>(
     host: &mut H,
-    input: &str,
+    blocks: Vec<ContentBlock>,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    run_prompt_with_host_and_event_sink(host, input, None)
+    run_prompt_with_host_and_event_sink(host, blocks, None)
 }
 
 fn run_prompt_with_host_and_event_sink<H: EngineHost>(
     host: &mut H,
-    input: &str,
+    blocks: Vec<ContentBlock>,
     event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
     let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
     let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
 
-    let _workspace_guard =
-        runtime::scoped_workspace_root(host.workspace_root().map(Path::to_path_buf));
+    let workspace_root = host.workspace_root().map(Path::to_path_buf);
+    let _workspace_guard = runtime::scoped_workspace_root(workspace_root.clone());
+    // Resolve the filesystem policy (Security panel `filesystemMode` + trustedRoots)
+    // once per run so the dedicated file tools honor it, not just the bash sandbox.
+    let _fs_policy_guard = runtime::scoped_filesystem_policy(Some(
+        runtime::load_filesystem_policy_for(workspace_root.as_deref()),
+    ));
 
-    let result = match event_sink {
-        Some(sink) => {
-            runtime.run_turn_with_event_sink(input, Some(&mut permission_prompter), Some(sink))
-        }
-        None => runtime.run_turn(input, Some(&mut permission_prompter)),
-    };
+    // The current turn is carried as content blocks (text + any image attachments) so a
+    // vision backend receives the images; the text-only callers wrap input in one Text block.
+    let result =
+        runtime.run_turn_blocks_with_event_sink(blocks, Some(&mut permission_prompter), event_sink);
 
     hook_abort_monitor.stop();
 
-    let summary = result?;
+    let summary = match result {
+        Ok(summary) => summary,
+        Err(error) => {
+            // On the success path `replace_engine_runtime` shuts down the OLD runtime's
+            // plugins; on an errored turn that swap never happens and this freshly built
+            // runtime is dropped instead. Shut its plugins down here so a failed turn
+            // doesn't leak plugin processes (one per failed request otherwise).
+            let _ = runtime.shutdown_plugins();
+            return Err(error.into());
+        }
+    };
     host.replace_engine_runtime(runtime)?;
     host.persist_engine_session()?;
 
@@ -219,6 +232,11 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
 /// state, or other terminal-only UI concerns.
 pub(crate) struct ClawEngineSession {
     model: String,
+    // Whether the runtime exposes tools to the model. Stored so every per-turn
+    // runtime rebuild (`prepare_engine_runtime`) honors it — a tools-disabled
+    // session (e.g. the UI title endpoint) must stay tools-disabled for the
+    // actual prompt run, not just for the constructor's initial runtime.
+    enable_tools: bool,
     allowed_tools: Option<crate::AllowedToolSet>,
     permission_mode: PermissionMode,
     system_prompt: Vec<String>,
@@ -228,6 +246,11 @@ pub(crate) struct ClawEngineSession {
     working_dir: PathBuf,
     // Kept alive so the per-request temp workspace is removed when the session drops.
     workspace_tempdir: Option<TempDir>,
+    // Turn-level cancellation. Tripped by the streaming layer when the client
+    // disconnects (OpenAI-serve path), and checked by the conversation loop between
+    // steps so a disconnected client stops the agent instead of running on in the
+    // background. Reused as the runtime's abort signal in `prepare_engine_runtime`.
+    abort_signal: runtime::HookAbortSignal,
 }
 
 impl ClawEngineSession {
@@ -270,6 +293,7 @@ impl ClawEngineSession {
 
         Ok(Self {
             model,
+            enable_tools,
             allowed_tools,
             permission_mode,
             system_prompt,
@@ -278,14 +302,22 @@ impl ClawEngineSession {
             persist_session: false,
             working_dir,
             workspace_tempdir: Some(workspace_tempdir),
+            abort_signal: runtime::HookAbortSignal::new(),
         })
+    }
+
+    /// Handle to this session's turn-level cancellation signal. The streaming
+    /// (OpenAI-serve) layer keeps a clone and trips it when the client disconnects;
+    /// the conversation loop checks the same signal between steps.
+    pub(crate) fn abort_signal(&self) -> runtime::HookAbortSignal {
+        self.abort_signal.clone()
     }
 
     pub(crate) fn run_prompt_json(
         &mut self,
         input: &str,
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-        run_prompt_with_host(self, input)
+        run_prompt_with_host(self, vec![ContentBlock::Text { text: input.to_string() }])
     }
 
     pub(crate) fn run_prompt_json_with_event_sink(
@@ -293,7 +325,21 @@ impl ClawEngineSession {
         input: &str,
         event_sink: &mut dyn FnMut(&AssistantEvent),
     ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-        run_prompt_with_host_and_event_sink(self, input, Some(event_sink))
+        run_prompt_with_host_and_event_sink(
+            self,
+            vec![ContentBlock::Text { text: input.to_string() }],
+            Some(event_sink),
+        )
+    }
+
+    /// Run a turn whose user message is given as explicit content blocks (text + image
+    /// attachments). Used by the OpenAI-serve path when the current turn carries images.
+    pub(crate) fn run_prompt_json_blocks_with_event_sink(
+        &mut self,
+        blocks: Vec<ContentBlock>,
+        event_sink: &mut dyn FnMut(&AssistantEvent),
+    ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
+        run_prompt_with_host_and_event_sink(self, blocks, Some(event_sink))
     }
 }
 
@@ -310,13 +356,13 @@ impl EngineHost for ClawEngineSession {
         &self,
         emit_output: bool,
     ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>> {
-        let hook_abort_signal = runtime::HookAbortSignal::new();
+        let hook_abort_signal = self.abort_signal.clone();
         let runtime = crate::build_runtime(
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
             self.system_prompt.clone(),
-            true,
+            self.enable_tools,
             emit_output,
             self.allowed_tools.clone(),
             self.permission_mode,
@@ -359,7 +405,7 @@ pub(crate) fn run_cli_prompt_json(
     cli: &mut crate::LiveCli,
     input: &str,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    run_prompt_with_host(cli, input)
+    run_prompt_with_host(cli, vec![ContentBlock::Text { text: input.to_string() }])
 }
 
 #[must_use]

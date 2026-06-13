@@ -49,6 +49,12 @@ pub enum ContentBlock {
         output: String,
         is_error: bool,
     },
+    /// An image attachment. `url` is the source as given by the client — typically
+    /// a `data:image/...;base64,...` URL (the mime type is embedded there) or an
+    /// http(s) URL. Carried through the stack so a vision backend can receive it.
+    Image {
+        url: String,
+    },
 }
 
 /// One conversation message with optional token-usage metadata.
@@ -271,6 +277,12 @@ impl Session {
 
     pub fn push_user_text(&mut self, text: impl Into<String>) -> Result<(), SessionError> {
         self.push_message(ConversationMessage::user_text(text))
+    }
+
+    /// Push a user message built from explicit content blocks (e.g. text + image
+    /// attachments). Used by the OpenAI-serve path when the current turn carries images.
+    pub fn push_user_blocks(&mut self, blocks: Vec<ContentBlock>) -> Result<(), SessionError> {
+        self.push_message(ConversationMessage::user(blocks))
     }
 
     pub fn record_health_check(&mut self, timestamp_ms: u64) {
@@ -696,6 +708,15 @@ impl ConversationMessage {
     }
 
     #[must_use]
+    pub fn user(blocks: Vec<ContentBlock>) -> Self {
+        Self {
+            role: MessageRole::User,
+            blocks,
+            usage: None,
+        }
+    }
+
+    #[must_use]
     pub fn assistant(blocks: Vec<ContentBlock>) -> Self {
         Self {
             role: MessageRole::Assistant,
@@ -800,6 +821,10 @@ impl ContentBlock {
             Self::Text { text } => {
                 object.insert("type".to_string(), JsonValue::String("text".to_string()));
                 object.insert("text".to_string(), JsonValue::String(text.clone()));
+            }
+            Self::Image { url } => {
+                object.insert("type".to_string(), JsonValue::String("image".to_string()));
+                object.insert("url".to_string(), JsonValue::String(url.clone()));
             }
             Self::Thinking {
                 thinking,
@@ -1048,6 +1073,13 @@ fn persisted_block_json(block: &ContentBlock) -> JsonValue {
             object.insert(
                 "text".to_string(),
                 JsonValue::String(sanitize_jsonl_field(text)),
+            );
+        }
+        ContentBlock::Image { url } => {
+            object.insert("type".to_string(), JsonValue::String("image".to_string()));
+            object.insert(
+                "url".to_string(),
+                JsonValue::String(sanitize_jsonl_field(url)),
             );
         }
         ContentBlock::Thinking {

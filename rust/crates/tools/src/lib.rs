@@ -8,7 +8,7 @@ use aspect_std::LoggingAspect;
 
 use api::{
     max_tokens_for_model, model_family_identity_for, resolve_model_alias, ApiError,
-    ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
+    ContentBlockDelta, ImageUrl, InputContentBlock, InputMessage, MessageRequest, MessageResponse,
     OutputContentBlock, ProviderClient, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
     ToolResultContentBlock,
 };
@@ -18,7 +18,6 @@ use runtime::{
     check_freshness, dedupe_superseded_commit_events, edit_file_in_workspace, execute_bash,
     glob_search_in_workspace, grep_search_in_workspace, load_system_prompt,
     lsp_client::LspRegistry,
-    mcp_tool_bridge::McpToolRegistry,
     permission_enforcer::{EnforcementResult, PermissionEnforcer},
     read_file_in_workspace,
     summary_compression::compress_summary_text,
@@ -40,12 +39,6 @@ fn global_lsp_registry() -> &'static LspRegistry {
     use std::sync::OnceLock;
     static REGISTRY: OnceLock<LspRegistry> = OnceLock::new();
     REGISTRY.get_or_init(LspRegistry::new)
-}
-
-fn global_mcp_registry() -> &'static McpToolRegistry {
-    use std::sync::OnceLock;
-    static REGISTRY: OnceLock<McpToolRegistry> = OnceLock::new();
-    REGISTRY.get_or_init(McpToolRegistry::new)
 }
 
 fn global_team_registry() -> &'static TeamRegistry {
@@ -402,7 +395,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string" },
-                    "timeout": { "type": "integer", "minimum": 1 },
+                    "timeout": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional command timeout in MILLISECONDS (not seconds). Omit to run without an explicit timeout. Typical values: 30000-120000." },
                     "description": { "type": "string" },
                     "run_in_background": { "type": "boolean" },
                     "dangerouslyDisableSandbox": { "type": "boolean" },
@@ -699,9 +692,17 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "StructuredOutput",
-            description: "Return structured output in the requested format.",
+            description: "Return structured output in the requested format. Pass the structured data JSON-encoded in the 'result' string.",
+            // A declared property matters: with a bare `additionalProperties` schema
+            // grammar-constrained backends (llama.cpp) emit `{}` for every call, so the
+            // tool always failed with "payload must not be empty" (live, 2026-06-11).
+            // `result` is a STRING (JSON-encoded, decoded by the tool) because those
+            // same backends also cannot fill a free-form nested object (they emit {}).
             input_schema: json!({
                 "type": "object",
+                "properties": {
+                    "result": { "type": "string", "description": "The structured data to return, as a JSON-encoded string, e.g. \"{\\\"answer\\\": 42}\"." }
+                },
                 "additionalProperties": true
             }),
             required_permission: PermissionMode::ReadOnly,
@@ -1096,45 +1097,13 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
             }),
             required_permission: PermissionMode::ReadOnly,
         },
-        ToolSpec {
-            name: "ListMcpResources",
-            description: "List available resources from connected MCP servers.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" }
-                },
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::ReadOnly,
-        },
-        ToolSpec {
-            name: "ReadMcpResource",
-            description: "Read a specific resource from an MCP server by URI.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" },
-                    "uri": { "type": "string" }
-                },
-                "required": ["uri"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::ReadOnly,
-        },
-        ToolSpec {
-            name: "McpAuth",
-            description: "Authenticate with an MCP server that requires OAuth or credentials.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" }
-                },
-                "required": ["server"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::DangerFullAccess,
-        },
+        // NOTE: the former static MCP tools (`MCP`, `ListMcpResources`, `ReadMcpResource`,
+        // `McpAuth`) were removed (2026-06-11): they queried a process-global registry
+        // that the serve path never populates, so they always answered "server not
+        // found" while the REAL MCP path (per-request `RuntimeMcpState` →
+        // `mcp__server__tool` + `MCPTool`/`ListMcpResourcesTool`/`ReadMcpResourceTool`
+        // in CliToolExecutor) worked beside them — the dead twins only confused the
+        // model. `RemoteTrigger` stays: it is a plain HTTP client, independent of MCP.
         ToolSpec {
             name: "RemoteTrigger",
             description: "Trigger a remote action or webhook endpoint.",
@@ -1147,21 +1116,6 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "body": { "type": "string" }
                 },
                 "required": ["url"],
-                "additionalProperties": false
-            }),
-            required_permission: PermissionMode::DangerFullAccess,
-        },
-        ToolSpec {
-            name: "MCP",
-            description: "Execute a tool provided by a connected MCP server.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "server": { "type": "string" },
-                    "tool": { "type": "string" },
-                    "arguments": { "type": "object" }
-                },
-                "required": ["server", "tool"],
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::DangerFullAccess,
@@ -1181,11 +1135,12 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "GitStatus",
-            description: "Show the working tree status (branch, staged, unstaged, untracked). Equivalent to 'git status --short --branch'. Use this instead of running git status via bash to get structured, parseable output.",
+            description: "Show the working tree status (branch, staged, unstaged, untracked). Equivalent to 'git status --short --branch'. Use this instead of running git status via bash to get structured, parseable output. Set 'directory' to the repository path (the default workspace directory is usually not a git repository).",
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "short": { "type": "boolean" }
+                    "short": { "type": "boolean" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1200,7 +1155,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "path": { "type": "string" },
                     "staged": { "type": "boolean" },
                     "commit": { "type": "string" },
-                    "commit2": { "type": "string" }
+                    "commit2": { "type": "string" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1217,7 +1173,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "oneline": { "type": "boolean" },
                     "author": { "type": "string" },
                     "since": { "type": "string" },
-                    "until": { "type": "string" }
+                    "until": { "type": "string" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "additionalProperties": false
             }),
@@ -1231,7 +1188,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "properties": {
                     "commit": { "type": "string" },
                     "path": { "type": "string" },
-                    "stat": { "type": "boolean" }
+                    "stat": { "type": "boolean" },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "required": ["commit"],
                 "additionalProperties": false
@@ -1246,7 +1204,8 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "properties": {
                     "path": { "type": "string" },
                     "start_line": { "type": "integer", "minimum": 1 },
-                    "end_line": { "type": "integer", "minimum": 1 }
+                    "end_line": { "type": "integer", "minimum": 1 },
+                    "directory": { "type": "string", "description": "Repository directory (absolute, or relative to the workspace). Defaults to the workspace directory." }
                 },
                 "required": ["path"],
                 "additionalProperties": false
@@ -1373,13 +1332,7 @@ fn execute_tool_with_enforcer(
         "CronDelete" => from_value::<CronDeleteInput>(input).and_then(run_cron_delete),
         "CronList" => run_cron_list(input.clone()),
         "LSP" => from_value::<LspInput>(input).and_then(run_lsp),
-        "ListMcpResources" => {
-            from_value::<McpResourceInput>(input).and_then(run_list_mcp_resources)
-        }
-        "ReadMcpResource" => from_value::<McpResourceInput>(input).and_then(run_read_mcp_resource),
-        "McpAuth" => from_value::<McpAuthInput>(input).and_then(run_mcp_auth),
         "RemoteTrigger" => from_value::<RemoteTriggerInput>(input).and_then(run_remote_trigger),
-        "MCP" => from_value::<McpToolInput>(input).and_then(run_mcp_tool),
         "TestingPermission" => {
             from_value::<TestingPermissionInput>(input).and_then(run_testing_permission)
         }
@@ -1416,7 +1369,21 @@ fn maybe_enforce_permission_check_with_mode(
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
-    use std::io::{self, BufRead, Write};
+    use std::io::{self, BufRead, IsTerminal, Write};
+
+    // Without an interactive terminal (openai-serve under systemd: stdin is
+    // /dev/null) reading stdin yields instant EOF, which used to be reported as
+    // `status: "answered"` with an empty answer — misleading the model. Return an
+    // honest "unavailable" so the model asks in the chat instead.
+    if !io::stdin().is_terminal() {
+        return to_pretty_json(json!({
+            "question": input.question,
+            "answer": Value::Null,
+            "status": "unavailable",
+            "message": "Interactive input is not available in this environment \
+                        (stdin is not a terminal). Ask the user directly in the chat."
+        }));
+    }
 
     // Display the question to the user via stdout
     let stdout = io::stdout();
@@ -1761,77 +1728,6 @@ fn run_lsp(input: LspInput) -> Result<String, String> {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn run_list_mcp_resources(input: McpResourceInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let server = input.server.as_deref().unwrap_or("default");
-    match registry.list_resources(server) {
-        Ok(resources) => {
-            let items: Vec<_> = resources
-                .iter()
-                .map(|r| {
-                    json!({
-                        "uri": r.uri,
-                        "name": r.name,
-                        "description": r.description,
-                        "mime_type": r.mime_type,
-                    })
-                })
-                .collect();
-            to_pretty_json(json!({
-                "server": server,
-                "resources": items,
-                "count": items.len()
-            }))
-        }
-        Err(e) => to_pretty_json(json!({
-            "server": server,
-            "resources": [],
-            "error": e
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_read_mcp_resource(input: McpResourceInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let uri = input.uri.as_deref().unwrap_or("");
-    let server = input.server.as_deref().unwrap_or("default");
-    match registry.read_resource(server, uri) {
-        Ok(resource) => to_pretty_json(json!({
-            "server": server,
-            "uri": resource.uri,
-            "name": resource.name,
-            "description": resource.description,
-            "mime_type": resource.mime_type
-        })),
-        Err(e) => to_pretty_json(json!({
-            "server": server,
-            "uri": uri,
-            "error": e
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
-fn run_mcp_auth(input: McpAuthInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    match registry.get_server(&input.server) {
-        Some(state) => to_pretty_json(json!({
-            "server": input.server,
-            "status": state.status,
-            "server_info": state.server_info,
-            "tool_count": state.tools.len(),
-            "resource_count": state.resources.len()
-        })),
-        None => to_pretty_json(json!({
-            "server": input.server,
-            "status": "disconnected",
-            "message": "Server not registered. Use MCP tool to connect first."
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
 fn run_remote_trigger(input: RemoteTriggerInput) -> Result<String, String> {
     let method = input.method.unwrap_or_else(|| "GET".to_string());
     let client = Client::new();
@@ -1896,26 +1792,6 @@ fn run_remote_trigger(input: RemoteTriggerInput) -> Result<String, String> {
 }
 
 #[allow(clippy::needless_pass_by_value)]
-fn run_mcp_tool(input: McpToolInput) -> Result<String, String> {
-    let registry = global_mcp_registry();
-    let args = input.arguments.unwrap_or(serde_json::json!({}));
-    match registry.call_tool(&input.server, &input.tool, &args) {
-        Ok(result) => to_pretty_json(json!({
-            "server": input.server,
-            "tool": input.tool,
-            "result": result,
-            "status": "success"
-        })),
-        Err(e) => to_pretty_json(json!({
-            "server": input.server,
-            "tool": input.tool,
-            "error": e,
-            "status": "error"
-        })),
-    }
-}
-
-#[allow(clippy::needless_pass_by_value)]
 fn run_testing_permission(input: TestingPermissionInput) -> Result<String, String> {
     to_pretty_json(json!({
         "action": input.action,
@@ -1933,15 +1809,7 @@ fn run_git_status(input: GitStatusInput) -> Result<String, String> {
         args.push("--short");
         args.push("--branch");
     }
-    match git_stdout(&args) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git status failed. Ensure the current directory is inside a git repository."
-                .to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &args).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1964,14 +1832,7 @@ fn run_git_diff(input: GitDiffInput) -> Result<String, String> {
         args.push(path.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git diff failed. Ensure the current directory is inside a git repository.".to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -1998,14 +1859,7 @@ fn run_git_log(input: GitLogInput) -> Result<String, String> {
         args.push(path.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(
-            "git log failed. Ensure the current directory is inside a git repository.".to_string(),
-        ),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -2022,15 +1876,7 @@ fn run_git_show(input: GitShowInput) -> Result<String, String> {
         args.push(input.commit.clone());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(format!(
-            "git show {} failed. Ensure the commit exists.",
-            input.commit
-        )),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -2042,12 +1888,7 @@ fn run_git_blame(input: GitBlameInput) -> Result<String, String> {
     }
     args.push(input.path.clone());
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    match git_stdout(&arg_refs) {
-        Some(output) => to_pretty_json(json!({
-            "output": output
-        })),
-        None => Err(format!("git blame {} failed. Ensure the file exists and the directory is inside a git repository.", input.path)),
-    }
+    git_stdout_in(input.directory.as_deref(), &arg_refs).and_then(git_output_json)
 }
 
 fn from_value<T: for<'de> Deserialize<'de>>(input: &Value) -> Result<T, String> {
@@ -2256,6 +2097,49 @@ fn git_stdout(args: &[&str]) -> Option<String> {
     }
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
     (!stdout.is_empty()).then_some(stdout)
+}
+
+/// Run `git` for the Git* tools, anchored to a directory the same way the file tools
+/// are: the optional `directory` input (absolute, or relative to the per-run workspace
+/// root) is resolved and checked against the ambient filesystem policy; with no
+/// `directory` the per-run workspace root itself is used (NOT the process cwd — under
+/// serve that is a shared neutral dir, see the NotebookEdit fix for the same class of
+/// bug). Success with empty stdout is a valid result (e.g. `git diff` with no changes),
+/// not a failure; on failure git's stderr is surfaced so the model sees the real reason.
+fn git_stdout_in(directory: Option<&str>, args: &[&str]) -> Result<String, String> {
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
+    let dir = match directory {
+        Some(path) => runtime::resolve_dir_in_workspace(path, &workspace)
+            .map_err(|error| format!("directory {path}: {error}"))?,
+        None => workspace,
+    };
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(&dir)
+        .output()
+        .map_err(|error| format!("failed to run git: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("git {} failed in {}", args.first().unwrap_or(&""), dir.display())
+        } else {
+            format!("git {} failed in {}: {stderr}", args.first().unwrap_or(&""), dir.display())
+        });
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Wrap a successful git stdout into the tools' JSON envelope, making an empty
+/// result explicit instead of an error.
+fn git_output_json(output: String) -> Result<String, String> {
+    if output.is_empty() {
+        to_pretty_json(json!({
+            "output": "",
+            "note": "command succeeded with empty output (e.g. no changes)"
+        }))
+    } else {
+        to_pretty_json(json!({ "output": output }))
+    }
 }
 
 fn branch_divergence_output(
@@ -2866,19 +2750,6 @@ struct LspInput {
 }
 
 #[derive(Debug, Deserialize)]
-struct McpResourceInput {
-    #[serde(default)]
-    server: Option<String>,
-    #[serde(default)]
-    uri: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpAuthInput {
-    server: String,
-}
-
-#[derive(Debug, Deserialize)]
 struct RemoteTriggerInput {
     url: String,
     #[serde(default)]
@@ -2887,14 +2758,6 @@ struct RemoteTriggerInput {
     headers: Option<Value>,
     #[serde(default)]
     body: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct McpToolInput {
-    server: String,
-    tool: String,
-    #[serde(default)]
-    arguments: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2909,6 +2772,10 @@ struct GitStatusInput {
     #[serde(default)]
     /// If true, use --short --branch format. Defaults to true.
     short: Option<bool>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitDiff tool: shows changes between commits, index, and working tree.
@@ -2927,6 +2794,10 @@ struct GitDiffInput {
     #[serde(default)]
     /// A second commit for range diffs (commit...commit2).
     commit2: Option<String>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitLog tool: shows commit history.
@@ -2951,6 +2822,10 @@ struct GitLogInput {
     #[serde(default)]
     /// Filter commits until date.
     until: Option<String>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitShow tool: shows a commit, tag, or tree object.
@@ -2964,6 +2839,10 @@ struct GitShowInput {
     #[serde(default)]
     /// If true, show diffstat summary instead of full diff.
     stat: Option<bool>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 /// Input for the GitBlame tool: shows per-line author/revision info for a file.
@@ -2979,6 +2858,10 @@ struct GitBlameInput {
     #[serde(default)]
     /// End of line range (1-based). Only used if start_line is also set.
     end_line: Option<usize>,
+    #[serde(default)]
+    /// Repository directory (absolute, or relative to the workspace root).
+    /// Defaults to the workspace root. Subject to the filesystem policy.
+    directory: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -3305,7 +3188,7 @@ fn normalize_fetch_url(url: &str) -> Result<String, String> {
     let parsed = reqwest::Url::parse(url).map_err(|error| error.to_string())?;
     if parsed.scheme() == "http" {
         let host = parsed.host_str().unwrap_or_default();
-        if host != "localhost" && host != "127.0.0.1" && host != "::1" {
+        if !host_is_local(host) {
             let mut upgraded = parsed;
             upgraded
                 .set_scheme("https")
@@ -3314,6 +3197,39 @@ fn normalize_fetch_url(url: &str) -> Result<String, String> {
         }
     }
     Ok(parsed.to_string())
+}
+
+/// Hosts we leave on plain `http` instead of upgrading to `https`: loopback,
+/// private/LAN, and link-local addresses, plus local-only hostnames. A home-lab
+/// fetches these over http and there is no public https endpoint to upgrade to,
+/// so forcing https would just break the request.
+fn host_is_local(host: &str) -> bool {
+    use std::net::IpAddr;
+    // `host_str()` keeps IPv6 literals bracketed (e.g. "[::1]"); strip them.
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+    if let Ok(ip) = bare.parse::<IpAddr>() {
+        return match ip {
+            IpAddr::V4(v4) => {
+                v4.is_private() || v4.is_loopback() || v4.is_link_local() || v4.is_unspecified()
+            }
+            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified() || ipv6_is_local(&v6),
+        };
+    }
+    let host = host.to_ascii_lowercase();
+    host == "localhost"
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+        || host.ends_with(".internal")
+        || host.ends_with(".lan")
+        // single-label intranet host (no dot), e.g. "combsrv"
+        || !host.contains('.')
+}
+
+/// IPv6 unique-local (`fc00::/7`) or link-local (`fe80::/10`). The equivalent
+/// `Ipv6Addr` helpers are unstable on this toolchain, so check the prefix by hand.
+fn ipv6_is_local(v6: &std::net::Ipv6Addr) -> bool {
+    let seg0 = v6.segments()[0];
+    (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
 }
 
 fn build_search_url(query: &str) -> Result<reqwest::Url, String> {
@@ -3917,17 +3833,6 @@ fn skill_lookup_roots() -> Vec<SkillLookupRoot> {
             SkillLookupOrigin::LegacyCommandsDir,
         );
     }
-    push_skill_lookup_root(
-        &mut roots,
-        std::path::PathBuf::from("/home/bellman/.claw/skills"),
-        SkillLookupOrigin::SkillsDir,
-    );
-    push_skill_lookup_root(
-        &mut roots,
-        std::path::PathBuf::from("/home/bellman/.codex/skills"),
-        SkillLookupOrigin::SkillsDir,
-    );
-
     roots
 }
 
@@ -4110,8 +4015,33 @@ fn parse_skill_frontmatter_value(contents: &str, key: &str) -> Option<String> {
 }
 
 const DEFAULT_AGENT_MODEL: &str = "claude-opus-4-6";
-const DEFAULT_AGENT_SYSTEM_DATE: &str = "2026-03-31";
 const DEFAULT_AGENT_MAX_ITERATIONS: usize = 32;
+
+/// The current UTC date as `YYYY-MM-DD` for the sub-agent system prompt. Computed
+/// from the system clock so it is never stale, without pulling in a date crate.
+fn current_utc_date() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    date_from_unix_secs(secs)
+}
+
+/// Civil date (`YYYY-MM-DD`, UTC) from a Unix timestamp, via Howard Hinnant's
+/// days-to-civil algorithm. Pure arithmetic — kept separate so it is testable.
+fn date_from_unix_secs(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097; // [0, 146096]
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365; // [0, 399]
+    let year = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); // [0, 365]
+    let mp = (5 * doy + 2) / 153; // [0, 11]
+    let day = doy - (153 * mp + 2) / 5 + 1; // [1, 31]
+    let month = if mp < 10 { mp + 3 } else { mp - 9 }; // [1, 12]
+    let year = if month <= 2 { year + 1 } else { year };
+    format!("{year:04}-{month:02}-{day:02}")
+}
 
 fn execute_agent(input: AgentInput) -> Result<AgentOutput, String> {
     // Run the sub-agent synchronously and reflect its outcome onto the returned
@@ -4238,12 +4168,18 @@ fn run_agent_job_blocking(
     // per-conversation workspace root into the thread so the sub-agent's file tools
     // stay isolated to this conversation (the root guard is thread-local).
     let parent_root = runtime::current_workspace_root().ok();
+    // Carry the parent's filesystem policy too: both ambient scopes are
+    // thread-local, so without this the sub-agent thread would fall back to the
+    // workspace-only default even when the parent run allows more (`off` /
+    // `allow-list` from the Security panel).
+    let parent_fs_policy = runtime::current_filesystem_policy();
     let outcome_for_thread = std::sync::Arc::clone(outcome);
     let thread_name = format!("clab-agent-{}", job.manifest.agent_id);
     let handle = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
             let _guard = runtime::scoped_workspace_root(parent_root);
+            let _fs_policy_guard = runtime::scoped_filesystem_policy(Some(parent_fs_policy));
             let result =
                 std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_agent_turn(&job)));
             let recorded = match result {
@@ -4314,7 +4250,7 @@ fn build_agent_system_prompt(subagent_type: &str, model: &str) -> Result<Vec<Str
     let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     let mut prompt = load_system_prompt(
         cwd,
-        DEFAULT_AGENT_SYSTEM_DATE.to_string(),
+        current_utc_date(),
         std::env::consts::OS,
         "unknown",
         model_family_identity_for(model),
@@ -5510,6 +5446,12 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                         }],
                         is_error: *is_error,
                     },
+                    ContentBlock::Image { url } => InputContentBlock::Image {
+                        image_url: ImageUrl {
+                            url: url.clone(),
+                            detail: None,
+                        },
+                    },
                 })
                 .filter(
                     |block| !matches!(block, InputContentBlock::Text { text } if text.is_empty()),
@@ -5818,14 +5760,25 @@ fn iso8601_now() -> String {
 
 #[allow(clippy::too_many_lines)]
 fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput, String> {
-    let path = std::path::PathBuf::from(&input.notebook_path);
-    if path.extension().and_then(|ext| ext.to_str()) != Some("ipynb") {
+    if std::path::Path::new(&input.notebook_path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        != Some("ipynb")
+    {
         return Err(String::from(
             "File must be a Jupyter notebook (.ipynb file).",
         ));
     }
 
-    let original_file = std::fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    // Resolve and read through the workspace-aware layer so the path is anchored to
+    // the per-run workspace root (like read/write/edit) and the filesystem policy
+    // (filesystemMode + trustedRoots) is enforced — same as the other file tools.
+    let workspace = runtime::current_workspace_root().map_err(|error| error.to_string())?;
+    let original_file =
+        read_file_in_workspace(&input.notebook_path, None, None, &workspace)
+            .map_err(|error| error.to_string())?
+            .file
+            .content;
     let mut notebook: serde_json::Value =
         serde_json::from_str(&original_file).map_err(|error| error.to_string())?;
     let language = notebook
@@ -5924,7 +5877,8 @@ fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput,
 
     let updated_file =
         serde_json::to_string_pretty(&notebook).map_err(|error| error.to_string())?;
-    std::fs::write(&path, &updated_file).map_err(|error| error.to_string())?;
+    let written = write_file_in_workspace(&input.notebook_path, &updated_file, &workspace)
+        .map_err(|error| error.to_string())?;
 
     Ok(NotebookEditOutput {
         new_source,
@@ -5933,7 +5887,7 @@ fn execute_notebook_edit(input: NotebookEditInput) -> Result<NotebookEditOutput,
         language,
         edit_mode: format_notebook_edit_mode(edit_mode),
         error: None,
-        notebook_path: path.display().to_string(),
+        notebook_path: written.file_path,
         original_file,
         updated_file,
     })
@@ -6240,12 +6194,23 @@ fn execute_exit_plan_mode(_input: ExitPlanModeInput) -> Result<PlanModeOutput, S
 fn execute_structured_output(
     input: StructuredOutputInput,
 ) -> Result<StructuredOutputResult, String> {
-    if input.0.is_empty() {
+    let mut payload = input.0;
+    // Accept the payload JSON-encoded in `result` (see the schema note: grammar-
+    // constrained backends can pass an arbitrary string but not a free-form object)
+    // and decode it back into the structured map.
+    if payload.len() == 1 {
+        if let Some(Value::String(raw)) = payload.get("result") {
+            if let Ok(Value::Object(decoded)) = serde_json::from_str::<Value>(raw) {
+                payload = decoded.into_iter().collect();
+            }
+        }
+    }
+    if payload.is_empty() {
         return Err(String::from("structured output payload must not be empty"));
     }
     Ok(StructuredOutputResult {
         data: String::from("Structured output provided successfully"),
-        structured_output: input.0,
+        structured_output: payload,
     })
 }
 
@@ -6494,7 +6459,12 @@ fn normalize_config_value(spec: ConfigSettingSpec, value: ConfigValue) -> Result
 fn config_file_for_scope(scope: ConfigScope) -> Result<PathBuf, String> {
     let cwd = runtime::current_workspace_root().map_err(|error| error.to_string())?;
     Ok(match scope {
-        ConfigScope::Global => config_home_dir()?.join("settings.json"),
+        // NOT `settings.json`: that file is schema-validated on every runtime build
+        // (runtime/config_validate.rs), and the Config tool's global keys (`theme`,
+        // `editorMode`, ...) are not in its schema — writing one there used to brick
+        // every subsequent request with "unknown key" (verified live 2026-06-11).
+        // The tool's keys are read by nobody else, so they get their own file.
+        ConfigScope::Global => config_home_dir()?.join("tool-config.json"),
         ConfigScope::Settings => cwd.join(".claw").join("settings.local.json"),
     })
 }
@@ -7904,6 +7874,48 @@ mod tests {
         assert!(summary.contains("Visible body text"));
         assert!(summary.contains("Real summary here"));
         assert!(!summary.contains("do-not-leak-this-js"));
+    }
+
+    #[test]
+    fn normalize_fetch_url_upgrades_only_public_http_hosts() {
+        // Public hosts: http is upgraded to https.
+        assert_eq!(
+            super::normalize_fetch_url("http://example.com/page").unwrap(),
+            "https://example.com/page"
+        );
+        // https is left untouched.
+        assert_eq!(
+            super::normalize_fetch_url("https://example.com/").unwrap(),
+            "https://example.com/"
+        );
+
+        // Loopback, private/LAN, and link-local stay on http (no public https to reach).
+        for url in [
+            "http://localhost:8080/x",
+            "http://127.0.0.1/x",
+            "http://[::1]/x",
+            "http://192.168.1.10/x",
+            "http://10.0.0.5/x",
+            "http://172.16.4.4/x",
+            "http://169.254.1.2/x",
+            "http://nas.local/x",
+            "http://combsrv/x",
+        ] {
+            assert_eq!(
+                super::normalize_fetch_url(url).unwrap(),
+                url,
+                "host should stay on http: {url}"
+            );
+        }
+    }
+
+    #[test]
+    fn date_from_unix_secs_matches_known_dates() {
+        assert_eq!(super::date_from_unix_secs(0), "1970-01-01");
+        // 1700000000 = 2023-11-14T22:13:20Z
+        assert_eq!(super::date_from_unix_secs(1_700_000_000), "2023-11-14");
+        // leap day
+        assert_eq!(super::date_from_unix_secs(1_582_934_400), "2020-02-29");
     }
 
     #[test]
@@ -9557,6 +9569,12 @@ mod tests {
 
     #[test]
     fn notebook_edit_replaces_inserts_and_deletes_cells() {
+        // NotebookEdit now goes through the workspace-aware file layer; allow the
+        // absolute temp path by disabling the filesystem boundary for this test.
+        let _fs = runtime::scoped_filesystem_policy(Some(runtime::FilesystemPolicy {
+            mode: runtime::FilesystemIsolationMode::Off,
+            trusted_roots: Vec::new(),
+        }));
         let path = temp_path("notebook.ipynb");
         std::fs::write(
             &path,
@@ -9637,6 +9655,10 @@ mod tests {
 
     #[test]
     fn notebook_edit_rejects_invalid_inputs() {
+        let _fs = runtime::scoped_filesystem_policy(Some(runtime::FilesystemPolicy {
+            mode: runtime::FilesystemIsolationMode::Off,
+            trusted_roots: Vec::new(),
+        }));
         let text_path = temp_path("notebook.txt");
         fs::write(&text_path, "not a notebook").expect("write text file");
         let wrong_extension = execute_tool(
@@ -9677,6 +9699,105 @@ mod tests {
         .expect_err("delete on empty notebook should fail");
         assert!(missing_cell.contains("Notebook has no cells to edit"));
         let _ = fs::remove_file(empty_notebook);
+    }
+
+    #[test]
+    fn notebook_edit_resolves_relative_path_under_workspace_root() {
+        // Regression: NotebookEdit must anchor a relative path to the per-run
+        // workspace root (like read/write/edit), not the process cwd. Default policy
+        // (workspace-only) permits it because the resolved path stays in-workspace.
+        let dir = temp_path("nb-workspace");
+        std::fs::create_dir_all(&dir).expect("workspace dir should be created");
+        std::fs::write(
+            dir.join("nb.ipynb"),
+            r#"{"cells":[{"cell_type":"code","id":"c1","metadata":{},"source":["print(1)\n"],"outputs":[],"execution_count":null}],"metadata":{"kernelspec":{"language":"python"}},"nbformat":4,"nbformat_minor":5}"#,
+        )
+        .expect("write notebook");
+
+        let _ws = runtime::scoped_workspace_root(Some(dir.clone()));
+        let out = execute_tool(
+            "NotebookEdit",
+            &json!({
+                "notebook_path": "nb.ipynb",
+                "cell_id": "c1",
+                "new_source": "print(42)\n",
+                "edit_mode": "replace"
+            }),
+        )
+        .expect("NotebookEdit with a relative path should resolve under the workspace root");
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(parsed["cell_id"], "c1");
+
+        let written: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("nb.ipynb")).expect("read"))
+                .expect("valid notebook json");
+        assert_eq!(written["cells"][0]["source"][0], "print(42)\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn git_tools_anchor_to_workspace_root_and_accept_directory() {
+        // Regression: the Git* tools must run against the per-run workspace root (or
+        // the explicit `directory` input), not the process cwd — under serve the cwd
+        // is a shared neutral dir that is never a repository.
+        let repo = temp_path("git-workspace");
+        std::fs::create_dir_all(&repo).expect("repo dir");
+        init_git_repo(&repo);
+
+        let _ws = runtime::scoped_workspace_root(Some(repo.clone()));
+
+        // No directory input → the workspace root (the repo) is used.
+        let status = execute_tool("GitStatus", &json!({})).expect("GitStatus in workspace repo");
+        let parsed: serde_json::Value = serde_json::from_str(&status).expect("json");
+        assert!(
+            parsed["output"].as_str().expect("output").starts_with("##"),
+            "expected branch line, got: {parsed}"
+        );
+
+        // Relative `directory` resolves under the workspace root too.
+        let log = execute_tool(
+            "GitLog",
+            &json!({ "count": 1, "oneline": true, "directory": "." }),
+        )
+        .expect("GitLog with relative directory");
+        let parsed: serde_json::Value = serde_json::from_str(&log).expect("json");
+        assert!(parsed["output"].as_str().expect("output").contains("init"));
+
+        // Empty stdout is success, not failure: clean repo → empty `git diff`.
+        let diff = execute_tool("GitDiff", &json!({})).expect("empty git diff should succeed");
+        let parsed: serde_json::Value = serde_json::from_str(&diff).expect("json");
+        assert_eq!(parsed["output"], "");
+        assert!(parsed["note"]
+            .as_str()
+            .expect("note")
+            .contains("empty output"));
+
+        let _ = std::fs::remove_dir_all(&repo);
+    }
+
+    #[test]
+    fn git_directory_outside_boundary_is_rejected_by_default_policy() {
+        // Default filesystem policy is workspace-only: a `directory` pointing outside
+        // the per-run root must be rejected, mirroring the file tools.
+        let workspace = temp_path("git-ws-confined");
+        let outside_repo = temp_path("git-outside-repo");
+        std::fs::create_dir_all(&workspace).expect("workspace dir");
+        std::fs::create_dir_all(&outside_repo).expect("outside dir");
+        init_git_repo(&outside_repo);
+
+        let _ws = runtime::scoped_workspace_root(Some(workspace.clone()));
+        let error = execute_tool(
+            "GitStatus",
+            &json!({ "directory": outside_repo.to_string_lossy() }),
+        )
+        .expect_err("directory outside the workspace boundary should be rejected");
+        assert!(
+            error.to_string().contains("escapes workspace boundary"),
+            "unexpected error: {error}"
+        );
+
+        let _ = std::fs::remove_dir_all(&workspace);
+        let _ = std::fs::remove_dir_all(&outside_repo);
     }
 
     #[test]
@@ -10146,11 +10267,14 @@ mod tests {
         let cwd = root.join("cwd");
         std::fs::create_dir_all(home.join(".claw")).expect("home dir");
         std::fs::create_dir_all(cwd.join(".claw")).expect("cwd dir");
+        // Global-scope Config keys live in `tool-config.json`, NOT `settings.json`:
+        // the latter is schema-validated on every runtime build and rejects them
+        // (writing `verbose` there bricked the live service — see config_file_for_scope).
         std::fs::write(
-            home.join(".claw").join("settings.json"),
+            home.join(".claw").join("tool-config.json"),
             r#"{"verbose":false}"#,
         )
-        .expect("write global settings");
+        .expect("write global tool config");
 
         let original_home = std::env::var("HOME").ok();
         let original_config_home = std::env::var("CLAW_CONFIG_HOME").ok();

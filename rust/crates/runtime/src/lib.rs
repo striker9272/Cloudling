@@ -66,7 +66,8 @@ pub use compact::{
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
 };
 pub use config::{
-    suppress_config_warnings_for_json_mode, ConfigEntry, ConfigError, ConfigLoader, ConfigSource,
+    default_config_home, suppress_config_warnings_for_json_mode, ConfigEntry, ConfigError,
+    ConfigLoader, ConfigSource,
     McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
     McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,
     McpWebSocketServerConfig, OAuthConfig, ProviderFallbackConfig, ResolvedPermissionMode,
@@ -84,9 +85,9 @@ pub use conversation::{
 };
 pub use file_ops::{
     edit_file, edit_file_in_workspace, glob_search, glob_search_in_workspace, grep_search,
-    grep_search_in_workspace, read_file, read_file_in_workspace, write_file,
-    write_file_in_workspace, EditFileOutput, GlobSearchOutput, GrepSearchInput, GrepSearchOutput,
-    ReadFileOutput, StructuredPatchHunk, TextFilePayload, WriteFileOutput,
+    grep_search_in_workspace, read_file, read_file_in_workspace, resolve_dir_in_workspace,
+    write_file, write_file_in_workspace, EditFileOutput, GlobSearchOutput, GrepSearchInput,
+    GrepSearchOutput, ReadFileOutput, StructuredPatchHunk, TextFilePayload, WriteFileOutput,
 };
 pub use git_context::{GitCommitEntry, GitContext};
 pub use hooks::{
@@ -194,7 +195,11 @@ pub use worker_boot::{
     Worker, WorkerEvent, WorkerEventKind, WorkerEventPayload, WorkerFailure, WorkerFailureKind,
     WorkerPromptTarget, WorkerReadySnapshot, WorkerRegistry, WorkerStatus, WorkerTrustResolution,
 };
-pub use workspace_root::{current_workspace_root, scoped_workspace_root, WorkspaceRootGuard};
+pub use workspace_root::{
+    current_filesystem_policy, current_workspace_root, load_filesystem_policy_for,
+    scoped_filesystem_policy, scoped_workspace_root, FilesystemPolicy, FilesystemPolicyGuard,
+    WorkspaceRootGuard,
+};
 
 #[cfg(test)]
 pub(crate) fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
