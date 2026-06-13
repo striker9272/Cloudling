@@ -1730,7 +1730,7 @@ fn parse_openai_serve_args(
         }
     }
 
-    let model = resolve_openai_serve_model(model, model_was_explicit)?;
+    let model = resolve_openai_serve_model(model, model_was_explicit, ui)?;
     Ok(CliAction::OpenAiServe {
         bind,
         model,
@@ -1743,6 +1743,7 @@ fn parse_openai_serve_args(
 fn resolve_openai_serve_model(
     parsed_model: String,
     model_was_explicit: bool,
+    ui: bool,
 ) -> Result<String, String> {
     if model_was_explicit {
         return Ok(parsed_model);
@@ -1761,8 +1762,18 @@ fn resolve_openai_serve_model(
         }
     }
 
+    // With `--ui` the server may start unconfigured: it serves the built-in web UI
+    // so the backend (OPENAI_MODEL / OPENAI_BASE_URL) can be set in the browser, then
+    // save-restart brings the process back up with a real model. An empty model means
+    // "not configured yet" — the served model id still comes from CLAW_SERVED_MODEL_ID,
+    // and the chat path errors gracefully until a backend is configured (the UI's
+    // first-run setup screen routes the user there before they can chat).
+    if ui {
+        return Ok(String::new());
+    }
+
     Err(
-        "missing_model: openai-serve requires an explicit OpenAI-compatible model.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097], or set OPENAI_MODEL=<model>"
+        "missing_model: openai-serve requires an explicit OpenAI-compatible model.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui], or set OPENAI_MODEL=<model>"
             .to_string(),
     )
 }

@@ -25,9 +25,24 @@ With `--ui` the server adds:
 Without `--ui` none of these routes exist; only `/health`, `/v1/models`, and
 `/v1/chat/completions` are served.
 
-> The service installer (`install-openai-service.sh`) does not yet expose a
-> `--ui` toggle. For now enable the UI manually — pass `--ui` in the service
-> wrapper / launch command and set the environment variables below.
+### Installer (recommended): UI-first setup
+
+The service installer wires this up for you. Run `install.sh` (or
+`rust/scripts/install-openai-service.sh`) and, at the first prompt, choose the
+built-in web UI. In that mode the wizard:
+
+- skips all backend questions — you set the model and URL in the browser later;
+- asks only the bind address (use `0.0.0.0:<port>` or a LAN address to reach it
+  from another machine; `127.0.0.1` is local-only);
+- generates a `CLAW_UI_TOKEN` and sets `CLAW_OPENAI_UI=1`, `CLAW_UI_DATA_DIR`,
+  and `CLAW_OPENAI_ENV_FILE`, makes the env file writable by the service user,
+  and sets `Restart=always` (needed for save-restart);
+- prints the UI address and token at the end.
+
+Open the printed address, enter the token, and the first-run setup screen guides
+you to point clab at your engine — saving there restarts the service with your
+model. Non-interactively, pass `--ui` (plus `--bind`, and optionally
+`--ui-token` / `--ui-data-dir`).
 
 ## Environment variables
 
@@ -37,6 +52,7 @@ Without `--ui` none of these routes exist; only `/health`, `/v1/models`, and
 | `CLAW_UI_DATA_DIR` | `CLAW_CONFIG_HOME/ui`, else `$HOME/.claw/ui` | Directory for the SQLite store that holds dialogs, presets, and UI preferences. Created on first use. |
 | `CLAW_OPENAI_ENV_FILE` | *(unset)* | Path to the service env file. Lets the UI's **General** settings save engine/model/key changes and self-restart the core. When unset, the settings form loads as read-only (`_can_save: false`) and the save button is disabled. |
 | `CLAB_UI_DIR` | *(unset)* | Dev override: serve `index.html` / `app.css` / `app.js` from this directory at runtime instead of the embedded copies, so UI edits don't need a rebuild. Leave unset in production to serve the embedded assets. |
+| `CLAW_OPENAI_UI` | *(unset)* | Set to `1` by the installer's UI mode. The generated service wrapper turns it into the `--ui` flag and relaxes the backend requirement so the service can start unconfigured. Read by the wrapper, not by `clab` itself. |
 
 The UI also reads and writes the sandbox/permission config in `settings.json`
 (via `/ui/config`) and the agent backend settings (`OPENAI_BASE_URL`,
