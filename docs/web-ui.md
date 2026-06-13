@@ -42,7 +42,13 @@ built-in web UI. In that mode the wizard:
 Open the printed address, enter the token, and the first-run setup screen guides
 you to point clab at your engine — saving there restarts the service with your
 model. Non-interactively, pass `--ui` (plus `--bind`, and optionally
-`--ui-token` / `--ui-data-dir`).
+`--ui-token` / `--ui-data-dir`) to `install-openai-service.sh`, or forward them
+through the top-level installer after `--`:
+`./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart`.
+
+Re-running the installer with `--ui` on an already-configured service keeps the
+engine and the other env values, so you can re-enable or tweak the UI without
+re-entering your backend.
 
 ## Environment variables
 
@@ -93,7 +99,8 @@ past dialogs:
   flags, reasoning visibility).
 
 All of this lives in `dialogs.sqlite` under `CLAW_UI_DATA_DIR`. Deleting that
-directory resets the UI to a clean slate without affecting the agent.
+directory resets the UI to a clean slate without affecting the agent;
+`uninstall.sh` removes it as well unless you pass `--keep-data`.
 
 ## Settings panels
 

@@ -99,6 +99,8 @@ scripts/install-openai-service.sh \
 
 (если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (сервис `claw-lab-openai.service`, пользователь, пути `/opt/claw-lab`, `/etc/claw-lab`, `/var/lib/claw-lab`, bind `127.0.0.1:4097`, permission mode `read-only`) подставляется по умолчанию и переопределяется флагами.
 
+> **Повторный запуск безопасен.** Установщик можно перезапускать на уже настроенном сервисе: текущие значения из env-файла (движок, bind, served-id, permission mode, ключ, UI-токен) сохраняются — переопределяй флагом только то, что нужно поменять.
+
 Мастер спрашивает:
 
 | Значение | Что это и где взять |
@@ -114,7 +116,7 @@ scripts/install-openai-service.sh \
 
 **Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `clab-agent` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) + рестарт сервиса.
 
-**Встроенный веб-интерфейс (необязательно).** Кроме API, `clab` умеет сам отдавать страницу чата. Самый простой путь: при установке мастер первым делом спрашивает — «с веб-интерфейсом или классический API». Если выбрать UI, мастер **не спрашивает про движок** (модель и адрес укажешь прямо в браузере), сам сгенерит токен доступа и в конце покажет адрес страницы. Открываешь его — попадаешь на экран первого запуска, указываешь движок, сохраняешь — ядро перезапускается, и всё готово. Под капотом это флаг `clab openai-serve --ui` + переменные `CLAW_UI_TOKEN` (Bearer-токен для служебных `/ui/*`; вне loopback без него они отключены), `CLAW_UI_DATA_DIR` (диалоги/пресеты; дефолт `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (чтобы UI мог сохранять «Основное» и перезапускать ядро). По умолчанию сервис headless (только API). Полная инструкция и модель доступа — [`docs/web-ui.md`](./docs/web-ui.md).
+**Встроенный веб-интерфейс (необязательно).** Кроме API, `clab` умеет сам отдавать страницу чата. Самый простой путь: при установке мастер первым делом спрашивает — «с веб-интерфейсом или классический API». Если выбрать UI, мастер **не спрашивает про движок** (модель и адрес укажешь прямо в браузере), сам сгенерит токен доступа и в конце покажет адрес страницы. Открываешь его — попадаешь на экран первого запуска, указываешь движок, сохраняешь — ядро перезапускается, и всё готово. Неинтерактивно весь UI-режим ставится одной командой (всё после `--` уходит в установщик сервиса): `./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart`. Под капотом это флаг `clab openai-serve --ui` + переменные `CLAW_UI_TOKEN` (Bearer-токен для служебных `/ui/*`; вне loopback без него они отключены), `CLAW_UI_DATA_DIR` (диалоги/пресеты; дефолт `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (чтобы UI мог сохранять «Основное» и перезапускать ядро). По умолчанию сервис headless (только API). Полная инструкция и модель доступа — [`docs/web-ui.md`](./docs/web-ui.md).
 
 Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
 
@@ -126,7 +128,7 @@ scripts/deploy-openai-server.sh \
   --health-url http://127.0.0.1:4097/health
 ```
 
-Снести сервис целиком — парной командой `uninstall.sh` (убирает unit, wrapper, env, бинарник, а также рабочие каталоги и бэкапы; `--keep-data` оставит данные, `--dry-run` покажет план, `--yes` без вопросов):
+Снести сервис целиком — парной командой `uninstall.sh` (убирает unit, wrapper, env, бинарник, а также рабочие каталоги, UI-данные (диалоги/пресеты) и бэкапы; `--keep-data` оставит данные, `--dry-run` покажет план, `--yes` без вопросов):
 
 ```bash
 ./uninstall.sh
@@ -230,6 +232,8 @@ scripts/install-openai-service.sh \
 
 (if your backend needs a key, add `--api-key sk-...`). Everything else (service `claw-lab-openai.service`, user, paths `/opt/claw-lab`, `/etc/claw-lab`, `/var/lib/claw-lab`, bind `127.0.0.1:4097`, permission mode `read-only`) is defaulted and overridable via flags.
 
+> **Re-running is safe.** You can re-run the installer on an already-configured service: the current values from the env file (engine, bind, served-id, permission mode, key, UI token) are preserved — pass a flag only for what you want to change.
+
 The wizard asks for:
 
 | Value | What it is / where to get it |
@@ -245,7 +249,7 @@ The wizard asks for:
 
 **Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `clab-agent` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/claw-lab/openai.env`) followed by a service restart.
 
-**Built-in web UI (optional).** Besides the API, `clab` can serve a chat page itself. The easiest path: during setup the wizard first asks — "built-in web UI or classic API". Pick the UI and it **skips the backend questions** (you set the model and URL in the browser), generates an access token, and prints the page address at the end. Open it, land on the first-run setup screen, point it at your engine, save — the core restarts and you're ready. Under the hood this is `clab openai-serve --ui` plus `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints; off-loopback they are disabled without it), `CLAW_UI_DATA_DIR` (dialog/preset storage; default `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (so the UI can save "General" settings and restart the core). The service is headless (API only) by default. Full guide and auth model — [`docs/web-ui.md`](./docs/web-ui.md).
+**Built-in web UI (optional).** Besides the API, `clab` can serve a chat page itself. The easiest path: during setup the wizard first asks — "built-in web UI or classic API". Pick the UI and it **skips the backend questions** (you set the model and URL in the browser), generates an access token, and prints the page address at the end. Open it, land on the first-run setup screen, point it at your engine, save — the core restarts and you're ready. To set up the whole UI mode non-interactively, everything after `--` is forwarded to the service installer: `./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart`. Under the hood this is `clab openai-serve --ui` plus `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints; off-loopback they are disabled without it), `CLAW_UI_DATA_DIR` (dialog/preset storage; default `$HOME/.claw/ui`), `CLAW_OPENAI_ENV_FILE` (so the UI can save "General" settings and restart the core). The service is headless (API only) by default. Full guide and auth model — [`docs/web-ui.md`](./docs/web-ui.md).
 
 When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
 
@@ -257,7 +261,7 @@ scripts/deploy-openai-server.sh \
   --health-url http://127.0.0.1:4097/health
 ```
 
-To remove the service, use the counterpart command `uninstall.sh` (removes the unit, wrapper, env, binary, plus the work/sandbox dirs and backups; `--keep-data` keeps the data, `--dry-run` shows the plan, `--yes` skips prompts):
+To remove the service, use the counterpart command `uninstall.sh` (removes the unit, wrapper, env, binary, plus the work/sandbox dirs, the UI data (dialogs/presets), and backups; `--keep-data` keeps the data, `--dry-run` shows the plan, `--yes` skips prompts):
 
 ```bash
 ./uninstall.sh
