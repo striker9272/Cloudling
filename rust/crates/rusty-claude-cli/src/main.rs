@@ -37,7 +37,7 @@ use log::debug;
 
 use api::{
     detect_provider_kind, model_family_identity_for, resolve_startup_auth_source, AnthropicClient,
-    AuthSource, ContentBlockDelta, InputContentBlock, InputMessage, MessageRequest,
+    AuthSource, ContentBlockDelta, ImageUrl, InputContentBlock, InputMessage, MessageRequest,
     MessageResponse, OutputContentBlock, PromptCache, ProviderClient as ApiProviderClient,
     ProviderKind, StreamEvent as ApiStreamEvent, ToolChoice, ToolDefinition,
     ToolResultContentBlock,
@@ -9044,6 +9044,7 @@ fn render_export_text(session: &Session) -> String {
         for block in &message.blocks {
             match block {
                 ContentBlock::Text { text } => lines.push(text.clone()),
+                ContentBlock::Image { .. } => lines.push("[image]".to_string()),
                 ContentBlock::Thinking { .. } => {}
                 ContentBlock::ToolUse { id, name, input } => {
                     lines.push(format!("[tool_use id={id} name={name}] {input}"));
@@ -9235,6 +9236,7 @@ fn render_session_markdown(session: &Session, session_id: &str, session_path: &P
                         lines.push(String::new());
                     }
                 }
+                ContentBlock::Image { .. } => {}
                 ContentBlock::Thinking { .. } => {}
                 ContentBlock::ToolUse { id, name, input } => {
                     lines.push(format!(
@@ -11481,6 +11483,12 @@ fn convert_messages(messages: &[ConversationMessage]) -> Vec<InputMessage> {
                             text: output.clone(),
                         }],
                         is_error: *is_error,
+                    }),
+                    ContentBlock::Image { url } => Some(InputContentBlock::Image {
+                        image_url: ImageUrl {
+                            url: url.clone(),
+                            detail: None,
+                        },
                     }),
                 })
                 .collect::<Vec<_>>();
