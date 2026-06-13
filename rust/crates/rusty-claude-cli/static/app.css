@@ -54,6 +54,23 @@ html,body{height:100%;}
 .entry .clip:disabled:hover{background:none; color:var(--muted);}
 .attachments{display:flex; flex-wrap:wrap; gap:7px; padding:8px 8px 0;}
 .attachments:empty{display:none;}
+/* attachment chips (composer + user bubble) */
+.att-chip{display:inline-flex; align-items:center; gap:8px; max-width:230px; background:#1c1c22; border:1px solid var(--line); border-radius:12px; padding:6px 9px; font-size:12.5px; color:var(--text); position:relative;}
+.att-chip .ic{flex:0 0 auto; color:var(--muted); display:flex;}
+.att-chip .nm{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.att-chip .sz{flex:0 0 auto; color:var(--muted); font-size:11px;}
+.att-chip .rm{flex:0 0 auto; width:18px; height:18px; border-radius:50%; border:none; background:#2a2a31; color:var(--muted); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:13px; line-height:1; padding:0;}
+.att-chip .rm:hover{background:#3a3a42; color:var(--text);}
+.att-chip.img{padding:0; overflow:hidden; width:46px; height:46px; max-width:46px;}
+.att-chip.img img{width:46px; height:46px; object-fit:cover; display:block;}
+.att-chip.img .rm{position:absolute; top:2px; right:2px; width:17px; height:17px; background:rgba(0,0,0,.6);}
+.entry.dragover{border-color:var(--accent); background:#15151a;}
+/* attachments rendered inside a sent user bubble */
+.turn.u .bubble .att-row{display:flex; flex-wrap:wrap; gap:7px; margin-top:9px;}
+.turn.u .bubble .att-row:only-child{margin-top:0;}
+.turn.u .bubble .att-chip{background:#23232a;}
+.turn.u .bubble .att-chip.img{width:auto; height:auto; max-width:180px;}
+.turn.u .bubble .att-chip.img img{width:auto; height:auto; max-width:180px; max-height:200px;}
 .att{display:inline-flex; align-items:center; gap:8px; background:#1b1b20; border:1px solid var(--line); border-radius:9px; padding:5px 9px; font-size:12px; color:#cfd2d8;}
 .att .ax{cursor:pointer; color:var(--muted); font-size:14px; line-height:1;}
 .att .ax:hover{color:var(--text);}

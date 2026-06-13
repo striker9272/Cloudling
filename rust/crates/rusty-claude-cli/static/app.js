@@ -10,7 +10,8 @@
     trash:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M7 7l1 13h8l1-13"/><path d="M9 7V4h6v3"/></svg>',
     check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>',
     send:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16161a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
-    warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>'
+    warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
+    doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
   function cloud(w){ var h=Math.round(w*0.7); return '<svg class="cloud" viewBox="0 0 40 28" width="'+w+'" height="'+h+'"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="4"/></g></svg>'; }
   var RIP='<span class="rip"><span></span><span></span></span>';
@@ -197,8 +198,12 @@
   var configured = location.search.indexOf('firstrun')===-1;
 
   function actBtn(act,label){return '<button class="act" data-act="'+act+'" title="'+label+'" aria-label="'+label+'">'+IC[act]+'</button>';}
-  function userTurn(text){ var t=document.createElement('div'); t.className='turn u';
-    t.innerHTML='<div class="bubble">'+esc(text)+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('edit','Редактировать')+'</div>'; return t; }
+  /* user turn: `msg` is a string (text-only) or a convo entry {content:text, atts:[…]} */
+  function userTurn(msg){ var t=document.createElement('div'); t.className='turn u';
+    var text=(typeof msg==='string')?msg:((msg&&msg.content)||'');
+    var atts=(msg&&typeof msg==='object'&&msg.atts)?msg.atts:[];
+    var inner=(text?esc(text):'')+(atts.length?'<div class="att-row">'+atts.map(attChipHTML).join('')+'</div>':'');
+    t.innerHTML='<div class="bubble">'+inner+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('edit','Редактировать')+'</div>'; return t; }
   /* stored assistant message → turn (content may carry inline tool-call <details>) */
   function assistantTurnEl(content){
     var t=document.createElement('div'); t.className='turn a';
@@ -243,8 +248,8 @@
     uiFetch('/ui/kv/dlg_pins',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(Object.keys(dlgPins))})}).catch(function(){});
   }, 600); }
   function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
-  function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
-    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); });
+  function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return m.atts ? {role:m.role, content:m.content, atts:m.atts} : {role:m.role, content:m.content}; });
+    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m) : assistantTurnEl(m.content)); });
     var em=dlgErrs[activeId]; /* unrecovered error from a previous session → re-show the box (lives outside convo) */
     if(em!==undefined){ var et=document.createElement('div'); et.className='turn a noconv'; et.innerHTML=errboxHTML(em); attachRetry(et, dlgSend()); thread.appendChild(et); }
     refreshTaskbar(); }
@@ -609,12 +614,16 @@
     };
   }
 
-  function sendFlow(text, btn){
+  /* `msg` is a string (text only) or {content:text, atts:[…]} when files are attached */
+  function sendFlow(msg, btn){
+    var isObj=(typeof msg==='object' && msg!==null);
+    var dispText=isObj ? (msg.content||'') : msg;
+    var entry=isObj ? {role:'user', content:(msg.content||''), atts:(msg.atts||[])} : {role:'user', content:msg};
     if(viewHome.hidden===false){ /* coming from home: start a real new dialog */
       var homeEntry=document.querySelector('#view-home .entry');
       var fromRect=homeEntry?homeEntry.getBoundingClientRect():null;
       activeId=genId();
-      var title=text.slice(0,42);
+      var title=(dispText||'Вложение').slice(0,42);
       var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
@@ -624,10 +633,10 @@
       if(fromRect) dockMorph(fromRect); /* slide the composer from center down into the dock */
       var dh=viewDlg.querySelector('.dhdr'); if(dh && dh.animate){ dh.animate([{opacity:0},{opacity:1}],{duration:260, easing:'ease-out'}); }
     }
-    convo.push({role:'user', content:text});
+    convo.push(entry);
     saveActive(); /* persist now so the dialog exists even before the answer */
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-    var ut=userTurn(text); thread.appendChild(ut); stick=true; toBottom();
+    var ut=userTurn(entry); thread.appendChild(ut); stick=true; toBottom();
     if(ut.animate){ ut.animate([{opacity:0, transform:'translateY(8px)'},{opacity:1, transform:'none'}],{duration:280, easing:'cubic-bezier(.4,0,.2,1)'}); }
     generate(btn);
   }
@@ -648,15 +657,72 @@
     refreshTaskbar();
   }
 
+  /* ---------- attachments ----------
+     Accept any file. Classify into image / text / other:
+       - image  → read as data URL, shown as a preview, sent as OpenAI {type:image_url}
+       - text   → read as text, inlined into the message (the server extracts text parts)
+       - other  → name+size chip only, sent as a "[file attached … — not inlined]" note
+     The convo entry keeps the display text in `content` (string) and the attachments in
+     `atts` (with the image data URL / file text), so persistence is free (saved in the
+     transcript → survives F5) and outgoingMessages() assembles the OWUI content array. */
+  var MAX_ATT=10*1024*1024; /* soft 10 MB/file cap (base64 images bloat the request/context) */
+  var TEXT_EXT=/\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|js|jsx|mjs|cjs|ts|tsx|py|rs|go|java|c|h|cpp|hpp|cc|rb|php|sh|bash|zsh|sql|r|lua|pl|swift|kt|scala|dart|vue|svelte|tex|rst|env|gitignore|dockerfile|makefile|diff|patch)$/i;
+  function humanSize(n){ if(n==null) return ''; if(n<1024) return n+' Б'; if(n<1024*1024) return (n/1024).toFixed(n<10240?1:0)+' КБ'; return (n/1048576).toFixed(1)+' МБ'; }
+  function fileKind(f){
+    if(/^image\//.test(f.type||'')) return 'image';
+    if(/^text\//.test(f.type||'') || /(json|xml|yaml|javascript|x-sh|x-python|csv|html)/.test(f.type||'') || TEXT_EXT.test(f.name||'')) return 'text';
+    return 'file';
+  }
+  function readAsDataURL(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=rej; r.readAsDataURL(f); }); }
+  function readAsText(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=rej; r.readAsText(f); }); }
+  /* chip inner HTML shared by composer (removable) and bubble (static) */
+  function attChipInner(att){
+    if(att.kind==='image' && att.url) return '<img src="'+esc(att.url)+'" alt="'+esc(att.name||'')+'" />';
+    return '<span class="ic">'+IC.doc+'</span><span class="nm">'+esc(att.name||'файл')+'</span>'+(att.size!=null?'<span class="sz">'+humanSize(att.size)+'</span>':'');
+  }
+  function attChipHTML(att){ return '<div class="att-chip'+((att.kind==='image'&&att.url)?' img':'')+'">'+attChipInner(att)+'</div>'; }
+  function attChipEl(att, onRemove){
+    var c=document.createElement('div'); c.className='att-chip'+((att.kind==='image'&&att.url)?' img':'');
+    c.innerHTML=attChipInner(att)+'<button class="rm" type="button" title="Убрать" aria-label="Убрать">✕</button>';
+    if(onRemove) c.querySelector('.rm').addEventListener('click', onRemove);
+    return c;
+  }
+  /* staged composer attachments → convo `atts` entries (image url / text content kept) */
+  function stagedToAtts(pending){
+    return pending.map(function(p){
+      if(p.kind==='image' && p.url) return {kind:'image', name:p.name, size:p.size, url:p.url};
+      if(p.kind==='text' && typeof p.text==='string') return {kind:'text', name:p.name, size:p.size, text:p.text};
+      return {kind:'file', name:p.name, size:p.size};
+    });
+  }
+
   function wireComposer(scope){ var ta=scope.querySelector('textarea'); var btn=scope.querySelector('.send');
-    var clip=scope.querySelector('.clip'); var atts=scope.querySelector('.attachments');
-    function refresh(){ if(!btn.classList.contains('stop')) btn.classList.toggle('off', !(ta.value||'').trim() && atts.children.length===0); }
-    function trySend(){ if(btn.classList.contains('stop')) return; var v=(ta.value||'').trim(); if(!v && atts.children.length===0) return; ta.value=''; atts.innerHTML=''; refresh(); sendFlow(v||'(вложение)', btn); }
+    var clip=scope.querySelector('.clip'); var atts=scope.querySelector('.attachments'); var input=scope.querySelector('.fileinput');
+    var pending=[]; /* files staged for the next send (live data: image url / text content) */
+    function refresh(){ if(!btn.classList.contains('stop')) btn.classList.toggle('off', !(ta.value||'').trim() && pending.length===0); }
+    function renderPending(){ atts.innerHTML='';
+      pending.forEach(function(att){ atts.appendChild(attChipEl(att, function(){ var i=pending.indexOf(att); if(i>=0) pending.splice(i,1); renderPending(); refresh(); })); });
+    }
+    function addFiles(files){ Array.prototype.slice.call(files||[]).forEach(function(f){
+      if(f.size>MAX_ATT){ toast('Файл «'+f.name+'» больше 10 МБ — пропущен'); return; }
+      var att={kind:fileKind(f), name:f.name, size:f.size};
+      pending.push(att); renderPending(); refresh();
+      if(att.kind==='image'){ readAsDataURL(f).then(function(u){ att.url=u; renderPending(); }).catch(function(){ var i=pending.indexOf(att); if(i>=0){ pending.splice(i,1); renderPending(); refresh(); } toast('Не удалось прочитать «'+f.name+'»'); }); }
+      else if(att.kind==='text'){ readAsText(f).then(function(t){ att.text=t; }).catch(function(){ att.kind='file'; }); }
+    }); }
+    function trySend(){ if(btn.classList.contains('stop')) return; var v=(ta.value||'').trim(); if(!v && pending.length===0) return;
+      var msg = pending.length ? {content:v, atts:stagedToAtts(pending)} : v;
+      ta.value=''; pending=[]; renderPending(); refresh(); sendFlow(msg, btn); }
     btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ stopGen(btn); return; } trySend(); });
     ta.addEventListener('input', refresh);
     ta.addEventListener('keydown', function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); trySend(); } });
-    /* attachments not wired yet — keep the button visible but inactive */
-    if(clip){ clip.disabled=true; clip.setAttribute('aria-disabled','true'); clip.title='Вложения — скоро'; }
+    if(clip){ clip.addEventListener('click', function(){ if(input) input.click(); }); }
+    if(input){ input.addEventListener('change', function(){ addFiles(input.files); input.value=''; }); }
+    /* drag-and-drop onto the composer */
+    scope.addEventListener('dragenter', function(e){ e.preventDefault(); scope.classList.add('dragover'); });
+    scope.addEventListener('dragover', function(e){ e.preventDefault(); scope.classList.add('dragover'); });
+    scope.addEventListener('dragleave', function(e){ if(!scope.contains(e.relatedTarget)) scope.classList.remove('dragover'); });
+    scope.addEventListener('drop', function(e){ e.preventDefault(); scope.classList.remove('dragover'); if(e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files); });
     refresh();
   }
   wireComposer(document.querySelector('#view-home .entry'));
@@ -714,25 +780,34 @@
   /* edit a user message: inline editor → on save, truncate after it and regenerate
      (mirrors how OWUI/real chat re-runs from an edited turn) */
   function editUserTurn(turn){ if(generating) return;
-    var bubble=turn.querySelector('.bubble'); if(!bubble) return;
-    var orig=bubble.textContent, rowacts=turn.querySelector('.row-acts');
+    var idx=turnIndex(turn); if(idx<0) return;
+    var entry=convo[idx]; var bubble=turn.querySelector('.bubble'); if(!entry || !bubble) return;
+    var orig=(typeof entry.content==='string')?entry.content:'';
+    var rowacts=turn.querySelector('.row-acts');
     var ta=document.createElement('textarea'); ta.className='editbox'; ta.value=orig;
     var acts=document.createElement('div'); acts.className='editacts';
     acts.innerHTML='<button class="ecancel" type="button">Отмена</button><button class="esave" type="button">Сохранить и отправить</button>';
-    bubble.replaceWith(ta); if(rowacts) rowacts.style.display='none'; turn.appendChild(acts);
+    /* hide the bubble (it holds the attachment chips too) instead of replacing it,
+       so Cancel restores text + attachments intact */
+    bubble.style.display='none'; if(rowacts) rowacts.style.display='none';
+    turn.appendChild(ta); turn.appendChild(acts);
     ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
-    function restore(text){ var nb=document.createElement('div'); nb.className='bubble'; nb.textContent=text; ta.replaceWith(nb); acts.remove(); if(rowacts) rowacts.style.display=''; }
-    acts.querySelector('.ecancel').onclick=function(){ restore(orig); };
-    acts.querySelector('.esave').onclick=function(){ var nv=(ta.value||'').trim()||orig; restore(nv);
-      var idx=turnIndex(turn); if(idx<0) return;
-      /* keep this (edited) user turn, drop everything after; rewrite history from here */
-      removeTurnsFrom(turn, false);
-      convo=convo.slice(0, idx); convo.push({role:'user', content:nv}); refreshTaskbar();
+    function cancel(){ ta.remove(); acts.remove(); bubble.style.display=''; if(rowacts) rowacts.style.display=''; }
+    function save(){ var nv=(ta.value||'').trim(); var keepAtts=entry.atts;
+      if(!nv && (!keepAtts || !keepAtts.length)) nv=orig;
+      var i=turnIndex(turn); if(i<0){ cancel(); return; }
+      /* keep the edited user turn (text + its attachments), drop everything after, rerun */
+      removeTurnsFrom(turn, true);
+      convo=convo.slice(0, i); convo.push((keepAtts&&keepAtts.length) ? {role:'user', content:nv, atts:keepAtts} : {role:'user', content:nv}); refreshTaskbar();
+      var fresh=userTurn(convo[i]); thread.appendChild(fresh);
+      if(fresh.animate){ fresh.animate([{opacity:0, transform:'translateY(8px)'},{opacity:1, transform:'none'}],{duration:240, easing:'cubic-bezier(.4,0,.2,1)'}); }
       var btn=dlgSend(); if(!btn) return;
       generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
-      generate(btn);
-    };
-    ta.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); acts.querySelector('.esave').click(); } else if(e.key==='Escape'){ e.preventDefault(); restore(orig); } });
+      stick=true; toBottom(); generate(btn);
+    }
+    acts.querySelector('.ecancel').onclick=cancel;
+    acts.querySelector('.esave').onclick=save;
+    ta.addEventListener('keydown', function(e){ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); save(); } else if(e.key==='Escape'){ e.preventDefault(); cancel(); } });
   }
   thread.addEventListener('click', function(e){
     var cp=e.target.closest('.code .copy'); if(cp){ copyText(cp.closest('.code').querySelector('pre').textContent, cp); return; }
@@ -963,10 +1038,28 @@
   function activePresetPrompt(){ for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId) return presets[i].prompt||''; } return ''; }
   /* what we actually send: active preset's prompt prepended as a system message (or just convo) */
   function stripReasoning(t){ return (t||'').replace(/<details type="reasoning"[\s\S]*?<\/details>/g,'').replace(/\n{3,}/g,'\n\n'); }
+  /* assemble the OWUI/OpenAI content array for a user message that carries attachments:
+     text + inlined text files + {type:image_url} + a note for non-inlined binaries.
+     (text-only messages stay plain strings.) */
+  function userContentForBackend(m){
+    if(!m.atts || !m.atts.length) return m.content;
+    var parts=[];
+    if(m.content) parts.push({type:'text', text:m.content});
+    m.atts.forEach(function(a){
+      if(a.kind==='image' && a.url) parts.push({type:'image_url', image_url:{url:a.url}});
+      else if(a.kind==='text' && typeof a.text==='string') parts.push({type:'text', text:'Файл «'+a.name+'»:\n```\n'+a.text+'\n```'});
+      else parts.push({type:'text', text:'[вложен файл '+a.name+', '+humanSize(a.size)+' — содержимое не передаётся]'});
+    });
+    if(!parts.length) parts.push({type:'text', text:''});
+    return parts;
+  }
   function outgoingMessages(){
     var sys=activePresetPrompt();
-    /* reasoning blocks are display-only — drop them from resent history so context stays lean */
-    var hist=convo.map(function(m){ return m.role==='assistant' ? {role:m.role, content:stripReasoning(m.content)} : m; });
+    /* reasoning blocks are display-only — drop them from resent history so context stays lean;
+       user messages may carry attachments → expand to a content array (UI-only fields dropped) */
+    var hist=convo.map(function(m){ return m.role==='assistant'
+      ? {role:m.role, content:stripReasoning(m.content)}
+      : {role:m.role, content:userContentForBackend(m)}; });
     return sys ? [{role:'system', content:sys}].concat(hist) : hist;
   }
 
