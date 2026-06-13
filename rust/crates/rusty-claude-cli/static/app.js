@@ -144,7 +144,7 @@
           /* localStorage blocked (private mode / site-data settings): work with the
              token in memory for this page; it will be asked again after a reload */
           uiToken=v; tokenGateShown=false; scrim.hidden=true;
-          refreshSidebar(); loadSettings(); loadDlgToks(); loadPresets();
+          refreshSidebar(); loadSettings(); loadDlgToks(); loadDlgErrs(); loadPresets();
         }).catch(function(){ fail('Сервер недоступен.'); });
       };
       ok.addEventListener('click', submit);
@@ -218,9 +218,26 @@
   function saveDlgToks(){ clearTimeout(dlgToksTimer); dlgToksTimer=setTimeout(function(){
     uiFetch('/ui/kv/dlg_toks',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(dlgToks)})}).catch(function(){});
   }, 800); }
+  /* Last unrecovered error message per dialog id, persisted as one ui_kv JSON map so the
+     error box survives a page reload. Deliberately kept OUT of `convo`: it must never be
+     resent to the backend, so continuing the dialog after the backend recovers can't be
+     polluted by a fake assistant turn carrying the error text. */
+  var dlgErrs={}, dlgErrsTimer=null;
+  function loadDlgErrs(){ pFetchJSON('/ui/kv/dlg_errs').then(function(d){
+    if(!d||!d.value) return;
+    try{ var m=JSON.parse(d.value); if(m&&typeof m==='object'){ Object.keys(m).forEach(function(k){ if(!(k in dlgErrs)) dlgErrs[k]=m[k]; }); } }catch(e){}
+  }); }
+  function saveDlgErrs(){ clearTimeout(dlgErrsTimer); dlgErrsTimer=setTimeout(function(){
+    uiFetch('/ui/kv/dlg_errs',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(dlgErrs)})}).catch(function(){});
+  }, 800); }
+  function setDlgErr(msg){ if(!activeId) return; dlgErrs[activeId]=String(msg||''); saveDlgErrs(); }
+  function clearDlgErr(){ if(activeId && (activeId in dlgErrs)){ delete dlgErrs[activeId]; saveDlgErrs(); } }
   function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
   function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return {role:m.role, content:m.content}; });
-    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); }); refreshTaskbar(); }
+    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m.content) : assistantTurnEl(m.content)); });
+    var em=dlgErrs[activeId]; /* unrecovered error from a previous session → re-show the box (lives outside convo) */
+    if(em!==undefined){ var et=document.createElement('div'); et.className='turn a noconv'; et.innerHTML=errboxHTML(em); attachRetry(et, dlgSend()); thread.appendChild(et); }
+    refreshTaskbar(); }
 
   function fmtDate(ms){ if(!ms) return ''; var d=new Date(ms), now=new Date();
     if(d.toDateString()===now.toDateString()) return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2);
@@ -462,6 +479,10 @@
 
   /* Tasks #7–#8: stream the answer and render inline tool-call blocks. */
   function generate(btn){
+    /* a fresh attempt (retry or a new message) supersedes any stored error for this dialog,
+       and any stale error boxes left in the thread are dropped so they don't pile up */
+    clearDlgErr();
+    thread.querySelectorAll('.turn').forEach(function(t){ if(t.querySelector('.errbox')) t.remove(); });
     var turn=document.createElement('div'); turn.className='turn a';
     turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
@@ -472,6 +493,7 @@
        `error` field. Show the error box with the reason instead of a blank turn. */
     function showError(msg){
       errored=true; liveAcc='';
+      setDlgErr(msg); /* persist so the box survives reload (stored outside convo) */
       turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
       turn.innerHTML=errboxHTML(msg); attachRetry(turn, btn);
       finishGen(btn); maybeScroll();
@@ -655,7 +677,7 @@
   var pendingDel=null, confirmScrim=document.getElementById('confirmScrim');
   function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent='«'+item.querySelector('.t').textContent.trim()+'» будет удалён без возможности восстановления.'; confirmScrim.hidden=false; }
   function closeConfirm(){ confirmScrim.hidden=true; pendingDel=null; }
-  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
+  document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } if(id in dlgErrs){ delete dlgErrs[id]; saveDlgErrs(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
   document.getElementById('confirmCancel').addEventListener('click', closeConfirm);
   confirmScrim.addEventListener('click', function(e){ if(e.target===confirmScrim) closeConfirm(); });
 
@@ -992,5 +1014,6 @@
   refreshSidebar();
   loadSettings();
   loadDlgToks();
+  loadDlgErrs();
   if(configured){ newDialog(); } else { showSetup(); }
 })();
