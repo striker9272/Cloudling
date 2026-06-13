@@ -456,7 +456,7 @@ let client = build_http_client_with(&config).expect("proxy client");
 
 ## Built-in web UI
 
-`clab openai-serve --ui` serves a browser chat page on the same port as the API (the service is headless by default). Enable it with the `--ui` flag and configure it via `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints), `CLAW_UI_DATA_DIR` (dialog/preset storage), and `CLAW_OPENAI_ENV_FILE` (so the UI can save engine settings and restart the core). See [`docs/web-ui.md`](./docs/web-ui.md) for the full guide, all environment variables, and the `/ui/*` auth model.
+`clab openai-serve --ui` serves a browser chat page on the same port as the API (the service is headless by default). The easiest way to enable it is the service installer's **UI-first mode**: choose the built-in web UI at the first wizard prompt and it skips the backend questions, generates a `CLAW_UI_TOKEN`, sets the UI env vars, and prints the page address + token — you then point clab at your engine in the browser. Manually, pass the `--ui` flag and set `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints), `CLAW_UI_DATA_DIR` (dialog/preset storage), and `CLAW_OPENAI_ENV_FILE` (so the UI can save engine settings and restart the core). See [`docs/web-ui.md`](./docs/web-ui.md) for the full guide, all environment variables, and the `/ui/*` auth model.
 
 ## Backend timeouts and retries
 

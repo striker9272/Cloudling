@@ -41,6 +41,11 @@ DRY_RUN=0
 UNINSTALL=0
 ASSUME_YES=0
 KEEP_DATA=0
+# Built-in web UI mode: serve the chat page and let the user configure the engine
+# in the browser, so the wizard skips all backend questions. All overridable.
+UI_MODE=0
+UI_TOKEN=""
+UI_DATA_DIR="/var/lib/claw-lab/ui"
 
 usage() {
   cat <<'USAGE'
@@ -52,6 +57,11 @@ Install (no required flags on a terminal -> interactive wizard):
   --base-url URL              OpenAI-compatible backend base URL
   --backend-model MODEL       backend/adaptor model id sent to the provider
   --served-model-id MODEL     model id exposed to clients. Default: clab-agent.
+
+Built-in web UI mode (configure the engine in the browser, not here):
+  --ui                        enable UI mode: serve the chat page; skip backend questions.
+  --ui-token VALUE            CLAW_UI_TOKEN guarding /ui/*. Auto-generated if omitted.
+  --ui-data-dir PATH          UI dialog/preset storage. Default: /var/lib/claw-lab/ui
 
 Common options:
   --service NAME              systemd service name. Default: claw-lab-openai.service
@@ -128,6 +138,11 @@ while [ "$#" -gt 0 ]; do
     --dry-run) DRY_RUN=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --keep-data) KEEP_DATA=1; shift ;;
+    --ui) UI_MODE=1; shift ;;
+    --ui-token) UI_TOKEN="${2:-}"; shift 2 ;;
+    --ui-token=*) UI_TOKEN="${1#*=}"; shift ;;
+    --ui-data-dir) UI_DATA_DIR="${2:-}"; shift 2 ;;
+    --ui-data-dir=*) UI_DATA_DIR="${1#*=}"; shift ;;
     -y|--yes) ASSUME_YES=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "FAIL: unknown argument: $1" >&2; usage; exit 2 ;;
@@ -165,6 +180,16 @@ existing_var() {
   local key="$1"
   if [ -f "$ENV_FILE" ]; then
     grep -E "^${key}=" "$ENV_FILE" | tail -1 | cut -d= -f2- || true
+  fi
+}
+
+gen_token() {  # print a random hex token for CLAW_UI_TOKEN
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 24
+  elif [ -r /dev/urandom ]; then
+    head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
+  else
+    fail "cannot generate a UI token: install openssl or pass --ui-token"
   fi
 }
 
@@ -264,6 +289,37 @@ ask() {  # ask "Prompt" "default" -> echoes the answer (default if empty)
 
 run_wizard() {
   echo "=== Claw Lab — service setup ==="
+
+  local mode
+  read -r -p 'Setup type: [1] built-in web UI (set the engine in the browser), [2] classic API (configure here) [1]: ' mode
+  case "${mode:-1}" in
+    2) UI_MODE=0 ;;
+    *) UI_MODE=1 ;;
+  esac
+
+  if [ "$UI_MODE" = "1" ]; then
+    echo
+    echo "Built-in web UI: the model/engine is configured later in the browser."
+    echo "Bind to 127.0.0.1 for local-only access; to open from another computer use"
+    echo "0.0.0.0:<port> (or this machine's LAN address)."
+    BIND="$(ask 'Bind address' "$BIND")"
+    SERVED_MODEL_ID="$(ask 'Served model id (shown to clients)' "$SERVED_MODEL_ID")"
+    local start_reply
+    read -r -p "Start now and enable on boot? [Y/n]: " start_reply
+    case "${start_reply:-Y}" in y|Y) ENABLE_SERVICE=1; RESTART_SERVICE=1 ;; esac
+    echo
+    echo "--- Summary ---"
+    echo "  mode:            built-in web UI (engine configured in the browser)"
+    echo "  served model id: $SERVED_MODEL_ID"
+    echo "  bind:            $BIND"
+    echo "  permission mode: $PERMISSION_MODE (default; change later in the UI)"
+    echo "  service:         $SERVICE_NAME (user=$USER_NAME)"
+    echo "  paths:           bin=$RUNTIME_BIN, env=$ENV_FILE, ui-data=$UI_DATA_DIR"
+    echo
+    confirm "Proceed?"
+    return 0
+  fi
+
   echo "Press Enter to accept the [default]. You only need your backend + a served model id."
   echo
 
@@ -308,7 +364,7 @@ run_wizard() {
   confirm "Proceed?"
 }
 
-if [ -z "$OPENAI_BASE_URL" ] && [ -t 0 ]; then
+if [ "$UI_MODE" != "1" ] && [ -z "$OPENAI_BASE_URL" ] && [ -t 0 ]; then
   run_wizard
 fi
 
@@ -316,14 +372,18 @@ fi
 # Install mode
 # ---------------------------------------------------------------------------
 
-need "--base-url" "$OPENAI_BASE_URL"
-need "--backend-model" "$BACKEND_MODEL"
+if [ "$UI_MODE" != "1" ]; then
+  need "--base-url" "$OPENAI_BASE_URL"
+  need "--backend-model" "$BACKEND_MODEL"
+fi
 need "--served-model-id" "$SERVED_MODEL_ID"
 
-case "$OPENAI_BASE_URL" in
-  http://?*|https://?*) ;;
-  *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
-esac
+if [ "$UI_MODE" != "1" ]; then
+  case "$OPENAI_BASE_URL" in
+    http://?*|https://?*) ;;
+    *) fail "--base-url must start with http:// or https:// and include a host (got: $OPENAI_BASE_URL)" ;;
+  esac
+fi
 
 if [ -n "$RUNTIME_BIN_SRC" ] && [ ! -f "$RUNTIME_BIN_SRC" ]; then
   fail "--runtime-bin-src not found: $RUNTIME_BIN_SRC"
@@ -341,6 +401,12 @@ if [ -z "$WEBSEARCH_URL" ]; then
   WEBSEARCH_URL="$(existing_var CLAWD_WEB_SEARCH_BASE_URL)"
 fi
 
+# UI mode: reuse an existing token on re-runs, otherwise generate one.
+if [ "$UI_MODE" = "1" ] && [ -z "$UI_TOKEN" ]; then
+  UI_TOKEN="$(existing_var CLAW_UI_TOKEN)"
+  [ -n "$UI_TOKEN" ] || UI_TOKEN="$(gen_token)"
+fi
+
 UNIT_PATH="/etc/systemd/system/$SERVICE_NAME"
 TMP_ENV="$(mktemp)"
 TMP_WRAPPER="$(mktemp)"
@@ -355,8 +421,14 @@ trap cleanup EXIT
   if [ -n "$API_KEY" ]; then
     printf 'OPENAI_API_KEY=%s\n' "$API_KEY"
   fi
-  printf 'OPENAI_BASE_URL=%s\n' "$OPENAI_BASE_URL"
-  printf 'OPENAI_MODEL=%s\n' "$BACKEND_MODEL"
+  # In UI mode the engine may be unset here and configured in the browser later;
+  # only write these when present so the UI's first-run setup screen triggers.
+  if [ -n "$OPENAI_BASE_URL" ]; then
+    printf 'OPENAI_BASE_URL=%s\n' "$OPENAI_BASE_URL"
+  fi
+  if [ -n "$BACKEND_MODEL" ]; then
+    printf 'OPENAI_MODEL=%s\n' "$BACKEND_MODEL"
+  fi
   printf 'CLAW_SERVED_MODEL_ID=%s\n' "$SERVED_MODEL_ID"
   printf 'CLAW_OPENAI_BIND=%s\n' "$BIND"
   printf 'CLAW_PERMISSION_MODE=%s\n' "$PERMISSION_MODE"
@@ -366,11 +438,35 @@ trap cleanup EXIT
   if [ -n "$WEBSEARCH_URL" ]; then
     printf 'CLAWD_WEB_SEARCH_BASE_URL=%s\n' "$WEBSEARCH_URL"
   fi
+  if [ "$UI_MODE" = "1" ]; then
+    printf 'CLAW_OPENAI_UI=1\n'
+    printf 'CLAW_UI_DATA_DIR=%s\n' "$UI_DATA_DIR"
+    printf 'CLAW_OPENAI_ENV_FILE=%s\n' "$ENV_FILE"
+    if [ -n "$UI_TOKEN" ]; then
+      printf 'CLAW_UI_TOKEN=%s\n' "$UI_TOKEN"
+    fi
+  fi
 } > "$TMP_ENV"
 
 cat > "$TMP_WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+
+BIND="\${CLAW_OPENAI_BIND:-127.0.0.1:4097}"
+PERMISSION_MODE="\${CLAW_PERMISSION_MODE:-read-only}"
+WORKDIR="\${CLAW_WORKING_DIRECTORY:-$WORKDIR}"
+
+if [ "\${CLAW_OPENAI_UI:-0}" = "1" ]; then
+  # UI mode: the engine can be set in the browser, so no backend is required to start.
+  if [ ! -d "\$WORKDIR" ]; then
+    echo "missing CLAW_WORKING_DIRECTORY: \$WORKDIR" >&2
+    exit 66
+  fi
+  cd "\$WORKDIR"
+  exec "$RUNTIME_BIN" \\
+    --permission-mode "\$PERMISSION_MODE" \\
+    openai-serve --bind "\$BIND" --ui
+fi
 
 if [ -z "\${OPENAI_MODEL:-}" ]; then
   echo "missing OPENAI_MODEL" >&2
@@ -381,10 +477,6 @@ if [ -z "\${OPENAI_BASE_URL:-}" ]; then
   echo "missing OPENAI_BASE_URL" >&2
   exit 64
 fi
-
-BIND="\${CLAW_OPENAI_BIND:-127.0.0.1:4097}"
-PERMISSION_MODE="\${CLAW_PERMISSION_MODE:-read-only}"
-WORKDIR="\${CLAW_WORKING_DIRECTORY:-$WORKDIR}"
 
 if [ ! -d "\$WORKDIR" ]; then
   echo "missing CLAW_WORKING_DIRECTORY: \$WORKDIR" >&2
@@ -397,6 +489,12 @@ exec "$RUNTIME_BIN" \\
   --permission-mode "\$PERMISSION_MODE" \\
   openai-serve --bind "\$BIND"
 EOF
+
+# UI "save & restart" exits 0 deliberately; only Restart=always brings it back up.
+RESTART_POLICY="on-failure"
+if [ "$UI_MODE" = "1" ]; then
+  RESTART_POLICY="always"
+fi
 
 cat > "$TMP_UNIT" <<EOF
 [Unit]
@@ -411,7 +509,7 @@ Group=$GROUP_NAME
 WorkingDirectory=$WORKDIR
 EnvironmentFile=$ENV_FILE
 ExecStart=$WRAPPER_PATH
-Restart=on-failure
+Restart=$RESTART_POLICY
 RestartSec=5
 
 [Install]
@@ -435,6 +533,11 @@ echo "  backend:      $BACKEND_MODEL"
 echo "  served-id:    $SERVED_MODEL_ID"
 echo "  permission:   $PERMISSION_MODE"
 echo "  websearch:    ${WEBSEARCH_URL:-<none>}"
+echo "  mode:         $([ "$UI_MODE" = "1" ] && echo 'built-in web UI' || echo 'classic API')"
+if [ "$UI_MODE" = "1" ]; then
+  echo "  ui-data-dir:  $UI_DATA_DIR"
+  echo "  ui-token:     <set; shown after install>"
+fi
 echo "  enable:       $ENABLE_SERVICE"
 echo "  restart:      $RESTART_SERVICE"
 echo "  dry-run:      $DRY_RUN"
@@ -468,7 +571,18 @@ run "${SUDO[@]}" mkdir -p "$(dirname "$ENV_FILE")" "$(dirname "$WRAPPER_PATH")" 
 run "${SUDO[@]}" chown "$USER_NAME:$GROUP_NAME" "$WORKDIR" "$SANDBOX_DIR" "$TMPDIR_VALUE"
 run "${SUDO[@]}" chmod 755 "$WORKDIR" "$SANDBOX_DIR" "$TMPDIR_VALUE"
 
-run "${SUDO[@]}" install -m 0640 -o root -g "$GROUP_NAME" "$TMP_ENV" "$ENV_FILE"
+if [ "$UI_MODE" = "1" ]; then
+  run "${SUDO[@]}" mkdir -p "$UI_DATA_DIR"
+  run "${SUDO[@]}" chown "$USER_NAME:$GROUP_NAME" "$UI_DATA_DIR"
+  run "${SUDO[@]}" chmod 755 "$UI_DATA_DIR"
+fi
+
+# UI "save & restart" rewrites the env file as the service user → it needs group write.
+ENV_MODE=0640
+if [ "$UI_MODE" = "1" ]; then
+  ENV_MODE=0660
+fi
+run "${SUDO[@]}" install -m "$ENV_MODE" -o root -g "$GROUP_NAME" "$TMP_ENV" "$ENV_FILE"
 run "${SUDO[@]}" install -m 0755 -o root -g root "$TMP_WRAPPER" "$WRAPPER_PATH"
 run "${SUDO[@]}" install -m 0644 -o root -g root "$TMP_UNIT" "$UNIT_PATH"
 
@@ -491,6 +605,18 @@ fi
 
 echo
 echo "Install complete."
+if [ "$UI_MODE" = "1" ]; then
+  ui_host="$BIND"
+  case "$BIND" in
+    0.0.0.0:*|"[::]:"*|"*:"*) ui_host="<this-machine-address>:${BIND##*:}" ;;
+  esac
+  echo
+  echo "Built-in web UI is enabled."
+  echo "  Open:      http://$ui_host/"
+  echo "  UI token:  $UI_TOKEN"
+  echo "  Enter the token in the browser, then set your engine (model + base URL) in the"
+  echo "  UI's General settings — saving there restarts the service with your model."
+fi
 echo "Verify:"
 echo "  systemctl status $SERVICE_NAME --no-pager"
 echo "  systemctl cat $SERVICE_NAME"
