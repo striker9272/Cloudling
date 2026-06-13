@@ -860,7 +860,7 @@
   function mcpRow(s){
     var d=document.createElement('div'); d.className='mcpsrv';
     d.innerHTML=
-      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">Имя сервера</div><input class="m-name" placeholder="например, kora" /><button class="m-del" type="button" title="Удалить сервер" aria-label="Удалить сервер">✕</button></div>'+
+      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">Имя сервера</div><input class="m-name" placeholder="например, filesystem" /><button class="m-del" type="button" title="Удалить сервер" aria-label="Удалить сервер">✕</button></div>'+
       '<div class="fld"><div class="lab">Команда</div><input class="m-cmd" placeholder="python3" /></div>'+
       '<div class="fld"><div class="lab">Аргументы — по одному на строку</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
       '<div class="fld"><div class="lab">Фрейминг <span class="env">framing</span></div><select class="m-framing"><option value="newline">стандартный MCP (newline)</option><option value="content-length">legacy (content-length)</option></select></div>'+
@@ -1116,11 +1116,17 @@
   }
   loadPresets();
 
-  /* first run → setup screen; otherwise land on home (new dialog) */
+  /* unconfigured engine (or ?firstrun) → setup screen; otherwise land on home.
+     Decide after settings load so an empty OPENAI_BASE_URL routes a fresh instance
+     to the guided setup instead of a dead-end home screen. */
   refreshSidebar();
-  loadSettings();
   loadDlgToks();
   loadDlgErrs();
   loadDlgPins();
-  if(configured){ newDialog(); } else { showSetup(); }
+  loadSettings().then(function(){
+    var u=document.querySelector('.drawer.right [data-key="OPENAI_BASE_URL"]');
+    var hasEngine=!!(u && (u.value||'').trim());
+    configured = hasEngine && (location.search.indexOf('firstrun')===-1);
+    if(configured){ newDialog(); } else { showSetup(); }
+  });
 })();
