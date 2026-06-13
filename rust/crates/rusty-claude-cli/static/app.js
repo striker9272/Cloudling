@@ -353,7 +353,7 @@
   function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off'); btn.innerHTML='<span class="sq"></span>'; btn.title='Остановить'; } else { btn.classList.remove('stop'); btn.innerHTML=IC.send; btn.title='Отправить'; var ta=btn.closest('.entry').querySelector('textarea'); btn.classList.toggle('off', !(ta.value||'').trim()); } }
   function clearTimers(){ genTimers.forEach(function(t){clearTimeout(t);clearInterval(t);}); genTimers=[]; }
 
-  function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); }
+  function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); if(pendingLiveCancel){ pendingLiveCancel(); pendingLiveCancel=null; } }
 
   function errboxHTML(msg){ var detail = msg ? esc(String(msg)) : 'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.'; return '<div class="errbox"><div class="ehead">'+IC.warn+'Не удалось получить ответ</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>'; }
 
@@ -361,7 +361,7 @@
      The page is the client: it holds the dialog history and re-sends it every turn
      (clab is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
      convo entry, so we can rewind both together on regenerate / edit. */
-  var convo = [], currentAbort = null, liveAcc = '';
+  var convo = [], currentAbort = null, liveAcc = '', pendingLiveCancel = null;
   /* Invariant: every *real* `.turn` maps 1:1 onto a `convo` entry. Error boxes are
      marked `.noconv` (they have no history entry) and are excluded from index math,
      so regenerate/edit slice `convo` at the right spot even after a failed turn. */
@@ -508,6 +508,19 @@
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false;
     liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
+    /* Coalesce the progressive markdown re-render to one per animation frame. md() reparses
+       the whole uncommitted tail, so calling it on every token is O(n^2) on long answers;
+       rAF batches it without changing the output (finalize() does the authoritative render). */
+    var liveRaf=0;
+    function renderLiveTail(){ liveRaf=0; if(!liveBox) return;
+      liveBox.innerHTML=md(acc.slice(committed));
+      (liveBox.lastElementChild || liveBox).appendChild(caretEl);
+      maybeScroll();
+    }
+    function scheduleLiveTail(){ if(liveRaf) return;
+      liveRaf=(window.requestAnimationFrame||function(f){return setTimeout(f,16);})(renderLiveTail);
+    }
+    pendingLiveCancel=function(){ if(liveRaf){ (window.cancelAnimationFrame||clearTimeout)(liveRaf); liveRaf=0; } };
     /* Backend error mid-stream (engine down / token limit): clab sends a chunk with an
        `error` field. Show the error box with the reason instead of a blank turn. */
     function showError(msg){
@@ -538,9 +551,7 @@
         committed=m.index+m[0].length;
       }
       if(todoTouched) refreshTaskbar();
-      liveBox.innerHTML=md(acc.slice(committed));            /* progressive markdown */
-      (liveBox.lastElementChild || liveBox).appendChild(caretEl);  /* caret at end of last line */
-      maybeScroll();
+      scheduleLiveTail();  /* progressive markdown, coalesced to one render per frame */
     }
     function finalize(){
       if(errored) return; /* error box already shown — don't overwrite with an empty turn */
