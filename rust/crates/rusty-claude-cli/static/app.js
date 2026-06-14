@@ -862,10 +862,10 @@
     if(!engineUrlValid()){ saveError(); return; }
     var btn=this, o=btn.innerHTML; document.getElementById('saveMsg').hidden=true; btn.disabled=true;
     var body={}; settingsFields().forEach(function(el){ body[el.getAttribute('data-key')]=el.value||''; });
-    btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Перезапуск ядра…</span>';
+    btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Сохранение…</span>';
     uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ waitForRestart(btn,o); })
+      .then(function(){ btn.innerHTML=IC.check+' Готово'; loadSettings(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
   });
 

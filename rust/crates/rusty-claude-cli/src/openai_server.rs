@@ -28,12 +28,14 @@ use ui::{
     ui_title,
 };
 
-#[derive(Clone)]
 pub(crate) struct OpenAiServerState {
-    backend_model: String,
-    served_model_id: String,
+    // Engine model, served id, and permission mode are mutable behind locks so the UI
+    // "Save" applies live without a process restart (see `apply_settings`). The chat
+    // path reads them per request via the accessor methods below.
+    backend_model: std::sync::RwLock<String>,
+    served_model_id: std::sync::RwLock<String>,
     allowed_tools: Option<crate::AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_mode: std::sync::RwLock<PermissionMode>,
     /// Dialog persistence for the built-in UI. `Some` only when `--ui` is on and the
     /// store opened successfully; the chat path never touches it.
     dialog_store: Option<Arc<crate::dialog_store::DialogStore>>,
@@ -43,6 +45,95 @@ pub(crate) struct OpenAiServerState {
     /// Whether the listen address is loopback. Decides the no-token default: open on
     /// localhost (dev convenience), disabled anywhere else (fail closed).
     bind_is_loopback: bool,
+}
+
+impl OpenAiServerState {
+    pub(crate) fn backend_model(&self) -> String {
+        self.backend_model
+            .read()
+            .expect("backend_model lock poisoned")
+            .clone()
+    }
+
+    pub(crate) fn served_model_id(&self) -> String {
+        self.served_model_id
+            .read()
+            .expect("served_model_id lock poisoned")
+            .clone()
+    }
+
+    pub(crate) fn permission_mode(&self) -> PermissionMode {
+        *self
+            .permission_mode
+            .read()
+            .expect("permission_mode lock poisoned")
+    }
+
+    /// Apply edited engine settings to the live state (no restart). `OPENAI_BASE_URL`,
+    /// `OPENAI_API_KEY`, and `CLAWD_WEB_SEARCH_BASE_URL` are read from the process
+    /// environment per request, so the caller sets those via `std::env::set_var`; the
+    /// model, served id, and permission mode are held here and updated in place.
+    pub(crate) fn apply_settings(&self, updates: &std::collections::HashMap<String, String>) {
+        if let Some(model) = updates.get("OPENAI_MODEL") {
+            *self.backend_model.write().expect("backend_model lock poisoned") = model.clone();
+        }
+        let backend = self.backend_model();
+        let served =
+            served_model_id_from_value(updates.get("CLAW_SERVED_MODEL_ID").cloned(), &backend);
+        *self
+            .served_model_id
+            .write()
+            .expect("served_model_id lock poisoned") = served;
+        if let Some(label) = updates
+            .get("CLAW_PERMISSION_MODE")
+            .and_then(|value| crate::normalize_permission_mode(value))
+        {
+            *self
+                .permission_mode
+                .write()
+                .expect("permission_mode lock poisoned") = crate::permission_mode_from_label(label);
+        }
+    }
+}
+
+/// Path to the env file that persists engine settings. Honors `CLAW_OPENAI_ENV_FILE`
+/// (set by the Linux service installer); otherwise defaults to a per-user location in
+/// the config home so saving works on a plain manual launch (e.g. native Windows),
+/// without any installer. Portable — no hardcoded absolute paths.
+pub(super) fn resolve_openai_env_file() -> std::path::PathBuf {
+    if let Ok(path) = std::env::var("CLAW_OPENAI_ENV_FILE") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return std::path::PathBuf::from(trimmed);
+        }
+    }
+    runtime::default_config_home().join("openai.env")
+}
+
+/// Read `KEY=VALUE` lines from the env file into the process environment, skipping keys
+/// already set (so an externally-provided environment — e.g. systemd `EnvironmentFile`
+/// or shell exports — always wins). Missing/unreadable file is a no-op.
+pub(super) fn load_env_file_into_process(path: &std::path::Path) {
+    let Ok(contents) = std::fs::read_to_string(path) else {
+        return;
+    };
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(eq) = line.find('=') else {
+            continue;
+        };
+        let key = line[..eq].trim();
+        let value = line[eq + 1..].trim();
+        if key.is_empty() {
+            continue;
+        }
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -87,6 +178,19 @@ async fn serve(
     ui: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = bind.parse()?;
+    // Load persisted engine settings from the env file into the process environment.
+    // This is the role systemd's `EnvironmentFile` plays on Linux; doing it in-binary
+    // makes a native Windows / manual launch pick up settings saved from the UI. Vars
+    // already present in the environment are never overwritten.
+    load_env_file_into_process(&resolve_openai_env_file());
+    // With `--ui` the server may start unconfigured. If no model was passed on the CLI
+    // but one was persisted (now in the environment), adopt it so a relaunch remembers
+    // the engine without a restart wizard.
+    let model = if model.trim().is_empty() {
+        std::env::var("OPENAI_MODEL").unwrap_or_default()
+    } else {
+        model
+    };
     let served_model_id =
         served_model_id_from_value(std::env::var("CLAW_SERVED_MODEL_ID").ok(), &model);
     // Dialog persistence is opt-in with the UI; a failure to open it disables storage
@@ -115,10 +219,10 @@ async fn serve(
     }
 
     let state = Arc::new(OpenAiServerState {
-        backend_model: model,
-        served_model_id,
+        backend_model: std::sync::RwLock::new(model),
+        served_model_id: std::sync::RwLock::new(served_model_id),
         allowed_tools,
-        permission_mode,
+        permission_mode: std::sync::RwLock::new(permission_mode),
         dialog_store,
         ui_token,
         bind_is_loopback: addr.ip().is_loopback(),
@@ -176,7 +280,7 @@ async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
     Json(HealthResponse {
         ok: true,
         service: "claw-openai-serve",
-        model: state.served_model_id.clone(),
+        model: state.served_model_id(),
     })
 }
 
@@ -184,7 +288,7 @@ async fn models(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
     Json(ModelListResponse {
         object: "list",
         data: vec![ModelObject {
-            id: state.served_model_id.clone(),
+            id: state.served_model_id(),
             object: "model",
             owned_by: "claw-openai-serve",
         }],

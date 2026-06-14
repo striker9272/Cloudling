@@ -135,10 +135,10 @@ pub(super) async fn chat_completions(
                 system_additions,
             } = conversation;
             let mut session = create_engine_session(
-                state_for_task.backend_model.clone(),
+                state_for_task.backend_model(),
                 true,
                 state_for_task.allowed_tools.clone(),
-                state_for_task.permission_mode,
+                state_for_task.permission_mode(),
                 (history, system_additions),
             )
             .map_err(|error| error.to_string())?;
@@ -202,7 +202,7 @@ pub(super) async fn chat_completions(
         created,
         model: request
             .model
-            .unwrap_or_else(|| state.served_model_id.clone()),
+            .unwrap_or_else(|| state.served_model_id()),
         choices: vec![ChatCompletionChoice {
             index: 0,
             message: ChatCompletionMessage {
@@ -233,10 +233,10 @@ fn stream_chat_completions(
 
     let response_model = request
         .model
-        .unwrap_or_else(|| state.served_model_id.clone());
-    let backend_model = state.backend_model.clone();
+        .unwrap_or_else(|| state.served_model_id());
+    let backend_model = state.backend_model();
     let allowed_tools = state.allowed_tools.clone();
-    let permission_mode = state.permission_mode;
+    let permission_mode = state.permission_mode();
     // Whether to forward the model's reasoning to the client as a collapsible block.
     // Stored as a UI preference (`ui_kv.show_reasoning`); defaults ON. Non-UI deployments
     // (no dialog store) also default ON. Read per request so the toggle applies live.

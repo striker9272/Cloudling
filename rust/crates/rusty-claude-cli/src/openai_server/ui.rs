@@ -337,17 +337,16 @@ pub(super) async fn ui_settings_get() -> Response {
             serde_json::Value::String(std::env::var(key).unwrap_or_default()),
         );
     }
-    // tell the UI whether saving is even possible (env file path configured)
-    let can_save = std::env::var("CLAW_OPENAI_ENV_FILE")
-        .map(|p| !p.trim().is_empty())
-        .unwrap_or(false);
-    map.insert("_can_save".to_string(), serde_json::Value::Bool(can_save));
+    // Saving is always possible now: settings apply live and persist to the env file,
+    // which resolves to a per-user default when `CLAW_OPENAI_ENV_FILE` is unset.
+    map.insert("_can_save".to_string(), serde_json::Value::Bool(true));
     Json(serde_json::Value::Object(map)).into_response()
 }
 
-/// Rewrite only the known settings keys in the env file (preserving everything else),
-/// then exit so systemd brings the process back up with the new values (needs
-/// `Restart=always`). Atomic write via temp + rename.
+/// Rewrite only the known settings keys in the env file (preserving everything else).
+/// Persists the values so they survive a cold restart; the live process applies them
+/// immediately without restarting (see `ui_settings_save_restart`). Atomic write via
+/// temp + rename, preserving the existing file mode on unix (the file holds the API key).
 fn write_env_file(
     path: &std::path::Path,
     updates: &std::collections::HashMap<String, String>,
@@ -402,18 +401,9 @@ fn write_env_file(
 }
 
 pub(super) async fn ui_settings_save_restart(
+    State(state): State<Arc<OpenAiServerState>>,
     Json(updates): Json<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let path = match std::env::var("CLAW_OPENAI_ENV_FILE") {
-        Ok(p) if !p.trim().is_empty() => p,
-        _ => {
-            return (
-                StatusCode::SERVICE_UNAVAILABLE,
-                "settings saving not configured (CLAW_OPENAI_ENV_FILE unset)",
-            )
-                .into_response()
-        }
-    };
     // A value with a line break would inject arbitrary extra lines (= arbitrary env
     // vars) into the env file; reject control characters outright.
     if let Some((key, _)) = updates
@@ -426,15 +416,25 @@ pub(super) async fn ui_settings_save_restart(
         )
             .into_response();
     }
-    if let Err(error) = write_env_file(std::path::Path::new(&path), &updates) {
+    // Persist to the env file (so the setting survives a cold restart), creating the
+    // parent directory if it does not exist yet (per-user default on manual launches).
+    let path = super::resolve_openai_env_file();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(error) = write_env_file(&path, &updates) {
         return (StatusCode::INTERNAL_SERVER_ERROR, format!("write env: {error}")).into_response();
     }
-    // Respond first, then exit shortly after so systemd restarts us with the new env.
-    tokio::spawn(async {
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-        std::process::exit(0);
-    });
-    Json(serde_json::json!({ "ok": true, "restarting": true })).into_response()
+    // Apply live — no restart. Env-read settings (base URL, key, web-search URL) go into
+    // the process environment, where the per-request engine resolution reads them; the
+    // model / served id / permission mode live in the server state and update in place.
+    for key in SETTINGS_KEYS {
+        if let Some(value) = updates.get(*key) {
+            std::env::set_var(key, value);
+        }
+    }
+    state.apply_settings(&updates);
+    Json(serde_json::json!({ "ok": true, "applied": true })).into_response()
 }
 
 /// Path to the global user `settings.json` (config home). This single file is read by
@@ -611,7 +611,7 @@ pub(super) async fn ui_title(
     State(state): State<Arc<OpenAiServerState>>,
     Json(request): Json<TitleRequest>,
 ) -> Response {
-    let backend_model = state.backend_model.clone();
+    let backend_model = state.backend_model();
     let text = request.text;
     let title = tokio::task::spawn_blocking(move || {
         let system = vec![
