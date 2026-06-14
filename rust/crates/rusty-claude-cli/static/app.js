@@ -407,7 +407,21 @@
     sum.innerHTML=(fail?IC.warn:'')+'<span class="tag">'+esc(decodeEntities(name))+'</span> · '+(fail?'ошибка':'выполнено');
     var pre=document.createElement('pre'); pre.className='toolout';
     var raw=decodeEntities(out), text;
-    try{ var parsed=JSON.parse(raw); text=(typeof parsed==='string')?parsed:JSON.stringify(parsed,null,2); }
+    try{
+      var parsed=JSON.parse(raw);
+      if(parsed && typeof parsed==='object' && ('stdout' in parsed || 'stderr' in parsed)){
+        /* Shell / PowerShell-style result: show the actual output, not raw JSON.
+           Normalize CRLF (and lone CR) so Windows output is not a "\r\n" wall,
+           and trim surrounding blank lines. */
+        var parts=[];
+        if(parsed.stdout) parts.push(String(parsed.stdout));
+        if(parsed.stderr) parts.push(String(parsed.stderr));
+        text=parts.join('\n').replace(/\r\n?/g,'\n').replace(/^\n+|\n+$/g,'');
+        if(!text) text='(нет вывода)';
+      } else {
+        text=(typeof parsed==='string')?parsed:JSON.stringify(parsed,null,2);
+      }
+    }
     catch(e){ text=raw; }
     pre.textContent=text;
     d.appendChild(sum); d.appendChild(pre); return d;
@@ -718,8 +732,10 @@
       pending.forEach(function(att){ atts.appendChild(attChipEl(att, function(){ var i=pending.indexOf(att); if(i>=0) pending.splice(i,1); renderPending(); refresh(); })); });
     }
     function addFiles(files){ Array.prototype.slice.call(files||[]).forEach(function(f){
-      if(f.size>MAX_ATT){ toast('Файл «'+f.name+'» больше 10 МБ — пропущен'); return; }
-      var att={kind:fileKind(f), name:f.name, size:f.size};
+      if(f.size>MAX_ATT){ toast('Файл «'+(f.name||'без имени')+'» больше 10 МБ — пропущен'); return; }
+      /* Pasted screenshots often arrive without a name — give them one. */
+      var name=f.name || ((f.type&&f.type.indexOf('image/')===0) ? ('изображение.'+(f.type.split('/')[1]||'png')) : 'вставка');
+      var att={kind:fileKind(f), name:name, size:f.size};
       pending.push(att); renderPending(); refresh();
       if(att.kind==='image'){ readAsDataURL(f).then(function(u){ att.url=u; renderPending(); }).catch(function(){ var i=pending.indexOf(att); if(i>=0){ pending.splice(i,1); renderPending(); refresh(); } toast('Не удалось прочитать «'+f.name+'»'); }); }
       else if(att.kind==='text'){ readAsText(f).then(function(t){ att.text=t; }).catch(function(){ att.kind='file'; }); }
@@ -737,6 +753,16 @@
     scope.addEventListener('dragover', function(e){ e.preventDefault(); scope.classList.add('dragover'); });
     scope.addEventListener('dragleave', function(e){ if(!scope.contains(e.relatedTarget)) scope.classList.remove('dragover'); });
     scope.addEventListener('drop', function(e){ e.preventDefault(); scope.classList.remove('dragover'); if(e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+    /* paste files from the clipboard (e.g. screenshots / images via Ctrl+V).
+       Only intercept when the clipboard actually carries files; plain-text paste
+       is left to the textarea's default behaviour. */
+    ta.addEventListener('paste', function(e){
+      var cd=e.clipboardData; if(!cd) return;
+      var files=[];
+      if(cd.files && cd.files.length){ files=Array.prototype.slice.call(cd.files); }
+      else if(cd.items){ Array.prototype.slice.call(cd.items).forEach(function(it){ if(it.kind==='file'){ var f=it.getAsFile(); if(f) files.push(f); } }); }
+      if(files.length){ e.preventDefault(); addFiles(files); }
+    });
     refresh();
   }
   wireComposer(document.querySelector('#view-home .entry'));
