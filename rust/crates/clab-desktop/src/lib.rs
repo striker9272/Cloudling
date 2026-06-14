@@ -1,42 +1,39 @@
 //! Windows desktop integration for Claw Lab.
 //!
 //! This is the quarantine crate for the small amount of unavoidable Windows FFI
-//! `unsafe` needed by the tray icon, console-window hiding, and registry
+//! `unsafe` needed by the tray icon, console-window handling, and registry
 //! autostart. The rest of the workspace keeps the upstream
 //! `unsafe_code = "forbid"`; only this crate permits `unsafe`, and every block
 //! carries a `// SAFETY:` note.
 //!
-//! The `tray` role runs the server + built-in web UI in the background, hides
-//! the console window, and shows a tray icon with a right-click menu (Open /
-//! Start at login / Uninstall / Quit). The `uninstall` role removes the optional
-//! autostart entry and, after confirmation, the per-user data directory.
+//! The `tray` role runs the server + built-in web UI in the background, with no
+//! console window, and shows a tray icon with a right-click menu (Open / Start
+//! at login / Uninstall / Quit). The `uninstall` role removes the optional
+//! autostart entry and, after confirmation, the per-user data directories.
 //!
 //! The crate is decoupled from the rest of Claw Lab: the caller passes a `serve`
-//! closure (which starts the HTTP server) and the `data_dir` to manage, so this
-//! crate depends on nothing but `tray-icon`/`windows-sys` (Windows only). The
-//! public API exists on every platform — off Windows it returns a clear
-//! "Windows-only" error — so the workspace still builds on Linux/macOS.
+//! closure (which starts the HTTP server) and the list of `data_dirs` to remove
+//! on uninstall, so this crate depends on nothing but `tray-icon`/`windows-sys`
+//! (Windows only). The public API exists on every platform — off Windows it
+//! returns a clear "Windows-only" error — so the workspace still builds on
+//! Linux/macOS.
 
-/// Run the desktop tray: start `serve` in the background, hide the console, and
-/// show the tray icon + menu. `bind` is used to build the browser URL for the
-/// "Open" item; `data_dir` is what the "Uninstall" item removes. Windows-only.
+/// Run the desktop tray: start `serve` in the background, with no console
+/// window, and show the tray icon + menu. `bind` builds the browser URL for the
+/// "Open" item. Windows-only.
 #[cfg(not(windows))]
-pub fn run_tray<F>(
-    _bind: String,
-    _data_dir: std::path::PathBuf,
-    _serve: F,
-) -> Result<(), Box<dyn std::error::Error>>
+pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::Error>>
 where
     F: FnOnce() + Send + 'static,
 {
     Err("`clab tray` is only available on Windows".into())
 }
 
-/// Remove the autostart entry and (after confirmation, unless `assume_yes`) the
-/// per-user `data_dir`. Windows-only.
+/// Remove the autostart entry and (after confirmation, unless `assume_yes`) each
+/// of the per-user `data_dirs`. Windows-only.
 #[cfg(not(windows))]
 pub fn run_uninstall(
-    _data_dir: std::path::PathBuf,
+    _data_dirs: Vec<std::path::PathBuf>,
     _assume_yes: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     Err("`clab uninstall` is only available on Windows".into())
@@ -56,9 +53,10 @@ pub use imp::{launched_by_double_click, run_tray, run_uninstall};
 mod imp {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::process::Command;
     use std::thread;
+    use std::time::Duration;
     use tray_icon::{
         menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
         Icon, TrayIconBuilder,
@@ -72,24 +70,41 @@ mod imp {
 
     /// `CreateProcess` flag: do not create a console window for the child.
     /// Defined locally to avoid pulling the `Win32_System_Threading` feature for
-    /// one constant.
+    /// these constants.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    /// `CreateProcess` flag: the child gets no console at all (not even a hidden
+    /// one). Used to relaunch the tray windowless and to run the detached
+    /// uninstaller.
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    /// Set in the environment of the relaunched, console-less tray process so it
+    /// runs the tray directly instead of relaunching itself again.
+    const DETACHED_ENV: &str = "CLAB_TRAY_DETACHED";
 
     /// Per-user autostart registry key and value name. `HKCU\...\Run` runs at
     /// logon without admin rights; removing the value disables autostart.
     const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
     const RUN_VALUE: &str = "ClawLab";
 
-    pub fn run_tray<F>(
-        bind: String,
-        data_dir: PathBuf,
-        serve: F,
-    ) -> Result<(), Box<dyn std::error::Error>>
+    pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
     where
         F: FnOnce() + Send + 'static,
     {
-        // A console-subsystem binary briefly shows a console window even when
-        // double-clicked; hide it immediately so only the tray icon remains.
+        // A console-subsystem binary gets a console window when double-clicked,
+        // launched from autostart, or run as `clab tray` in a terminal. On
+        // Windows 11 that console is hosted by Windows Terminal (a separate
+        // process), so ShowWindow(SW_HIDE) only minimizes a window we don't own.
+        // The robust fix: relaunch ourselves as a DETACHED process that has no
+        // console at all, then let this process exit — which closes the
+        // originating console/terminal window. The relaunched child carries
+        // DETACHED_ENV so it runs the tray directly instead of relaunching again.
+        if std::env::var_os(DETACHED_ENV).is_none() {
+            relaunch_detached_tray(&bind)?;
+            return Ok(());
+        }
+
+        // Detached child: no console exists; this is a harmless no-op safety net.
         hide_console_window();
 
         let open_url = browser_url(&bind);
@@ -157,7 +172,12 @@ mod imp {
                     set_autostart(autostart_item.is_checked());
                 } else if event.id == uninstall_id {
                     if confirm_gui() {
-                        let _ = run_uninstall(data_dir.clone(), true);
+                        // This process runs the server, which holds the dialogs
+                        // DB open — Windows refuses to delete locked files. Hand
+                        // off to a detached `uninstall --yes` process and exit so
+                        // the lock releases; the child retries until it can
+                        // remove the data directories.
+                        let _ = spawn_uninstall_detached();
                         std::process::exit(0);
                     }
                 } else if event.id == quit_id {
@@ -171,10 +191,10 @@ mod imp {
     }
 
     pub fn run_uninstall(
-        data_dir: PathBuf,
+        data_dirs: Vec<PathBuf>,
         assume_yes: bool,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if !assume_yes && !confirm_cli(&data_dir.display().to_string())? {
+        if !assume_yes && !confirm_cli(&data_dirs) {
             eprintln!("Aborted. Nothing was removed.");
             return Ok(());
         }
@@ -183,12 +203,55 @@ mod imp {
         // launch a deleted binary at next logon.
         set_autostart(false);
 
-        if data_dir.exists() {
-            std::fs::remove_dir_all(&data_dir)?;
-            println!("Removed {}", data_dir.display());
-        } else {
-            println!("Nothing to remove at {}", data_dir.display());
+        for dir in &data_dirs {
+            if dir.exists() {
+                remove_dir_all_retry(dir)?;
+                println!("Removed {}", dir.display());
+            }
         }
+        Ok(())
+    }
+
+    /// Remove a directory tree, retrying briefly. When invoked from the tray's
+    /// detached uninstaller the parent tray process is still exiting, so the
+    /// dialogs DB may stay locked for a moment; retry until the lock releases.
+    fn remove_dir_all_retry(dir: &Path) -> std::io::Result<()> {
+        let mut last = Ok(());
+        for _ in 0..20 {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => return Ok(()),
+                Err(error) => last = Err(error),
+            }
+            if !dir.exists() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        last
+    }
+
+    /// Relaunch this executable as a console-less detached `clab tray` process.
+    fn relaunch_detached_tray(bind: &str) -> std::io::Result<()> {
+        let exe = std::env::current_exe()?;
+        Command::new(exe)
+            .arg("tray")
+            .arg("--bind")
+            .arg(bind)
+            .env(DETACHED_ENV, "1")
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()?;
+        Ok(())
+    }
+
+    /// Launch a detached `clab uninstall --yes` process (no console) that deletes
+    /// the data directories once this process has released its file locks.
+    fn spawn_uninstall_detached() -> std::io::Result<()> {
+        let exe = std::env::current_exe()?;
+        Command::new(exe)
+            .arg("uninstall")
+            .arg("--yes")
+            .creation_flags(DETACHED_PROCESS)
+            .spawn()?;
         Ok(())
     }
 
@@ -205,14 +268,20 @@ mod imp {
 
     /// Interactive CLI confirmation for `clab uninstall` (no `--yes`). The tray
     /// path uses [`confirm_gui`] instead.
-    fn confirm_cli(dir: &str) -> Result<bool, Box<dyn std::error::Error>> {
+    fn confirm_cli(dirs: &[PathBuf]) -> bool {
         eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
-        eprintln!("Directory: {dir}");
+        for dir in dirs {
+            eprintln!("  {}", dir.display());
+        }
         eprint!("Type 'yes' to confirm: ");
-        std::io::stderr().flush()?;
+        if std::io::stderr().flush().is_err() {
+            return false;
+        }
         let mut line = String::new();
-        std::io::stdin().read_line(&mut line)?;
-        Ok(line.trim() == "yes")
+        if std::io::stdin().read_line(&mut line).is_err() {
+            return false;
+        }
+        line.trim() == "yes"
     }
 
     /// GUI confirmation dialog for the tray "Uninstall" item. Returns true only
@@ -298,33 +367,81 @@ mod imp {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// Tray icon: the Claw Lab cloud glyph rendered procedurally (no asset file
-    /// to ship or embed). A 32x32 brand-blue cloud silhouette on transparency.
+    /// Tray icon: a dark rounded tile (the UI background `--bg` #0d0d0f) with the
+    /// in-app cloud mark on top (the union of four circles on a 40x28 viewBox,
+    /// color `--load` #e9ebef). Rendered procedurally — no asset file to ship or
+    /// embed — anti-aliased via 4x4 supersampling onto a 32x32 canvas. The dark
+    /// tile keeps the light cloud readable on any taskbar theme.
     fn load_icon() -> Icon {
-        const SIZE: i32 = 32;
-        // Cloud = union of three lobes plus a flat base. Coordinates tuned for a
-        // recognizable silhouette at small sizes.
-        let lobes = [(11_i32, 20_i32, 6_i32), (16, 14, 8), (22, 19, 7)];
-        let base = (5_i32, 18_i32, 27_i32, 26_i32); // x0, y0, x1, y1
+        const SIZE: usize = 32;
+        const SS: usize = 4; // supersamples per axis
+        const N: u32 = (SS * SS) as u32;
 
-        let mut rgba = vec![0u8; (SIZE * SIZE * 4) as usize];
-        for y in 0..SIZE {
-            for x in 0..SIZE {
-                let in_lobe = lobes.iter().any(|&(cx, cy, r)| {
-                    let dx = x - cx;
-                    let dy = y - cy;
-                    dx * dx + dy * dy <= r * r
-                });
-                let in_base = x >= base.0 && x <= base.2 && y >= base.1 && y <= base.3;
-                if in_lobe || in_base {
-                    let idx = ((y * SIZE + x) * 4) as usize;
-                    rgba[idx] = 0x3a; // R
-                    rgba[idx + 1] = 0x8d; // G
-                    rgba[idx + 2] = 0xde; // B
-                    rgba[idx + 3] = 0xff; // A
+        // Cloud circles in the UI viewBox (40 wide x 28 tall): center + left +
+        // right + top lobe (see static/index.html `.cloud`).
+        let circles = [
+            (20.0_f32, 14.0_f32, 6.0_f32),
+            (14.0, 15.0, 5.0),
+            (26.0, 15.0, 5.0),
+            (20.0, 11.0, 5.0),
+        ];
+        let (vb_w, vb_h) = (40.0_f32, 28.0_f32);
+        // Cloud sits at ~62% width, centered, leaving a dark margin.
+        let scale = (SIZE as f32 * 0.62) / vb_w;
+        let off_x = (SIZE as f32 - vb_w * scale) / 2.0;
+        let off_y = (SIZE as f32 - vb_h * scale) / 2.0;
+        let tile_radius = 6.0_f32;
+
+        let mut rgba = vec![0u8; SIZE * SIZE * 4];
+        for py in 0..SIZE {
+            for px in 0..SIZE {
+                let mut tile_hits = 0u32;
+                let mut cloud_hits = 0u32;
+                for sy in 0..SS {
+                    for sx in 0..SS {
+                        let fx = px as f32 + (sx as f32 + 0.5) / SS as f32;
+                        let fy = py as f32 + (sy as f32 + 0.5) / SS as f32;
+                        if in_rounded_square(fx, fy, SIZE as f32, tile_radius) {
+                            tile_hits += 1;
+                        }
+                        let vx = (fx - off_x) / scale;
+                        let vy = (fy - off_y) / scale;
+                        if circles.iter().any(|&(cx, cy, r)| {
+                            let dx = vx - cx;
+                            let dy = vy - cy;
+                            dx * dx + dy * dy <= r * r
+                        }) {
+                            cloud_hits += 1;
+                        }
+                    }
                 }
+                if tile_hits == 0 {
+                    continue; // outside the rounded tile: transparent
+                }
+                // Base = dark tile; blend the light cloud over it by coverage.
+                let cc = cloud_hits as f32 / N as f32;
+                let lerp = |dark: f32, light: f32| (dark * (1.0 - cc) + light * cc) as u8;
+                let idx = (py * SIZE + px) * 4;
+                rgba[idx] = lerp(0x0d as f32, 0xe9 as f32);
+                rgba[idx + 1] = lerp(0x0d as f32, 0xeb as f32);
+                rgba[idx + 2] = lerp(0x0f as f32, 0xef as f32);
+                // Tile edge is anti-aliased via its coverage; the cloud is fully
+                // inside the tile, so alpha follows the tile coverage.
+                rgba[idx + 3] = (tile_hits * 255 / N) as u8;
             }
         }
         Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("cloud icon dimensions are valid")
+    }
+
+    /// Whether point (x, y) lies inside a `size`x`size` square with rounded
+    /// corners of the given `radius` (rounded-rectangle signed-distance test).
+    fn in_rounded_square(x: f32, y: f32, size: f32, radius: f32) -> bool {
+        if x < 0.0 || x > size || y < 0.0 || y > size {
+            return false;
+        }
+        // Distance outside the corner-deflated inner rectangle, per axis.
+        let dx = (radius - x).max(x - (size - radius)).max(0.0);
+        let dy = (radius - y).max(y - (size - radius)).max(0.0);
+        dx * dx + dy * dy <= radius * radius
     }
 }

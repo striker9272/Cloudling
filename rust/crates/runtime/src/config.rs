@@ -692,10 +692,18 @@ impl RuntimePluginConfig {
 
 #[must_use]
 /// Returns the default per-user config directory used by the runtime.
+///
+/// `CLAW_CONFIG_HOME` overrides everything. Otherwise the per-user home is
+/// `$HOME/.claw` on Unix; on Windows, where `HOME` is usually unset, it falls
+/// back to `%USERPROFILE%\.claw` so config does not land in a CWD-relative
+/// `.claw` (mirrors `dialog_store::resolve_data_dir`, keeping settings and UI
+/// data under the same per-user root). A bare relative `.claw` is the last
+/// resort if no home variable is set at all.
 pub fn default_config_home() -> PathBuf {
     std::env::var_os("CLAW_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claw")))
+        .or_else(|| std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".claw")))
         .unwrap_or_else(|| PathBuf::from(".claw"))
 }
 
