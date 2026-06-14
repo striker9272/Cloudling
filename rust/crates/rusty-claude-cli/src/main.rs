@@ -5214,6 +5214,12 @@ struct RuntimeMcpState {
     manager: McpServerManager,
     pending_servers: Vec<String>,
     degraded_report: Option<runtime::McpDegradedReport>,
+    /// True once this state is owned by the process-global MCP pool
+    /// (`mcp_pool`). While pooled, `shutdown()` is a no-op so the per-request
+    /// runtime drop and one-off registry reads leave the live server processes
+    /// alone; only the pool itself tears them down (via `force_shutdown`), on
+    /// config change or when a pooled process is found dead.
+    pooled: bool,
 }
 
 struct BuiltRuntime {
@@ -5408,14 +5414,38 @@ impl RuntimeMcpState {
                 manager,
                 pending_servers,
                 degraded_report,
+                pooled: false,
             },
             discovery,
         )))
     }
 
+    /// Tear down the live server processes unless this state is pool-owned.
+    ///
+    /// Called by the per-request runtime drop (`BuiltRuntime::shutdown_mcp`) and
+    /// by one-off registry reads (`current_tool_registry`). For a pooled state
+    /// these are no-ops: the pool keeps the servers alive across requests and is
+    /// the only owner allowed to stop them (`force_shutdown`).
     fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.pooled {
+            return Ok(());
+        }
+        self.force_shutdown()
+    }
+
+    /// Unconditionally stop the live server processes. Only the MCP pool calls
+    /// this — when evicting an entry on a config change or replacing a dead one.
+    fn force_shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         self.runtime.block_on(self.manager.shutdown())?;
         Ok(())
+    }
+
+    /// Whether every server that was successfully spawned is still running.
+    /// A server that never spawned (discovery failed) does not count as dead —
+    /// re-running discovery on every request would re-pay the latency we are
+    /// pooling to avoid. Used to decide whether a pooled entry can be reused.
+    fn all_alive(&mut self) -> bool {
+        self.manager.all_spawned_processes_alive()
     }
 
     fn pending_servers(&self) -> Option<Vec<String>> {
@@ -5515,10 +5545,97 @@ impl RuntimeMcpState {
     }
 }
 
+/// One pooled MCP runtime: the live server processes plus the tool definitions
+/// discovered from them, keyed by a fingerprint of the MCP config that produced
+/// it. See [`build_runtime_mcp_state`].
+struct McpPoolEntry {
+    fingerprint: String,
+    state: Arc<Mutex<RuntimeMcpState>>,
+    tools: Vec<RuntimeToolDefinition>,
+}
+
+/// Process-global pool of MCP server managers.
+///
+/// `RuntimeMcpState::new` spawns the configured stdio servers and runs tool
+/// discovery — about a second of latency on every build. The runtime is rebuilt
+/// several times per chat request (session constructor + once per turn), so
+/// without pooling those servers were spawned and killed repeatedly. The pool
+/// keeps a single live entry alive across requests and hands out shared `Arc`
+/// clones; it is rebuilt only when the MCP config changes (different
+/// fingerprint) or a pooled server is found dead.
+///
+/// A single entry matches reality — one active `settings.json`. MCP servers are
+/// process-global by nature (no per-dialog history), so sharing one manager
+/// across dialogs is safe; concurrent tool calls serialize on the inner `Mutex`.
+fn mcp_pool() -> &'static Mutex<Option<McpPoolEntry>> {
+    static MCP_POOL: std::sync::OnceLock<Mutex<Option<McpPoolEntry>>> = std::sync::OnceLock::new();
+    MCP_POOL.get_or_init(|| Mutex::new(None))
+}
+
+/// Lock the pool, recovering the guard if a previous holder panicked. The data
+/// behind the lock is plain state, so a poisoned lock is still usable.
+fn lock_mcp_pool() -> std::sync::MutexGuard<'static, Option<McpPoolEntry>> {
+    mcp_pool()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Fingerprint of the configured MCP servers. `None` means no servers are
+/// configured at all. Two configs with the same servers (command, args, env,
+/// framing, scope) produce the same string, so the pooled entry is reused.
+/// Derived from the `Debug` of the scope-ordered `BTreeMap`, which is stable
+/// within a process and needs no extra trait impls on the config types.
+fn mcp_config_fingerprint(runtime_config: &runtime::RuntimeConfig) -> Option<String> {
+    let servers = runtime_config.mcp().servers();
+    if servers.is_empty() {
+        return None;
+    }
+    Some(format!("{servers:?}"))
+}
+
 fn build_runtime_mcp_state(
     runtime_config: &runtime::RuntimeConfig,
 ) -> Result<RuntimePluginStateBuildOutput, Box<dyn std::error::Error>> {
-    let Some((mcp_state, discovery)) = RuntimeMcpState::new(runtime_config)? else {
+    let Some(fingerprint) = mcp_config_fingerprint(runtime_config) else {
+        // No MCP servers configured. Drop any stale pooled entry (e.g. the user
+        // just removed the last server) so its processes are released.
+        if let Some(entry) = lock_mcp_pool().take() {
+            let _ = entry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .force_shutdown();
+        }
+        return Ok((None, Vec::new()));
+    };
+
+    let mut pool = lock_mcp_pool();
+
+    // Reuse the live entry when the config is unchanged and every spawned server
+    // is still running.
+    if let Some(entry) = pool.as_ref() {
+        if entry.fingerprint == fingerprint {
+            let alive = entry
+                .state
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .all_alive();
+            if alive {
+                return Ok((Some(entry.state.clone()), entry.tools.clone()));
+            }
+        }
+    }
+
+    // Config changed or a pooled server died: evict and rebuild.
+    if let Some(stale) = pool.take() {
+        let _ = stale
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .force_shutdown();
+    }
+
+    let Some((mut mcp_state, discovery)) = RuntimeMcpState::new(runtime_config)? else {
         return Ok((None, Vec::new()));
     };
 
@@ -5531,7 +5648,17 @@ fn build_runtime_mcp_state(
         runtime_tools.extend(mcp_wrapper_tool_definitions());
     }
 
-    Ok((Some(Arc::new(Mutex::new(mcp_state))), runtime_tools))
+    // Hand lifecycle to the pool: from here the per-request runtime drop must not
+    // stop these processes — only the pool may, via `force_shutdown`.
+    mcp_state.pooled = true;
+    let state = Arc::new(Mutex::new(mcp_state));
+    *pool = Some(McpPoolEntry {
+        fingerprint,
+        state: state.clone(),
+        tools: runtime_tools.clone(),
+    });
+
+    Ok((Some(state), runtime_tools))
 }
 
 fn mcp_runtime_tool_definition(tool: &runtime::ManagedMcpTool) -> RuntimeToolDefinition {

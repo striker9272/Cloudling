@@ -541,6 +541,20 @@ impl McpServerManager {
         self.servers.keys().cloned().collect()
     }
 
+    /// Whether every server that has actually been spawned is still running.
+    ///
+    /// Servers that never spawned (e.g. tool discovery failed) carry no process
+    /// and are skipped — they are already accounted for in the degraded report,
+    /// and re-attempting them would defeat pooling. A process that has exited
+    /// (or whose liveness check errors) makes this return `false`, signalling the
+    /// caller to rebuild rather than hand out a dead server.
+    pub fn all_spawned_processes_alive(&mut self) -> bool {
+        self.servers.values_mut().all(|server| match server.process {
+            Some(ref mut process) => !process.has_exited().unwrap_or(true),
+            None => true,
+        })
+    }
+
     pub async fn discover_tools(&mut self) -> Result<Vec<ManagedMcpTool>, McpServerManagerError> {
         let server_names = self.servers.keys().cloned().collect::<Vec<_>>();
         let mut discovered_tools = Vec::new();
