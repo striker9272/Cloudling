@@ -12,9 +12,6 @@ on:
   push:
     branches:
       - main
-      # TEMP(3b-test): allow a live GHCR publish run from the feature branch before
-      # merge. Remove this line once the workflow is verified.
-      - feat/container-image
     tags:
       - 'v*'
   workflow_dispatch:
@@ -52,10 +49,6 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
-            # TEMP(3b-test): tag image with the sanitized branch name so the
-            # feature-branch test run has something to push. Remove with the branch
-            # trigger above once verified.
-            type=ref,event=branch
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
