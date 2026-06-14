@@ -40,6 +40,11 @@ RUN apt-get update \
 
 COPY --from=builder /build/rust/target/release/clab /usr/local/bin/clab
 COPY docker/entrypoint.sh /usr/local/bin/clab-entrypoint
+# Baked config home: turns off the namespace sandbox by design — inside a container the
+# container itself is the isolation boundary, so `unshare` user namespaces are neither
+# available nor needed. Filesystem workspace-only isolation stays on. Lives in an image
+# layer (not a volume), so it is always present and never shadowed by a mount.
+COPY docker/settings.json /etc/clab/settings.json
 RUN chmod +x /usr/local/bin/clab-entrypoint \
     && mkdir -p /workspace /data/ui
 
@@ -49,7 +54,8 @@ ENV CLAW_OPENAI_UI=1 \
     CLAW_OPENAI_BIND=0.0.0.0:4097 \
     CLAW_PERMISSION_MODE=read-only \
     CLAW_WORKING_DIRECTORY=/workspace \
-    CLAW_UI_DATA_DIR=/data/ui
+    CLAW_UI_DATA_DIR=/data/ui \
+    CLAW_CONFIG_HOME=/etc/clab
 
 EXPOSE 4097
 ENTRYPOINT ["/usr/local/bin/clab-entrypoint"]
