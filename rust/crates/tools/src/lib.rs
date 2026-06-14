@@ -6626,12 +6626,19 @@ fn execute_powershell(input: PowerShellInput) -> std::io::Result<runtime::BashCo
         return Ok(output);
     }
     let shell = detect_powershell_shell()?;
-    execute_shell_command(
-        shell,
-        &input.command,
-        input.timeout,
-        input.run_in_background,
-    )
+    // Windows PowerShell 5.1 writes stdout in the console's OEM code page, so non-ASCII
+    // output (e.g. Cyrillic) comes back as mojibake once decoded as UTF-8. Force UTF-8
+    // before the user's command. Windows-only: on Linux/macOS pwsh is already UTF-8, and
+    // leaving the command untouched keeps the stub-shell test exact.
+    let command = if cfg!(windows) {
+        format!(
+            "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; {}",
+            input.command
+        )
+    } else {
+        input.command.clone()
+    };
+    execute_shell_command(shell, &command, input.timeout, input.run_in_background)
 }
 
 fn detect_powershell_shell() -> std::io::Result<&'static str> {
