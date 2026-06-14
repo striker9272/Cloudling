@@ -1,6 +1,7 @@
 # Keep docker build context small (Windows-friendly).
 .git
 .github
+notes
 **/target
 **/.claw-rag
 **/.claw
