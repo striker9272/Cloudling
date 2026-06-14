@@ -72,6 +72,27 @@ are typically blocked anyway (Docker seccomp; on hosts like Ubuntu 24.04 also Ap
 isolation off makes `clab sandbox` report an honest **Active** state with filesystem `workspace-only`
 isolation still on, instead of a noisy fallback warning. The agent's tools run directly inside the container.
 
+### Published image (GHCR)
+
+On a `v*` git tag (and on pushes to `main`), the **Container image** workflow
+([`../.github/workflows/container.yml`](../.github/workflows/container.yml)) builds this `Dockerfile` and
+publishes it to the GitHub Container Registry at `ghcr.io/<owner>/<repo>`:
+
+- tag `vX.Y.Z` → `X.Y.Z`, `X.Y`, and `latest`
+- push to `main` → `edge`
+
+Once an image is published you can run it instead of building locally:
+
+```bash
+docker run -d -p 4098:4097 \
+  -e CLAW_UI_TOKEN="$(openssl rand -hex 16)" \
+  -e OPENAI_BASE_URL="http://your-backend:8080/v1" -e OPENAI_MODEL="your-model" \
+  ghcr.io/<owner>/<repo>:latest
+```
+
+Package visibility (private vs public) is controlled in the repository's package settings; a private package
+requires `docker login ghcr.io` with a token that has `read:packages`.
+
 ## What the checked-in dev shell image is for
 
 The root [`../Containerfile`](../Containerfile) gives you a reusable Rust build/test shell with the extra packages this workspace commonly needs (`git`, `pkg-config`, `libssl-dev`, certificates).
