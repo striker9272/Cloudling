@@ -6648,6 +6648,17 @@ fn detect_powershell_shell() -> std::io::Result<&'static str> {
 }
 
 fn command_exists(command: &str) -> bool {
+    // On Windows there is no `sh`, so the shell probe below always fails — which wrongly
+    // reported PowerShell / Python / Node as missing. Walk PATH directly there (the same
+    // cross-platform approach already used in runtime's sandbox.rs). Unix keeps the shell
+    // probe unchanged so builtins/aliases still resolve and Linux behavior is identical.
+    if cfg!(windows) {
+        let candidates = [format!("{command}.exe"), command.to_string()];
+        return std::env::var_os("PATH").is_some_and(|paths| {
+            std::env::split_paths(&paths)
+                .any(|dir| candidates.iter().any(|name| dir.join(name).is_file()))
+        });
+    }
     std::process::Command::new("sh")
         .arg("-lc")
         .arg(format!("command -v {command} >/dev/null 2>&1"))

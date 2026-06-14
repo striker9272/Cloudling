@@ -72,6 +72,18 @@ pub fn execute_bash(input: BashCommandInput) -> io::Result<BashCommandOutput> {
     let cwd = crate::current_workspace_root()?;
     let sandbox_status = sandbox_status_for_input(&input, &cwd);
 
+    // The `bash` tool runs bash. On Windows that needs a real bash on PATH; we do NOT
+    // silently fall back to PowerShell (its syntax for `&&`, pipes, and `2>/dev/null`
+    // differs, which mangles bash commands). When absent, fail clearly so the model
+    // switches to the dedicated PowerShell tool instead.
+    if cfg!(windows) && !program_on_path("bash") {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "bash is not available on this Windows host. Use the PowerShell tool for shell \
+             commands here — bash syntax such as `&&`, pipes, and `2>/dev/null` is not PowerShell.",
+        ));
+    }
+
     if input.run_in_background.unwrap_or(false) {
         let mut child = prepare_command(&input.command, &cwd, &sandbox_status, false);
         let child = child
@@ -315,51 +327,22 @@ fn program_on_path(program: &str) -> bool {
     })
 }
 
-/// Pure shell-selection core (no environment probing) so the decision is unit-testable
-/// on any host. See [`shell_invocation`] for the platform-wired entry point.
-///
-/// * Unix — always `sh -lc <command>` (unchanged behavior).
-/// * Windows — a real `bash -lc <command>` when one is on `PATH`
-///   (Git for Windows / MSYS2 / WSL `bash.exe`), otherwise PowerShell
-///   (`pwsh` preferred, else `powershell`) with `-NoProfile -NonInteractive -Command`.
-fn build_invocation(
-    command: &str,
-    is_windows: bool,
-    bash_present: bool,
-    pwsh_present: bool,
-) -> ShellInvocation {
-    if is_windows {
-        if bash_present {
-            return ShellInvocation {
-                program: "bash".to_string(),
-                args: vec!["-lc".to_string(), command.to_string()],
-            };
-        }
-        let program = if pwsh_present { "pwsh" } else { "powershell" };
-        return ShellInvocation {
-            program: program.to_string(),
-            args: vec![
-                "-NoProfile".to_string(),
-                "-NonInteractive".to_string(),
-                "-Command".to_string(),
-                command.to_string(),
-            ],
-        };
-    }
+/// Pure shell-selection core (unit-testable on any host). The `bash` tool runs bash:
+/// `sh -lc` on unix, `bash -lc` on Windows. On Windows a real `bash` must be present on
+/// `PATH`; [`execute_bash`] guards that and returns a clear "use PowerShell" error when it
+/// is not, so we never silently run bash syntax through a non-bash shell (PowerShell uses
+/// different syntax for `&&`, pipes, and redirections).
+fn build_invocation(command: &str, is_windows: bool) -> ShellInvocation {
+    let program = if is_windows { "bash" } else { "sh" };
     ShellInvocation {
-        program: "sh".to_string(),
+        program: program.to_string(),
         args: vec!["-lc".to_string(), command.to_string()],
     }
 }
 
-/// Resolves the shell launcher for the current platform by probing `PATH`.
+/// Resolves the shell launcher for the current platform.
 fn shell_invocation(command: &str) -> ShellInvocation {
-    build_invocation(
-        command,
-        cfg!(windows),
-        program_on_path("bash"),
-        program_on_path("pwsh"),
-    )
+    build_invocation(command, cfg!(windows))
 }
 
 fn prepare_command(
@@ -450,38 +433,18 @@ mod tests {
 
     #[test]
     fn unix_invocation_is_sh_lc_unchanged() {
-        let invocation = super::build_invocation("echo hi", false, false, false);
+        let invocation = super::build_invocation("echo hi", false);
         assert_eq!(invocation.program, "sh");
         assert_eq!(invocation.args, vec!["-lc".to_string(), "echo hi".to_string()]);
-        // A real bash present on a Unix host must not change the launcher.
-        let with_bash = super::build_invocation("echo hi", false, true, true);
-        assert_eq!(with_bash.program, "sh");
     }
 
     #[test]
-    fn windows_prefers_real_bash_when_present() {
-        let invocation = super::build_invocation("ls -la", true, true, true);
+    fn windows_invocation_is_bash_lc() {
+        // On Windows the bash tool runs real bash (presence is guarded in execute_bash);
+        // it never falls back to PowerShell, whose syntax differs.
+        let invocation = super::build_invocation("ls -la", true);
         assert_eq!(invocation.program, "bash");
         assert_eq!(invocation.args, vec!["-lc".to_string(), "ls -la".to_string()]);
-    }
-
-    #[test]
-    fn windows_falls_back_to_pwsh_then_powershell() {
-        let pwsh = super::build_invocation("Get-Date", true, false, true);
-        assert_eq!(pwsh.program, "pwsh");
-        assert_eq!(
-            pwsh.args,
-            vec![
-                "-NoProfile".to_string(),
-                "-NonInteractive".to_string(),
-                "-Command".to_string(),
-                "Get-Date".to_string(),
-            ]
-        );
-
-        let legacy = super::build_invocation("Get-Date", true, false, false);
-        assert_eq!(legacy.program, "powershell");
-        assert_eq!(legacy.args[0], "-NoProfile");
     }
 
     #[test]
