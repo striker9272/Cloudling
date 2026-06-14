@@ -113,10 +113,62 @@ The right-hand drawer groups settings into:
 - **System prompt** — manage presets.
 - **Chat** — toggle whether the model's reasoning block is shown.
 - **Tools** — configure MCP servers (`mcpServers` in `settings.json`); applied on
-  the next message, no restart.
+  the next message, no restart. See [MCP servers](#mcp-servers) below.
 - **Security** — sandbox on/off, filesystem mode, network isolation, namespace
   restrictions, trusted roots, and allow/deny permission rules. Applied on the
   next message, no restart.
+
+## MCP servers
+
+An MCP server is an external program that gives the model extra tools. Claw Lab
+launches the configured servers over the **stdio** transport, discovers their
+tools, and exposes them to the model as `mcp__<server>__<tool>`. Configuration is
+a runtime concern, not an install-time one — set it per deployment in the UI or
+in `settings.json`, never in the install wizard.
+
+### Add a server
+
+In the UI, open **Settings → Tools → MCP servers** and add one with its launch
+command and arguments. Under the hood this writes the `mcpServers` map in
+`settings.json` under `CLAW_CONFIG_HOME`; for a headless instance (no UI) edit
+that file directly:
+
+```json
+{
+  "mcpServers": {
+    "fs": {
+      "command": "/path/to/mcp-server-filesystem",
+      "args": ["/path/to/exposed/dir"],
+      "env": { "EXAMPLE": "1" }
+    }
+  }
+}
+```
+
+The config is read on every message, so adding, changing, or removing a server
+applies on the next send — no restart.
+
+### Wire framing
+
+The MCP specification frames stdio messages as newline-delimited JSON, which is
+the default. A server written against clab's older transport (LSP-style
+`Content-Length` headers) can be selected with `"framing": "content-length"` on
+its entry. Reads auto-detect both formats; the setting only controls what the
+client writes.
+
+### Server lifetime (pooling)
+
+Launching a server and discovering its tools costs about a second, and the agent
+rebuilds its runtime several times per message, so Claw Lab keeps a single live
+set of servers warm and reuses it across messages instead of respawning each
+time. The pool is rebuilt only when the `mcpServers` config changes or a pooled
+server is found dead; removing the last server stops the pooled processes.
+
+Prefer a **direct command** (the server's own executable) over a launcher like
+`npx`. A launcher is a wrapper process that spawns the real server as a child;
+when the pool stops a server it signals the wrapper, which can leave the real
+process orphaned on a config change. A direct command is a single process that
+stops cleanly.
 
 ## Attachments
 
