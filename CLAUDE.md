@@ -26,7 +26,7 @@ and deploy tooling are Claw Lab's.
 
 ## Build, verify, test
 
-Run from `rust/` (combsrv has cargo 1.96; the local sandbox does not):
+Run from `rust/` (the Linux build host has cargo 1.96; the local sandbox does not):
 
 ```bash
 cargo build --workspace
@@ -62,7 +62,7 @@ assets named `claw-<os>-<arch>` (+ `.sha256`) — asset names keep the `claw-` p
 binary is `clab`. `install.sh --prebuilt` consumes these. Keep the tag in sync with the workspace
 version in `rust/Cargo.toml`.
 
-## Deploy (combsrv)
+## Deploy
 
 The repo is checked out under the deploying user's home (`~/claw-lab`); the install
 defaults place the runtime binary at `/opt/claw-lab/bin/clab`, the env file at
@@ -85,8 +85,8 @@ scripts/deploy-openai-server.sh \
 Run it as the current user, **NOT** with an outer `sudo`: the script builds/tests as the
 user (cargo lives in `~/.cargo/bin`, not on root's PATH) and self-escalates with `sudo`
 only for the install/backup/restart steps, prompting for the password once at the
-"sudo preflight" step. combsrv has no passwordless sudo, so Alexander runs the deploy
-interactively.
+"sudo preflight" step. If the host has no passwordless sudo, the maintainer runs the
+deploy interactively.
 
 ## Conventions
 
@@ -94,14 +94,14 @@ interactively.
   do NOT touch plumbing: the config dir `.claw/`, env vars `CLAW_*`, or config files
   like `.claw-analog.toml`. Keep all `claw-code` / "Claw Code" references that credit
   the **upstream** project (MIT attribution requirement — `LICENSE` must stay intact).
-- **Language:** code, commits, and public docs in English; conversation with Alexander
-  in Russian.
+- **Language:** code, commits, and public docs in English; maintainer conversation may
+  be in another language.
 - **CI:** GitHub Actions does **not** gate on the build. `.github/workflows/rust-ci.yml`
   (push/PR to `main`) runs only the docs source-of-truth job — two Python checks
   (`check_doc_source_of_truth.py` for branding/links and `check_release_readiness.py`);
   it does **not** run fmt, clippy, tests, or build. `.github/workflows/release.yml` builds
   the platform binaries only on a `v*` tag. The real build/test signal is `cargo build`
-  (and the commands above) on combsrv — keep `rust/` source and `tests/` in sync when
-  behavior changes.
+  (and the commands above) on the Linux build host — keep `rust/` source and `tests/` in
+  sync when behavior changes.
 - Prefer small, reviewable changes. Reserve machine-local overrides for
   `.claude/settings.local.json`; keep shared defaults in `.claude.json`.

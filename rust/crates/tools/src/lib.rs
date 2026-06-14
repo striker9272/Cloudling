@@ -3221,7 +3221,7 @@ fn host_is_local(host: &str) -> bool {
         || host.ends_with(".local")
         || host.ends_with(".internal")
         || host.ends_with(".lan")
-        // single-label intranet host (no dot), e.g. "combsrv"
+        // single-label intranet host (no dot), e.g. "intranet-host"
         || !host.contains('.')
 }
 
@@ -7899,7 +7899,7 @@ mod tests {
             "http://172.16.4.4/x",
             "http://169.254.1.2/x",
             "http://nas.local/x",
-            "http://combsrv/x",
+            "http://intranet-host/x",
         ] {
             assert_eq!(
                 super::normalize_fetch_url(url).unwrap(),
