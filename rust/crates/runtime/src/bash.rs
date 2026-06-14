@@ -292,6 +292,76 @@ fn sandbox_status_for_input(input: &BashCommandInput, cwd: &std::path::Path) -> 
     resolve_sandbox_status_for_request(&request, cwd)
 }
 
+/// Program + argument prefix used to hand a command line to a shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ShellInvocation {
+    program: String,
+    args: Vec<String>,
+}
+
+/// Returns true if `program` (or `program.exe` on Windows) is found on `PATH`.
+///
+/// Cross-platform PATH walk; does not spawn a shell (so it works on Windows,
+/// unlike the `sh`-based `command_exists` helpers elsewhere in the tree).
+fn program_on_path(program: &str) -> bool {
+    let candidates: Vec<String> = if cfg!(windows) {
+        vec![format!("{program}.exe"), program.to_string()]
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::var_os("PATH").is_some_and(|paths| {
+        std::env::split_paths(&paths)
+            .any(|dir| candidates.iter().any(|name| dir.join(name).is_file()))
+    })
+}
+
+/// Pure shell-selection core (no environment probing) so the decision is unit-testable
+/// on any host. See [`shell_invocation`] for the platform-wired entry point.
+///
+/// * Unix — always `sh -lc <command>` (unchanged behavior).
+/// * Windows — a real `bash -lc <command>` when one is on `PATH`
+///   (Git for Windows / MSYS2 / WSL `bash.exe`), otherwise PowerShell
+///   (`pwsh` preferred, else `powershell`) with `-NoProfile -NonInteractive -Command`.
+fn build_invocation(
+    command: &str,
+    is_windows: bool,
+    bash_present: bool,
+    pwsh_present: bool,
+) -> ShellInvocation {
+    if is_windows {
+        if bash_present {
+            return ShellInvocation {
+                program: "bash".to_string(),
+                args: vec!["-lc".to_string(), command.to_string()],
+            };
+        }
+        let program = if pwsh_present { "pwsh" } else { "powershell" };
+        return ShellInvocation {
+            program: program.to_string(),
+            args: vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                command.to_string(),
+            ],
+        };
+    }
+    ShellInvocation {
+        program: "sh".to_string(),
+        args: vec!["-lc".to_string(), command.to_string()],
+    }
+}
+
+/// Resolves the shell launcher for the current platform by probing `PATH`.
+fn shell_invocation(command: &str) -> ShellInvocation {
+    build_invocation(
+        command,
+        cfg!(windows),
+        program_on_path("bash"),
+        program_on_path("pwsh"),
+    )
+}
+
 fn prepare_command(
     command: &str,
     cwd: &std::path::Path,
@@ -310,8 +380,9 @@ fn prepare_command(
         return prepared;
     }
 
-    let mut prepared = Command::new("sh");
-    prepared.arg("-lc").arg(command).current_dir(cwd);
+    let invocation = shell_invocation(command);
+    let mut prepared = Command::new(&invocation.program);
+    prepared.args(&invocation.args).current_dir(cwd);
     if sandbox_status.filesystem_active {
         prepared.env("HOME", cwd.join(".sandbox-home"));
         prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
@@ -337,8 +408,9 @@ fn prepare_tokio_command(
         return prepared;
     }
 
-    let mut prepared = TokioCommand::new("sh");
-    prepared.arg("-lc").arg(command).current_dir(cwd);
+    let invocation = shell_invocation(command);
+    let mut prepared = TokioCommand::new(&invocation.program);
+    prepared.args(&invocation.args).current_dir(cwd);
     if sandbox_status.filesystem_active {
         prepared.env("HOME", cwd.join(".sandbox-home"));
         prepared.env("TMPDIR", cwd.join(".sandbox-tmp"));
@@ -374,6 +446,49 @@ mod tests {
         assert_eq!(output.stdout, "hello");
         assert!(!output.interrupted);
         assert!(output.sandbox_status.is_some());
+    }
+
+    #[test]
+    fn unix_invocation_is_sh_lc_unchanged() {
+        let invocation = super::build_invocation("echo hi", false, false, false);
+        assert_eq!(invocation.program, "sh");
+        assert_eq!(invocation.args, vec!["-lc".to_string(), "echo hi".to_string()]);
+        // A real bash present on a Unix host must not change the launcher.
+        let with_bash = super::build_invocation("echo hi", false, true, true);
+        assert_eq!(with_bash.program, "sh");
+    }
+
+    #[test]
+    fn windows_prefers_real_bash_when_present() {
+        let invocation = super::build_invocation("ls -la", true, true, true);
+        assert_eq!(invocation.program, "bash");
+        assert_eq!(invocation.args, vec!["-lc".to_string(), "ls -la".to_string()]);
+    }
+
+    #[test]
+    fn windows_falls_back_to_pwsh_then_powershell() {
+        let pwsh = super::build_invocation("Get-Date", true, false, true);
+        assert_eq!(pwsh.program, "pwsh");
+        assert_eq!(
+            pwsh.args,
+            vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                "Get-Date".to_string(),
+            ]
+        );
+
+        let legacy = super::build_invocation("Get-Date", true, false, false);
+        assert_eq!(legacy.program, "powershell");
+        assert_eq!(legacy.args[0], "-NoProfile");
+    }
+
+    #[test]
+    fn program_on_path_rejects_missing_program() {
+        assert!(!super::program_on_path(
+            "clab-definitely-not-a-real-program-xyz"
+        ));
     }
 
     #[test]
