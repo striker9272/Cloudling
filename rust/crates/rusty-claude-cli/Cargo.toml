@@ -28,18 +28,11 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 tools = { path = "../tools" }
 tempfile = "3"
 log = "0.4"
-
-# Windows-only desktop integration (tray icon + native console/window control).
-# Gated to `cfg(windows)` so the Linux/macOS build pulls none of these and stays
-# unchanged. `tray-icon` brings `muda` (menu) + `windows-sys`; on Windows it does
-# NOT pull the Linux gtk / macOS objc deps (those are target-gated upstream).
-[target.'cfg(windows)'.dependencies]
-tray-icon = "0.24"
-windows-sys = { version = "0.61", features = [
-    "Win32_Foundation",
-    "Win32_System_Console",
-    "Win32_UI_WindowsAndMessaging",
-] }
+# Windows desktop integration (tray icon, console hiding, autostart, uninstall).
+# Quarantines the unavoidable Win32 FFI `unsafe` so this crate keeps the
+# upstream `unsafe_code = "forbid"`. No-op stubs off Windows; pulls no extra
+# deps on Linux/macOS.
+clab-desktop = { path = "../clab-desktop" }
 
 
 [lints]

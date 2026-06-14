@@ -1,0 +1,27 @@
+[package]
+name = "clab-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+
+# Windows-only desktop integration deps. Gated to `cfg(windows)` so the
+# Linux/macOS build pulls none of these. `tray-icon` brings `muda` (menu) +
+# `windows-sys`; on Windows it does NOT pull the Linux gtk / macOS objc deps.
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.24"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+# This crate is the quarantine for the unavoidable Windows FFI `unsafe` (tray,
+# console hiding, registry). The rest of the workspace keeps the upstream
+# `unsafe_code = "forbid"`; we deliberately do NOT inherit the workspace lints
+# here so this crate may use `unsafe` (each block carries a `// SAFETY:` note).
+# We still keep clippy warnings for code quality.
+[lints.clippy]
+all = { level = "warn", priority = -1 }
