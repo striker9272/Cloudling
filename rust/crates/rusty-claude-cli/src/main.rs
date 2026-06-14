@@ -20,6 +20,7 @@ mod render;
 mod engine;
 mod dialog_store;
 mod openai_server;
+mod desktop;
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
@@ -540,6 +541,18 @@ fn plugin_load_failure_json(failure: &plugins::PluginLoadFailure) -> Value {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
+    // Windows: a bare double-click (no args, our own fresh console) launches the
+    // desktop tray instead of the interactive REPL. Running `clab` from a
+    // terminal keeps the REPL, because the shell shares the console.
+    #[cfg(windows)]
+    if args.is_empty() && desktop::launched_by_double_click() {
+        return desktop::run_tray(
+            "127.0.0.1:4097".to_string(),
+            String::new(),
+            None,
+            PermissionMode::ReadOnly,
+        );
+    }
     // #824: suppress config deprecation prose warnings to stderr when JSON
     // output mode is active.  Scan the raw argv before parse_args so the
     // suppression is in place before any settings file is loaded.
@@ -635,6 +648,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             ui,
         } => {
             openai_server::serve_blocking(bind, model, allowed_tools, permission_mode, ui)?;
+        }
+        CliAction::Tray {
+            bind,
+            model,
+            allowed_tools,
+            permission_mode,
+        } => {
+            desktop::run_tray(bind, model, allowed_tools, permission_mode)?;
+        }
+        CliAction::Uninstall { assume_yes } => {
+            desktop::run_uninstall(assume_yes)?;
         }
         CliAction::Doctor { output_format } => run_doctor(output_format)?,
         CliAction::Acp { output_format } => print_acp_status(output_format)?,
@@ -770,6 +794,25 @@ enum CliAction {
         /// Serve the built-in web UI (page + assets) alongside the API. Off by
         /// default so the headless service is unchanged unless explicitly enabled.
         ui: bool,
+    },
+    /// Windows desktop mode: run serve + built-in UI in the background, place a
+    /// tray icon with a right-click menu, and hide the console window. The same
+    /// `clab.exe` in a different role (see `desktop` module). Windows-only at
+    /// runtime; the variant itself is cross-platform so the parser/dispatch
+    /// compile everywhere (non-Windows returns a clear "Windows-only" error).
+    Tray {
+        bind: String,
+        model: String,
+        allowed_tools: Option<AllowedToolSet>,
+        permission_mode: PermissionMode,
+    },
+    /// Windows desktop mode: remove what the desktop integration created
+    /// (shortcuts, autostart entry) and, after confirmation, the per-user data
+    /// directory. Windows-only at runtime.
+    Uninstall {
+        /// Skip the interactive confirmation (CLI `--yes`). The tray menu path
+        /// shows its own GUI confirmation dialog instead.
+        assume_yes: bool,
     },
     Doctor {
         output_format: CliOutputFormat,
@@ -1364,6 +1407,14 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             allowed_tools,
             permission_mode_override.unwrap_or(PermissionMode::ReadOnly),
         ),
+        "tray" => parse_tray_args(
+            &rest[1..],
+            model,
+            model_flag_raw.is_some(),
+            allowed_tools,
+            permission_mode_override.unwrap_or(PermissionMode::ReadOnly),
+        ),
+        "uninstall" => parse_uninstall_args(&rest[1..]),
         "acp" => parse_acp_args(&rest[1..], output_format),
         "login" | "logout" => Err(removed_auth_surface_error(rest[0].as_str())),
         "init" => {
@@ -1776,6 +1827,80 @@ fn resolve_openai_serve_model(
         "missing_model: openai-serve requires an explicit OpenAI-compatible model.\nUsage: claw --model openai/<model> openai-serve [--bind 127.0.0.1:4097] [--ui], or set OPENAI_MODEL=<model>"
             .to_string(),
     )
+}
+
+/// Parse `clab tray [--bind ADDR]`. Mirrors `parse_openai_serve_args`: the tray
+/// always serves the built-in UI (it is the desktop front end), so `--ui` is
+/// implicit and an unconfigured engine is allowed (configured in the browser).
+fn parse_tray_args(
+    args: &[String],
+    model: String,
+    model_was_explicit: bool,
+    allowed_tools: Option<AllowedToolSet>,
+    permission_mode: PermissionMode,
+) -> Result<CliAction, String> {
+    let mut bind = "127.0.0.1:4097".to_string();
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--bind" => {
+                let value = args.get(index + 1).ok_or_else(|| {
+                    "missing_flag_value: missing value for --bind.\nUsage: clab tray [--bind 127.0.0.1:4097]".to_string()
+                })?;
+                bind = value.clone();
+                index += 2;
+            }
+            flag if flag.starts_with("--bind=") => {
+                bind = flag[7..].to_string();
+                index += 1;
+            }
+            "--help" | "-h" => {
+                return Err(
+                    "Usage: clab tray [--bind 127.0.0.1:4097]\nWindows desktop mode: runs the server + built-in web UI in the background, adds a tray icon, and hides the console window. Configure the engine in the browser. Windows-only."
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(format!(
+                    "unknown_option: unknown tray option: {other}.\nUsage: clab tray [--bind 127.0.0.1:4097]"
+                ));
+            }
+        }
+    }
+
+    // `--ui` is always on for the tray, so an unconfigured engine is fine
+    // (resolved in the browser, exactly like `openai-serve --ui`).
+    let model = resolve_openai_serve_model(model, model_was_explicit, true)?;
+    Ok(CliAction::Tray {
+        bind,
+        model,
+        allowed_tools,
+        permission_mode,
+    })
+}
+
+/// Parse `clab uninstall [--yes]`. `--yes`/`-y` skips the interactive
+/// confirmation (the tray-menu path uses a GUI dialog instead).
+fn parse_uninstall_args(args: &[String]) -> Result<CliAction, String> {
+    let mut assume_yes = false;
+    for arg in args {
+        match arg.as_str() {
+            "--yes" | "-y" => assume_yes = true,
+            "--help" | "-h" => {
+                return Err(
+                    "Usage: clab uninstall [--yes]\nRemoves the desktop integration (shortcuts, autostart) and, after confirmation, the per-user data directory (conversations, keys, settings). Windows-only."
+                        .to_string(),
+                );
+            }
+            other => {
+                return Err(format!(
+                    "unknown_option: unknown uninstall option: {other}.\nUsage: clab uninstall [--yes]"
+                ));
+            }
+        }
+    }
+    Ok(CliAction::Uninstall { assume_yes })
 }
 
 fn parse_acp_args(args: &[String], output_format: CliOutputFormat) -> Result<CliAction, String> {
@@ -11706,6 +11831,16 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
     writeln!(
         out,
         "      Dump the latest (or named) session as markdown; writes to PATH or stdout"
+    )?;
+    writeln!(out, "  clab tray [--bind ADDR]")?;
+    writeln!(
+        out,
+        "      Windows only: run server + web UI in the background with a tray icon (no console window)"
+    )?;
+    writeln!(out, "  clab uninstall [--yes]")?;
+    writeln!(
+        out,
+        "      Windows only: remove desktop integration and (after confirmation) per-user data"
     )?;
     writeln!(out)?;
     writeln!(out, "Flags:")?;

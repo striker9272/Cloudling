@@ -29,6 +29,18 @@ tools = { path = "../tools" }
 tempfile = "3"
 log = "0.4"
 
+# Windows-only desktop integration (tray icon + native console/window control).
+# Gated to `cfg(windows)` so the Linux/macOS build pulls none of these and stays
+# unchanged. `tray-icon` brings `muda` (menu) + `windows-sys`; on Windows it does
+# NOT pull the Linux gtk / macOS objc deps (those are target-gated upstream).
+[target.'cfg(windows)'.dependencies]
+tray-icon = "0.24"
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 
 [lints]
 workspace = true
