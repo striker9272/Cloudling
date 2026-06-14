@@ -68,17 +68,14 @@ mod imp {
         MB_ICONWARNING, MB_YESNO, MSG, SW_HIDE,
     };
 
-    /// `CreateProcess` flag: do not create a console window for the child.
-    /// Defined locally to avoid pulling the `Win32_System_Threading` feature for
-    /// these constants.
+    /// `CreateProcess` flag: the process gets a console but no console *window*.
+    /// Crucially, child processes it spawns (git for context, the PowerShell/bash
+    /// tool, etc.) inherit this window-less console instead of allocating their
+    /// own — so they don't flash console windows on every model turn. Defined
+    /// locally to avoid pulling the `Win32_System_Threading` feature for it.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-    /// `CreateProcess` flag: the child gets no console at all (not even a hidden
-    /// one). Used to relaunch the tray windowless and to run the detached
-    /// uninstaller.
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-
-    /// Set in the environment of the relaunched, console-less tray process so it
+    /// Set in the environment of the relaunched, window-less tray process so it
     /// runs the tray directly instead of relaunching itself again.
     const DETACHED_ENV: &str = "CLAB_TRAY_DETACHED";
 
@@ -95,16 +92,19 @@ mod imp {
         // launched from autostart, or run as `clab tray` in a terminal. On
         // Windows 11 that console is hosted by Windows Terminal (a separate
         // process), so ShowWindow(SW_HIDE) only minimizes a window we don't own.
-        // The robust fix: relaunch ourselves as a DETACHED process that has no
-        // console at all, then let this process exit — which closes the
-        // originating console/terminal window. The relaunched child carries
-        // DETACHED_ENV so it runs the tray directly instead of relaunching again.
+        // The robust fix: relaunch ourselves with CREATE_NO_WINDOW — a console
+        // with no window — then let this process exit, which closes the
+        // originating console/terminal window. The window-less console is also
+        // inherited by every child process we later spawn (git, the shell tool),
+        // so none of them flash their own console window. The relaunched child
+        // carries DETACHED_ENV so it runs the tray directly instead of
+        // relaunching again.
         if std::env::var_os(DETACHED_ENV).is_none() {
-            relaunch_detached_tray(&bind)?;
+            relaunch_windowless_tray(&bind)?;
             return Ok(());
         }
 
-        // Detached child: no console exists; this is a harmless no-op safety net.
+        // Window-less child: there is no console window; harmless no-op safety net.
         hide_console_window();
 
         let open_url = browser_url(&bind);
@@ -230,27 +230,38 @@ mod imp {
         last
     }
 
-    /// Relaunch this executable as a console-less detached `clab tray` process.
-    fn relaunch_detached_tray(bind: &str) -> std::io::Result<()> {
+    /// Relaunch this executable as a window-less `clab tray` process whose
+    /// console (and thus its child processes' console) has no window.
+    ///
+    /// The relaunched process runs from the user's home directory rather than
+    /// wherever the `.exe` happens to sit (e.g. Desktop). The agent creates a
+    /// project-local `.claw` config dir relative to its working directory; from
+    /// home that coincides with the per-user config dir (`%USERPROFILE%\.claw`,
+    /// which uninstall removes) instead of littering one next to the executable.
+    fn relaunch_windowless_tray(bind: &str) -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
-        Command::new(exe)
+        let mut command = Command::new(exe);
+        command
             .arg("tray")
             .arg("--bind")
             .arg(bind)
             .env(DETACHED_ENV, "1")
-            .creation_flags(DETACHED_PROCESS)
-            .spawn()?;
+            .creation_flags(CREATE_NO_WINDOW);
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            command.current_dir(home);
+        }
+        command.spawn()?;
         Ok(())
     }
 
-    /// Launch a detached `clab uninstall --yes` process (no console) that deletes
-    /// the data directories once this process has released its file locks.
+    /// Launch a window-less `clab uninstall --yes` process that deletes the data
+    /// directories once this process has released its file locks.
     fn spawn_uninstall_detached() -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
         Command::new(exe)
             .arg("uninstall")
             .arg("--yes")
-            .creation_flags(DETACHED_PROCESS)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()?;
         Ok(())
     }
@@ -386,8 +397,8 @@ mod imp {
             (20.0, 11.0, 5.0),
         ];
         let (vb_w, vb_h) = (40.0_f32, 28.0_f32);
-        // Cloud sits at ~62% width, centered, leaving a dark margin.
-        let scale = (SIZE as f32 * 0.62) / vb_w;
+        // Cloud fills ~85% of the tile width, centered, leaving a small margin.
+        let scale = (SIZE as f32 * 0.85) / vb_w;
         let off_x = (SIZE as f32 - vb_w * scale) / 2.0;
         let off_y = (SIZE as f32 - vb_h * scale) / 2.0;
         let tile_radius = 6.0_f32;
