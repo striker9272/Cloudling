@@ -3154,7 +3154,7 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
     // Honest fallback notice: with no configured search backend, clab scrapes
     // DuckDuckGo HTML, which is unreliable. Surface that instead of silently
     // presenting the built-in default as a first-class search provider.
-    if std::env::var("CLAWD_WEB_SEARCH_BASE_URL").is_err() {
+    if configured_web_search_base().is_none() {
         summary = format!(
             "Note: no web search backend configured; using the built-in DuckDuckGo fallback \
              (results may be unreliable). Set CLAWD_WEB_SEARCH_BASE_URL to a JSON search backend \
@@ -3232,8 +3232,20 @@ fn ipv6_is_local(v6: &std::net::Ipv6Addr) -> bool {
     (seg0 & 0xfe00) == 0xfc00 || (seg0 & 0xffc0) == 0xfe80
 }
 
+/// The configured JSON web-search backend, if any. An unset *or blank*
+/// `CLAWD_WEB_SEARCH_BASE_URL` counts as "not configured", so we fall back to the
+/// built-in DuckDuckGo scrape instead of parsing an empty string as a URL (which fails
+/// with "relative URL without a base"). Some installs write the variable empty when no
+/// SearXNG backend is chosen, so an empty value must not break web search.
+fn configured_web_search_base() -> Option<String> {
+    match std::env::var("CLAWD_WEB_SEARCH_BASE_URL") {
+        Ok(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        _ => None,
+    }
+}
+
 fn build_search_url(query: &str) -> Result<reqwest::Url, String> {
-    if let Ok(base) = std::env::var("CLAWD_WEB_SEARCH_BASE_URL") {
+    if let Some(base) = configured_web_search_base() {
         let mut url = reqwest::Url::parse(&base).map_err(|error| error.to_string())?;
         url.query_pairs_mut().append_pair("q", query);
         return Ok(url);
@@ -8052,6 +8064,29 @@ mod tests {
         assert_eq!(content.len(), 1);
         assert_eq!(content[0]["title"], "Reqwest docs");
         assert_eq!(content[0]["url"], "https://docs.rs/reqwest");
+    }
+
+    #[test]
+    fn web_search_blank_base_url_falls_back_to_duckduckgo() {
+        // A blank CLAWD_WEB_SEARCH_BASE_URL (some installs write it empty when no
+        // SearXNG backend is chosen) must be treated as "unset" rather than parsed as
+        // a URL — otherwise build_search_url fails with "relative URL without a base".
+        // Regression test for web search failing out of the box on Windows.
+        let _guard = env_lock()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+        std::env::set_var("CLAWD_WEB_SEARCH_BASE_URL", "");
+        assert!(super::configured_web_search_base().is_none());
+        let url = super::build_search_url("hello world").expect("blank base must fall back, not error");
+        assert_eq!(url.host_str(), Some("html.duckduckgo.com"));
+
+        std::env::set_var("CLAWD_WEB_SEARCH_BASE_URL", "   ");
+        assert!(super::configured_web_search_base().is_none());
+        let url = super::build_search_url("hello").expect("whitespace base must fall back");
+        assert_eq!(url.host_str(), Some("html.duckduckgo.com"));
+
+        std::env::remove_var("CLAWD_WEB_SEARCH_BASE_URL");
     }
 
     #[test]
