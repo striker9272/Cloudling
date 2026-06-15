@@ -308,6 +308,9 @@ details.tool>summary.head::-webkit-details-marker{display:none;}
 details.tool>summary.head::after{content:"▾"; margin-left:auto; color:var(--faint); font-size:11px; transition:transform .15s;}
 details.tool[open]>summary.head::after{transform:rotate(180deg);}
 .toolout{margin:6px 0 0; padding:8px 10px; border:1px solid #1f1f24; border-radius:6px; background:#0e0e11; font-family:var(--mono); font-size:12px; line-height:1.5; max-height:280px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#c4c7cd;}
+/* The agent's tool invocation (command / input params), shown above its output */
+.toolcmd{margin:6px 0 0; padding:6px 10px; border:1px solid #232329; border-radius:6px; background:#121216; font-family:var(--mono); font-size:12px; line-height:1.5; max-height:160px; overflow:auto; white-space:pre-wrap; word-break:break-word; color:#9aa0a8;}
+.toolcmd::before{content:"\203A  "; color:var(--faint);}
 .tool.reason{border-left-color:var(--line2);}
 .tool.reason .tag{color:var(--faint); font-weight:500;}
 .tool.reason .toolout{font-family:inherit; color:var(--muted);}

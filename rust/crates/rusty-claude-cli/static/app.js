@@ -397,9 +397,20 @@
     var name=(attrs.match(/\bname="([^"]*)"/)||[])[1]||'';
     /* TodoWrite is shown in the task bar under the header, not as an inline plate */
     if(name==='TodoWrite') return null;
-    return buildToolEl(name, inner);
+    var args=(attrs.match(/\barguments="([^"]*)"/)||[])[1]||'';
+    return buildToolEl(name, inner, args);
   }
-  function buildToolEl(name, inner){
+  /* The tool invocation lives in the block's arguments="…" attr (HTML-escaped JSON). Show it
+     above the output so it is clear *what* the agent ran: the command string for shell tools,
+     else a compact view of the input params. Empty ("{}") arguments render nothing. */
+  function toolCommandText(rawArgs){
+    if(!rawArgs) return '';
+    var obj; try{ obj=JSON.parse(decodeEntities(rawArgs)); }catch(e){ return ''; }
+    if(!obj || typeof obj!=='object') return '';
+    if(typeof obj.command==='string' && obj.command.trim()) return obj.command.replace(/\r\n?/g,'\n');
+    return Object.keys(obj).length ? JSON.stringify(obj) : '';
+  }
+  function buildToolEl(name, inner, args){
     var fail=/<summary>\s*Tool Failed/i.test(inner);
     var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
     var d=document.createElement('details'); d.className='tool'+(fail?' fail':'');
@@ -432,7 +443,11 @@
     }
     catch(e){ text=raw; }
     pre.textContent=text;
-    d.appendChild(sum); d.appendChild(pre); return d;
+    d.appendChild(sum);
+    var cmd=toolCommandText(args);
+    if(cmd){ var cel=document.createElement('pre'); cel.className='toolcmd'; cel.textContent=cmd; d.appendChild(cel); }
+    d.appendChild(pre);
+    return d;
   }
   /* reasoning block: the model's thinking, collapsed by default */
   function buildReasonEl(inner){
