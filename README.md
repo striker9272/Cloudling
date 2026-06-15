@@ -42,7 +42,7 @@
 
 На выходе Claw Lab поднимает `/v1/chat/completions` со стримингом, который Open WebUI (или другой клиент) видит как одну модель. Всё остальное — инструменты, поиск, сессии — уже внутри.
 
-> **Статус:** проект экспериментальный, для домашнего сервера. **Проверенная платформа — Linux**; macOS и Windows/WSL — на будущее, «как есть» и без гарантий (бинарники под них собираются в CI, но регулярно не тестируются). Сервис ставится одной командой (бэкенд + вывод) или интерактивным мастером — см. раздел «Запуск как сервиса» ниже.
+> **Статус:** проект экспериментальный, для домашнего сервера. **Основная серверная платформа — Linux** (сервис ставится одной командой или интерактивным мастером — см. «Запуск как сервиса» ниже). Для **Windows** есть нативная десктоп-сборка: тот же `clab.exe` живёт значком в трее (двойной клик → фоновый serve+UI, без Docker и WSL), проверена на Windows 11 — см. [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS — «как есть», без гарантий.
 
 ### Что внутри
 
@@ -53,6 +53,7 @@
 - **Стабильное имя модели** — фронт видит постоянный id (например `clab-agent`), а реальная модель провайдера остаётся внутренней и заменяемой.
 - **Изоляция** — живой сервис работает в нейтральной директории и не тянет в обычные чаты `CLAUDE.md`, git-статус и настройки проекта.
 - **Встроенный веб-интерфейс (необязательно)** — с флагом `--ui` тот же бинарник отдаёт на том же порту страницу чата: стрим, сворачиваемые tool-call'ы, markdown, вложения-картинки, серверное хранилище диалогов/пресетов/настроек. По умолчанию headless — UI не мешает API. Подробности — [`docs/web-ui.md`](./docs/web-ui.md).
+- **Нативное десктоп-приложение для Windows (необязательно)** — тот же `clab.exe` умеет жить значком в трее: двойной клик → фоновый serve+UI без окна консоли; меню «открыть в браузере / автозапуск / удалить»; без Docker и WSL. В терминале `clab` остаётся обычным CLI/REPL. Подробности — [`docs/windows-install-release.md`](./docs/windows-install-release.md).
 
 ### Быстрый старт
 
@@ -175,7 +176,7 @@ By design you only need two things:
 
 Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or any client) sees as a single model. Everything else — tools, search, sessions — happens inside.
 
-> **Status:** experimental, built for a home server. **Linux is the validated platform**; macOS and Windows/WSL are best-effort, future targets with no guarantees (CI builds binaries for them but they are not tested regularly). The service installs with a single command (backend + output) or an interactive wizard — see "Run it as a service" below.
+> **Status:** experimental, built for a home server. **Linux is the primary server platform** (the service installs with a single command or an interactive wizard — see "Run it as a service" below). **Windows** has a native desktop build: the same `clab.exe` lives as a system-tray app (double-click → background serve+UI, no Docker or WSL), tested on Windows 11 — see [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS is best-effort with no guarantees.
 
 ### What's inside
 
@@ -186,6 +187,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 - **Stable model name** — the frontend sees a constant id (e.g. `clab-agent`) while the real provider model stays internal and swappable.
 - **Isolation** — the live service runs in a neutral workdir and won't pull `CLAUDE.md`, git status, or project settings into ordinary chats.
 - **Built-in web UI (optional)** — with the `--ui` flag the same binary serves a chat page on the same port: streaming, collapsible tool calls, markdown, image attachments, and server-side storage of dialogs/presets/settings. Headless by default — the UI never gets in the API's way. See [`docs/web-ui.md`](./docs/web-ui.md).
+- **Native Windows desktop app (optional)** — the same `clab.exe` can run as a system-tray app: double-click → background serve+UI with no console window; tray menu to open it in the browser, toggle start-at-login, or uninstall; no Docker or WSL. In a terminal `clab` stays a normal CLI/REPL. See [`docs/windows-install-release.md`](./docs/windows-install-release.md).
 
 ### Quick start
 

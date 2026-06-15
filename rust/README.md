@@ -183,6 +183,7 @@ rust/
 ├── Cargo.lock
 └── crates/
     ├── api/                # Provider clients + streaming + request preflight
+    ├── clab-desktop/       # Windows tray/desktop integration (FFI quarantine; no-op off Windows)
     ├── commands/           # Shared slash-command registry + help rendering
     ├── compat-harness/     # TS manifest extraction harness
     ├── mock-anthropic-service/ # Deterministic local Anthropic-compatible mock
@@ -196,6 +197,7 @@ rust/
 ### Crate Responsibilities
 
 - **api** — provider clients, SSE streaming, request/response types, auth (`ANTHROPIC_API_KEY` + bearer-token support), request-size/context-window preflight
+- **clab-desktop** — Windows-only desktop integration: system-tray app (`clab tray`), console hiding, registry autostart, uninstall (`clab uninstall`). Quarantines all Windows FFI `unsafe`; the rest of the workspace stays `unsafe_code = forbid`. No-op stubs on non-Windows.
 - **commands** — slash command definitions, parsing, help text generation, JSON/text command rendering
 - **compat-harness** — extracts tool/prompt manifests from upstream TS source
 - **mock-anthropic-service** — deterministic `/v1/messages` mock for CLI parity tests and local harness runs
@@ -208,8 +210,8 @@ rust/
 ## Stats
 
 - **~20K lines** of Rust
-- **9 crates** in workspace
-- **Binary name:** `claw`
+- **12 crates** in workspace
+- **Binary name:** `clab` (package `clab-cli`)
 - **Default model:** `claude-opus-4-6`
 - **Default permissions:** `danger-full-access`
 

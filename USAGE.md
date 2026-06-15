@@ -458,6 +458,15 @@ let client = build_http_client_with(&config).expect("proxy client");
 
 `clab openai-serve --ui` serves a browser chat page on the same port as the API (the service is headless by default). The easiest way to enable it is the service installer's **UI-first mode**: choose the built-in web UI at the first wizard prompt and it skips the backend questions, generates a `CLAW_UI_TOKEN`, sets the UI env vars, and prints the page address + token — you then point clab at your engine in the browser. Manually, pass the `--ui` flag and set `CLAW_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints), `CLAW_UI_DATA_DIR` (dialog/preset storage), and `CLAW_OPENAI_ENV_FILE` (so the UI can save engine settings and restart the core). See [`docs/web-ui.md`](./docs/web-ui.md) for the full guide, all environment variables, and the `/ui/*` auth model.
 
+## Windows desktop (tray)
+
+On Windows, the same `clab.exe` can run as a native system-tray app instead of from a terminal:
+double-click it (or run `clab tray`) and it starts serve + the built-in UI in the background, with no
+console window, and shows a tray icon. The right-click menu opens the UI in the browser, toggles
+start-at-login (off by default), or uninstalls (`clab uninstall` removes per-user data under
+`%USERPROFILE%\.claw` plus the autostart entry). Running `clab` from a terminal stays the normal
+CLI/REPL. No Docker or WSL required. Full walkthrough: [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+
 ## Backend timeouts and retries
 
 The HTTP client that talks to your model backend has a tunable connect timeout and retry policy, set via optional `CLAW_BACKEND_*` environment variables. They are read when the client is built per request, so changes apply without a restart, and the defaults are sensible — an unreachable backend surfaces as an error in seconds rather than minutes.
@@ -567,11 +576,14 @@ cargo test --workspace
 Current Rust crates:
 
 - `api`
+- `clab-analog`
+- `clab-desktop` (Windows-only tray/desktop integration; no-op stubs elsewhere)
+- `clab-rag-service`
 - `commands`
 - `compat-harness`
 - `mock-anthropic-service`
 - `plugins`
 - `runtime`
-- `rusty-claude-cli`
+- `rusty-claude-cli` (package `clab-cli`; the `clab` binary)
 - `telemetry`
 - `tools`

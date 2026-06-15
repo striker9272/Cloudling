@@ -18,11 +18,15 @@ and deploy tooling are Claw Lab's.
 ## Stack & repository shape
 
 - Language: Rust. The workspace lives in `rust/` (members under `rust/crates/*`).
-- Binary: **`clab`** (defined in crate `clab-cli`). Other notable crates: `clab-analog`,
-  `clab-rag-service`.
+- Binary: **`clab`** (defined in crate `clab-cli`). Other notable crates: `clab-desktop`
+  (Windows tray/desktop integration), `clab-analog`, `clab-rag-service`.
 - `USAGE.md` — task-oriented usage guide. `docs/` — Windows, local providers, containers,
   model compatibility, RAG/web-ui, navigation/file-context.
 - `src/` + `tests/` — companion reference/audit workspace, not the primary runtime.
+- **Windows desktop:** `clab tray` runs serve + the built-in UI in the background as a
+  system-tray app with no console window (a bare double-click does the same; `clab` in a
+  terminal stays the CLI/REPL); `clab uninstall` removes per-user data + the autostart
+  entry. All Windows FFI lives in the `clab-desktop` crate. See `docs/windows-install-release.md`.
 
 ## Build, verify, test
 
@@ -35,6 +39,13 @@ cargo test --workspace
 ```
 
 Formatting from repo root: `scripts/fmt.sh --check` (or `scripts/fmt.sh` to apply).
+
+A plain Linux/macOS `cargo build` does **not** compile the `#[cfg(windows)]` code (the `clab-desktop`
+tray/FFI). To compile-check the Windows-only code without a Windows machine:
+`cargo check -p clab-cli --target x86_64-pc-windows-gnu` (one-time: `rustup target add
+x86_64-pc-windows-gnu` + a mingw cross C toolchain — `ring`/`rusqlite` build their C for the target).
+This is a dev convenience on the build host, **not** a product dependency. The real Windows `.exe` is
+built MSVC by `release.yml`.
 
 ## Install & release
 
@@ -96,6 +107,10 @@ deploy interactively.
   the **upstream** project (MIT attribution requirement — `LICENSE` must stay intact).
 - **Language:** code, commits, and public docs in English; maintainer conversation may
   be in another language.
+- **Unsafe code:** the workspace sets `unsafe_code = "forbid"` (from upstream) — keep it. The one
+  exception is `clab-desktop` (Windows tray/console/registry FFI), which opts out via its own
+  crate-level `[lints]` and documents every `unsafe` block with `// SAFETY:`. Do not introduce
+  `unsafe` anywhere else; new unavoidable FFI belongs in `clab-desktop` (or a similarly-quarantined crate).
 - **CI:** GitHub Actions does **not** gate on the build. `.github/workflows/rust-ci.yml`
   (push/PR to `main`) runs only the docs source-of-truth job — two Python checks
   (`check_doc_source_of_truth.py` for branding/links and `check_release_readiness.py`);

@@ -1,8 +1,38 @@
 # Windows install and release quickstart
 
-> **Status: experimental / unvalidated.** Linux is the supported platform for Claw Lab. The Windows and macOS release binaries are produced by CI but are not tested regularly, and `install.sh --prebuilt` currently downloads Linux/macOS artifacts only. Treat this guide as best-effort. For the primary path, see the root [`README.md`](../README.md) and [`USAGE.md`](../USAGE.md).
+> **Status:** Linux is the primary server platform for Claw Lab. On Windows, the **native desktop app
+> (system tray)** described below is the recommended path and has been tested on Windows 11; the
+> PowerShell CLI / build-from-source paths are also supported for development. macOS release binaries are
+> produced by CI but not tested regularly. For the server/Linux path, see the root [`README.md`](../README.md)
+> and [`USAGE.md`](../USAGE.md).
 
-This page is the PowerShell-first path for installing, verifying, and safely switching providers on Windows. It is intentionally copyable without embedding live secrets.
+## Native desktop app (system tray)
+
+The simplest way to run Claw Lab on Windows — no Docker, no WSL, no terminal. Tested on Windows 11.
+
+1. Get `claw-windows-x64.exe` from a GitHub release (or build it — see Option A below) and put it anywhere,
+   e.g. your Desktop. You may rename it to `clab.exe`.
+2. **Double-click it.** It starts the agent server with the built-in web UI in the background and adds a
+   cloud icon to the system tray (near the clock). No console window stays open.
+3. **Right-click the tray icon** for the menu:
+   - **Open Claw Lab** — opens the chat UI in your browser (`http://127.0.0.1:4097/`). On first run, point it
+     at your model backend and save.
+   - **Start at login** — optional autostart (off by default; a per-user `HKCU\...\Run` registry entry).
+   - **Uninstall…** — after a confirmation, removes the per-user data (conversations, keys, settings) and the
+     autostart entry.
+   - **Quit** — stops the background server and exits.
+
+Per-user data (settings + conversations) lives under `%USERPROFILE%\.claw`. The same `clab.exe` run from a
+terminal stays a normal CLI/REPL (see below). Under the hood the tray mode is `clab tray` and the menu's
+uninstall is `clab uninstall`.
+
+> Windows SmartScreen may warn about an unsigned download — choose **More info → Run anyway**. Code signing
+> is planned.
+
+## PowerShell CLI / build-from-source
+
+The rest of this page is the PowerShell-first path for installing, verifying, and safely switching providers
+on Windows from the command line. It is intentionally copyable without embedding live secrets.
 
 ## Choose an install path
 
