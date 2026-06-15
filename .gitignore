@@ -3,12 +3,12 @@ archive/
 .omx/
 .omc/
 .clawd-agents/
-# Claude Code local artifacts
-.claude/settings.local.json
-.claude/sessions/
-# Claw Code local artifacts
-.claw/settings.local.json
-.claw/sessions/
+# Claude Code local artifacts (any depth: repo root or a subdir like rust/)
+**/.claude/settings.local.json
+**/.claude/sessions/
+# Claw Code local artifacts (any depth)
+**/.claw/settings.local.json
+**/.claw/sessions/
 .clawhip/
 status-help.txt
 # Legacy Python port session scratch artifacts
