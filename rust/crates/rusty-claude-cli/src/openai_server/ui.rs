@@ -381,15 +381,33 @@ fn write_env_file(
             }
         }
     }
+    // Prefer a crash-safe atomic write (temp file + rename); it also lets us lock down the
+    // mode before the file is visible. But temp+rename needs write permission on the parent
+    // *directory*. Hardened installs make the env file group-writable yet keep its directory
+    // root-owned (e.g. /etc/claw-lab), so the atomic path fails there with EACCES — fall back
+    // to rewriting the existing file in place, which only needs write permission on the file
+    // itself and preserves its mode (the inode is unchanged).
+    match atomic_write_env_file(path, &out) {
+        Ok(()) => Ok(()),
+        Err(_) if path.exists() => std::fs::write(path, out.as_bytes()).map_err(|e| e.to_string()),
+        Err(error) => Err(error),
+    }
+}
+
+/// Crash-safe write: stage the new contents into a sibling temp file (carrying over the env
+/// file's mode so the API key never lands in a world-readable file) and rename over the
+/// target. Requires write permission on the parent directory; `write_env_file` falls back to
+/// an in-place write when that is not available (root-owned config dir + group-writable file).
+fn atomic_write_env_file(path: &std::path::Path, contents: &str) -> Result<(), String> {
     let tmp = path.with_extension("env.tmp");
-    std::fs::write(&tmp, out.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, contents.as_bytes()).map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        // The env file holds secrets (API key). `fs::write` creates the temp file
-        // with umask permissions (usually 0644); the rename would silently replace
-        // the installer's restrictive mode (0640) with a world-readable file.
-        // Carry over the existing file's mode, falling back to owner-only.
+        // The env file holds secrets (API key). `fs::write` creates the temp file with umask
+        // permissions (usually 0644); the rename would silently replace the installer's
+        // restrictive mode (0640) with a world-readable file. Carry over the existing file's
+        // mode, falling back to owner-only.
         let mode = std::fs::metadata(path)
             .map(|m| m.permissions().mode() & 0o777)
             .unwrap_or(0o600);
@@ -687,5 +705,42 @@ mod tests {
             ui_auth_decision(Some("tok"), false, Some("Bearer  tok ")),
             UiAuthDecision::Allow
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_env_file_falls_back_to_in_place_when_dir_is_read_only() {
+        // Reproduces the hardened-install layout: the env file is group-writable but its
+        // directory is root-owned (not writable by the service user), so the atomic
+        // temp+rename cannot stage a sibling file. The in-place fallback must still persist
+        // the change. Regression for the Linux settings-save EACCES.
+        use std::os::unix::fs::PermissionsExt;
+
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("clab-env-test-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("openai.env");
+        std::fs::write(&path, "OPENAI_MODEL=old\nUNRELATED=keep\n").unwrap();
+
+        // Read+execute but NOT write: blocks creating/renaming entries in the dir while an
+        // existing file inside it stays writable — exactly the bой layout.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let mut updates = std::collections::HashMap::new();
+        updates.insert("OPENAI_MODEL".to_string(), "new".to_string());
+        let result = write_env_file(&path, &updates);
+
+        // Restore dir perms first so cleanup can proceed regardless of the assertions.
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        result.expect("in-place fallback should persist when the dir is not writable");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("OPENAI_MODEL=new"), "updated key not written: {content}");
+        assert!(content.contains("UNRELATED=keep"), "unrelated line not preserved: {content}");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
