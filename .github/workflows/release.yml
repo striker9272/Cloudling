@@ -40,7 +40,7 @@ jobs:
       run:
         working-directory: rust
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -60,7 +60,7 @@ jobs:
           (cd dist && { if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.artifact_name }}"; else shasum -a 256 "${{ matrix.artifact_name }}"; fi; } > "${{ matrix.artifact_name }}.sha256")
 
       - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
           path: |
