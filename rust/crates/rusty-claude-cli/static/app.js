@@ -409,6 +409,14 @@
     var raw=decodeEntities(out), text;
     try{
       var parsed=JSON.parse(raw);
+      /* The server JSON-encodes the tool-output string (serde_json::to_string), so the
+         first parse only unwraps that layer and yields the original output string. When
+         that output is itself JSON (shell tools return {stdout,stderr,…} as a string),
+         parse once more to reach the object. Plain-text output stays a string (the inner
+         parse throws and we keep it). */
+      if(typeof parsed==='string'){
+        try{ var inner=JSON.parse(parsed); if(inner && typeof inner==='object') parsed=inner; }catch(_){}
+      }
       if(parsed && typeof parsed==='object' && ('stdout' in parsed || 'stderr' in parsed)){
         /* Shell / PowerShell-style result: show the actual output, not raw JSON.
            Normalize CRLF (and lone CR) so Windows output is not a "\r\n" wall,
