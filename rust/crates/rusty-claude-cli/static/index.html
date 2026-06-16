@@ -58,7 +58,7 @@
   <details class="acc">
     <summary>Чат <span class="chev">▾</span></summary>
     <div class="body">
-      <div class="fld" style="margin-top:10px;"><div class="lab">Размышления модели <span class="env">reasoning</span></div><select id="showReason"><option value="true">показывать</option><option value="false">скрывать</option></select></div>
+      <div class="fld row" style="margin-top:10px;"><div class="lab">Размышления модели <span class="env">reasoning</span></div><label class="switch"><input type="checkbox" id="showReason" checked><span class="track"></span></label></div>
       <div class="note">Сворачиваемый блок с рассуждениями reasoning-модели. Применяется со следующего сообщения; если у модели нет этого режима — блока просто не будет.</div>
     </div>
   </details>
@@ -77,11 +77,12 @@
   <details class="acc">
     <summary>Безопасность <span class="chev">▾</span></summary>
     <div class="body">
-      <div class="subhead" style="margin-top:10px;">Песочница</div>
-      <div class="fld"><div class="lab">Песочница</div><select data-sb="enabled"><option value="true">включена</option><option value="false">выключена</option></select></div>
+      <div class="subhead subhead-row" style="margin-top:10px;">Песочница<label class="switch"><input type="checkbox" data-sb="enabled"><span class="track"></span></label></div>
+      <div id="sbParams">
       <div class="fld"><div class="lab">Файловая система <span class="env">filesystemMode</span></div><select data-sb="filesystemMode"><option value="off">без ограничений</option><option value="workspace-only">только рабочая папка</option><option value="allow-list">по списку доверенных</option></select></div>
-      <div class="fld"><div class="lab">Сетевая изоляция <span class="env">networkIsolation</span></div><select data-sb="networkIsolation"><option value="false">выкл</option><option value="true">вкл</option></select></div>
-      <div class="fld"><div class="lab">Ограничения namespace <span class="env">namespaceRestrictions</span></div><select data-sb="namespaceRestrictions"><option value="true">вкл</option><option value="false">выкл</option></select></div>
+      <div class="fld row"><div class="lab">Сетевая изоляция <span class="env">networkIsolation</span></div><label class="switch"><input type="checkbox" data-sb="networkIsolation"><span class="track"></span></label></div>
+      <div class="fld row"><div class="lab">Ограничения namespace <span class="env">namespaceRestrictions</span></div><label class="switch"><input type="checkbox" data-sb="namespaceRestrictions"><span class="track"></span></label></div>
+      </div>
       <div class="subhead">Доверенные папки <span class="env">trustedRoots</span></div>
       <div class="fld"><textarea class="cfgta" id="cfgTrusted" placeholder="По одному пути на строку, например /home/user/projects"></textarea></div>
       <div class="subhead">Правила доступа <span class="env">permissions</span></div>
@@ -108,7 +109,7 @@
       <textarea placeholder="Спроси или дай задачу…"></textarea>
       <div class="bar">
         <div class="barleft"><button class="clip" type="button" title="Прикрепить файл" aria-label="Прикрепить файл"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L10 17.4a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/></svg></button><input type="file" class="fileinput" multiple hidden /><span class="model"><span class="dot"></span></span></div>
-        <button class="send" aria-label="Отправить" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16161a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>
+        <button class="send" aria-label="Отправить" title="Отправить"><svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 7.2 L19.6 16.4 L12 15 L4.4 16.4 Z"/></svg></button>
       </div>
     </div>
   </div>
@@ -125,7 +126,7 @@
         <textarea placeholder="Ответить…"></textarea>
         <div class="bar">
           <div class="barleft"><button class="clip" type="button" title="Прикрепить файл" aria-label="Прикрепить файл"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5l-8.5 8.5a5 5 0 0 1-7-7l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7L10 17.4a1.6 1.6 0 0 1-2.3-2.3l7.8-7.8"/></svg></button><input type="file" class="fileinput" multiple hidden /><span class="model"><span class="dot"></span></span></div>
-          <button class="send" aria-label="Отправить" title="Отправить"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16161a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg></button>
+          <button class="send" aria-label="Отправить" title="Отправить"><svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 7.2 L19.6 16.4 L12 15 L4.4 16.4 Z"/></svg></button>
         </div>
       </div>
     </div>

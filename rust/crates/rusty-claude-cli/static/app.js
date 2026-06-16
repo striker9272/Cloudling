@@ -9,7 +9,7 @@
     pin:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v1H7v-1l3-3z"/><path d="M12 17v4"/></svg>',
     trash:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M7 7l1 13h8l1-13"/><path d="M9 7V4h6v3"/></svg>',
     check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>',
-    send:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#16161a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="M6 11l6-6 6 6"/></svg>',
+    send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 7.2 L19.6 16.4 L12 15 L4.4 16.4 Z"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
@@ -1056,6 +1056,7 @@
 
   /* ---------- security section: settings.json-backed config (no restart) ---------- */
   function cfgSandboxFields(){ return document.querySelectorAll('.drawer.right [data-sb]'); }
+  function gateSandbox(){ var m=document.querySelector('.drawer.right [data-sb="enabled"]'); var p=document.getElementById('sbParams'); if(!m||!p) return; var off=!m.checked; p.classList.toggle('sb-off', off); p.querySelectorAll('input,select').forEach(function(x){ x.disabled=off; }); }
   function linesToArray(s){ return (s||'').split('\n').map(function(x){ return x.trim(); }).filter(function(x){ return x.length; }); }
   function loadConfig(){
     return uiFetch('/ui/config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
@@ -1066,8 +1067,9 @@
         var k=el.getAttribute('data-sb');
         var v=(sb && k in sb)?sb[k]:defaults[k];
         if(typeof v==='boolean') v=v?'true':'false';
-        el.value=(v==null?'':String(v));
+        if(el.type==='checkbox') el.checked=(v==='true'); else el.value=(v==null?'':String(v));
       });
+      gateSandbox();
       document.getElementById('cfgTrusted').value=(c.trustedRoots||[]).join('\n');
       var perm=c.permissions||{};
       document.getElementById('cfgAllow').value=(perm.allow||[]).join('\n');
@@ -1083,7 +1085,7 @@
     var btn=this; btn.disabled=true; document.getElementById('cfgMsg').hidden=true;
     var sandbox={};
     cfgSandboxFields().forEach(function(el){
-      var k=el.getAttribute('data-sb'), v=el.value;
+      var k=el.getAttribute('data-sb'), v=(el.type==='checkbox')?(el.checked?'true':'false'):el.value;
       sandbox[k]=(v==='true')?true:(v==='false')?false:v;
     });
     var body={ sandbox:sandbox, trustedRoots:linesToArray(document.getElementById('cfgTrusted').value), permissions:{ allow:linesToArray(document.getElementById('cfgAllow').value), deny:linesToArray(document.getElementById('cfgDeny').value) } };
@@ -1093,15 +1095,16 @@
       .catch(function(err){ btn.disabled=false; cfgMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
   });
   loadConfig();
+  (function(){ var m=document.querySelector('.drawer.right [data-sb="enabled"]'); if(m) m.addEventListener('change', gateSandbox); })();
 
   /* ---------- reasoning display toggle (ui_kv show_reasoning, default ON) ---------- */
   (function(){
     var sel=document.getElementById('showReason'); if(!sel) return;
     uiFetch('/ui/kv/show_reasoning').then(function(r){ return r.ok?r.json():null; }).then(function(d){
-      if(d && d.value==='false') sel.value='false';
+      if(d && d.value==='false') sel.checked=false;
     }).catch(function(){});
     sel.addEventListener('change', function(){
-      uiFetch('/ui/kv/show_reasoning',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.value})}).catch(function(){});
+      uiFetch('/ui/kv/show_reasoning',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.checked?'true':'false'})}).catch(function(){});
     });
   })();
 
