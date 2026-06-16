@@ -196,6 +196,19 @@ pub(super) async fn chat_completions(
     };
     let total_tokens = prompt_tokens + engine_response.usage.output_tokens;
 
+    // Surface auto-compaction to the client: the engine drops older messages mid-turn to
+    // keep context within the model window, but that event is otherwise invisible over the
+    // OpenAI wire. Append the notice to the assistant text and log it server-side so the
+    // behaviour is observable in both the chat and the service logs.
+    let mut content = engine_response.message;
+    if let Some(compaction) = &engine_response.auto_compaction {
+        eprintln!(
+            "claw openai-serve: auto-compaction fired (removed {} messages)",
+            compaction.removed_messages
+        );
+        content.push_str(&format!("\n\n> {}", compaction.notice));
+    }
+
     Json(ChatCompletionResponse {
         id: next_completion_id(created),
         object: "chat.completion",
@@ -207,7 +220,7 @@ pub(super) async fn chat_completions(
             index: 0,
             message: ChatCompletionMessage {
                 role: "assistant",
-                content: engine_response.message,
+                content,
             },
             finish_reason: "stop",
         }],
@@ -328,6 +341,22 @@ fn stream_chat_completions(
 
         match result {
             Ok(response) => {
+                // Surface auto-compaction (older messages dropped mid-turn to keep context within
+                // the model window) as a trailing content chunk + server log, so the otherwise
+                // invisible event shows up in both the chat and the service logs.
+                if let Some(compaction) = &response.auto_compaction {
+                    eprintln!(
+                        "claw openai-serve: auto-compaction fired (removed {} messages)",
+                        compaction.removed_messages
+                    );
+                    let _ = sender.send(openai_sse_chunk(
+                        &id,
+                        created,
+                        &response_model,
+                        Some(format!("\n\n> {}", compaction.notice)),
+                        None,
+                    ));
+                }
                 // prompt_tokens = context size = the LAST model call's prompt (evaluated input +
                 // cache-created + cache-read), captured from the final Usage event. `response.usage`
                 // is cumulative across the agentic loop's calls, so it over-counts multi-step turns.
