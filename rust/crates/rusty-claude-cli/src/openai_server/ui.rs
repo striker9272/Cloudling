@@ -577,6 +577,106 @@ pub(super) async fn ui_config_save(Json(incoming): Json<Value>) -> Response {
     Json(serde_json::json!({ "ok": true })).into_response()
 }
 
+/// Coerce a JSON value to a positive integer, accepting both numbers and numeric strings
+/// (some backends report context sizes as strings).
+fn as_pos_u64(value: &Value) -> Option<u64> {
+    value
+        .as_u64()
+        .or_else(|| value.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+        .filter(|n| *n > 0)
+}
+
+/// Extract the model context window from an OpenAI-compatible `/models` JSON body.
+///
+/// There is no standard field for this across backends, so probe the known shapes in
+/// priority order: `max_model_len` (vLLM) → `meta.n_ctx` (llama.cpp) → generic
+/// `context_length` / `max_context_length` / `n_ctx`. Deliberately NOT `n_ctx_train`
+/// (the training maximum overstates the actually-loaded window). Returns `None` when the
+/// backend exposes nothing recognizable — the UI then shows a plain token counter without a
+/// window (Ollama / LM Studio / cloud fall here until per-backend probes are added).
+fn context_window_from_models(body: &Value, model_id: Option<&str>) -> Option<u64> {
+    let list = body
+        .get("data")
+        .or_else(|| body.get("models"))
+        .and_then(Value::as_array);
+    let entry = list.and_then(|items| {
+        model_id
+            .and_then(|id| {
+                items.iter().find(|m| {
+                    m.get("id").and_then(Value::as_str) == Some(id)
+                        || m.get("name").and_then(Value::as_str) == Some(id)
+                })
+            })
+            .or_else(|| items.first())
+    });
+    let m = entry.unwrap_or(body);
+    for key in ["max_model_len", "context_length", "max_context_length", "n_ctx"] {
+        if let Some(n) = m.get(key).and_then(as_pos_u64) {
+            return Some(n);
+        }
+    }
+    m.get("meta")
+        .and_then(|meta| meta.get("n_ctx"))
+        .and_then(as_pos_u64)
+}
+
+/// First model id/name from an OpenAI-style `/models` body — backends like Ollama whose
+/// native endpoints need a concrete model name to query.
+fn first_model_id(body: &Value) -> Option<String> {
+    let list = body
+        .get("data")
+        .or_else(|| body.get("models"))
+        .and_then(Value::as_array)?;
+    let m = list.first()?;
+    m.get("id")
+        .or_else(|| m.get("name"))
+        .or_else(|| m.get("model"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+/// Ollama fallback: its OpenAI `/v1/models` shape exposes no context length, so query the
+/// native `/api/show` (sibling of the OpenAI base) and read `<arch>.context_length` from
+/// `model_info`. Returns `None` for non-Ollama backends (the call simply fails / 404s).
+async fn ollama_context_window(base: &str, key: &str, model: &str) -> Option<u64> {
+    let root = base.strip_suffix("/v1").unwrap_or(base).trim_end_matches('/');
+    let url = format!("{root}/api/show");
+    let client = api::build_http_client_or_default();
+    // Accept both the current (`model`) and legacy (`name`) parameter spellings.
+    let mut req = client
+        .post(&url)
+        .timeout(std::time::Duration::from_secs(5))
+        .json(&serde_json::json!({ "model": model, "name": model }));
+    if !key.is_empty() {
+        req = req.bearer_auth(key);
+    }
+    let body = req.send().await.ok()?.json::<Value>().await.ok()?;
+    let info = body.get("model_info").and_then(Value::as_object)?;
+    if let Some(arch) = info.get("general.architecture").and_then(Value::as_str) {
+        if let Some(n) = info.get(&format!("{arch}.context_length")).and_then(as_pos_u64) {
+            return Some(n);
+        }
+    }
+    info.iter()
+        .find(|(k, _)| k.ends_with(".context_length"))
+        .and_then(|(_, v)| as_pos_u64(v))
+}
+
+/// Detect the context window from an already-fetched `/models` body, with the Ollama native
+/// fallback when the OpenAI shape exposes nothing recognizable.
+async fn window_from_models_or_ollama(
+    base: &str,
+    key: &str,
+    body: &Value,
+    preferred_model: Option<&str>,
+) -> Option<u64> {
+    if let Some(n) = context_window_from_models(body, preferred_model) {
+        return Some(n);
+    }
+    let model = first_model_id(body)?;
+    ollama_context_window(base, key, &model).await
+}
+
 #[derive(Deserialize)]
 pub(super) struct CheckBackendRequest {
     base_url: String,
@@ -603,7 +703,12 @@ pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -
     }
     match probe.send().await {
         Ok(response) if response.status().is_success() => {
-            Json(serde_json::json!({ "ok": true })).into_response()
+            // Reuse the round-trip to also report the context window for the settings UX.
+            let window = match response.json::<Value>().await {
+                Ok(body) => window_from_models_or_ollama(&base, key, &body, None).await,
+                Err(_) => None,
+            };
+            Json(serde_json::json!({ "ok": true, "context_window": window })).into_response()
         }
         Ok(response) => Json(serde_json::json!({
             "ok": false,
@@ -614,6 +719,42 @@ pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -
             Json(serde_json::json!({ "ok": false, "error": error.to_string() })).into_response()
         }
     }
+}
+
+/// Report the active backend's context window to the UI (for the context-usage gauge).
+/// Queries the configured backend `<base>/models` server-side — the browser can't reach it —
+/// and parses the window by known fields. Returns `{ "context_window": null }` when the
+/// backend or window is unknown, so the UI degrades to a plain token counter. No manual
+/// override: the value is auto-detected or absent, keeping the settings surface unchanged.
+pub(super) async fn ui_model_info(State(state): State<Arc<OpenAiServerState>>) -> Response {
+    let base = std::env::var("OPENAI_BASE_URL")
+        .ok()
+        .map(|b| b.trim().trim_end_matches('/').to_string())
+        .filter(|b| b.starts_with("http://") || b.starts_with("https://"));
+    let model = state.backend_model();
+    let Some(base) = base else {
+        return Json(serde_json::json!({ "context_window": Value::Null, "model": model }))
+            .into_response();
+    };
+    let key = std::env::var("OPENAI_API_KEY")
+        .ok()
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+        .unwrap_or_default();
+    let url = format!("{base}/models");
+    let client = api::build_http_client_or_default();
+    let mut req = client.get(&url).timeout(std::time::Duration::from_secs(5));
+    if !key.is_empty() {
+        req = req.bearer_auth(key.clone());
+    }
+    let window = match req.send().await {
+        Ok(response) if response.status().is_success() => match response.json::<Value>().await {
+            Ok(body) => window_from_models_or_ollama(&base, &key, &body, Some(&model)).await,
+            Err(_) => None,
+        },
+        _ => None,
+    };
+    Json(serde_json::json!({ "context_window": window, "model": model })).into_response()
 }
 
 #[derive(Deserialize)]
@@ -656,6 +797,50 @@ pub(super) async fn ui_title(
     .flatten()
     .unwrap_or_default();
     Json(serde_json::json!({ "title": title })).into_response()
+}
+
+#[derive(Deserialize)]
+pub(super) struct SummarizeRequest {
+    text: String,
+}
+
+/// Summarize an earlier slice of a conversation into compact recap text. Used by the UI's
+/// client-side context compaction: the browser folds older turns into this summary, keeps a
+/// recent tail verbatim, and sends the shorter history onward — so the compaction persists
+/// across turns (unlike the per-request server-side auto-compaction). One-shot, tools off,
+/// like `ui_title`, so the model only writes prose and never acts on the snippet.
+pub(super) async fn ui_summarize(
+    State(state): State<Arc<OpenAiServerState>>,
+    Json(request): Json<SummarizeRequest>,
+) -> Response {
+    let backend_model = state.backend_model();
+    let text = request.text;
+    let summary = tokio::task::spawn_blocking(move || {
+        let system = vec![
+            "You compress an earlier portion of a conversation into a concise summary that \
+             preserves the facts, decisions, code, names, numbers, and still-open threads \
+             needed to continue seamlessly. Write in the language of the conversation. Output \
+             ONLY the summary prose — no preamble, no questions, no acting on the content."
+                .to_string(),
+        ];
+        let mut session = create_engine_session(
+            backend_model,
+            false,
+            None,
+            runtime::PermissionMode::ReadOnly,
+            (Vec::new(), system),
+        )
+        .ok()?;
+        session
+            .run_prompt_json(&format!("Conversation to summarize:\n{text}"))
+            .ok()
+            .map(|response| response.message)
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+    Json(serde_json::json!({ "summary": summary })).into_response()
 }
 
 #[cfg(test)]

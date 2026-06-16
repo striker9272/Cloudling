@@ -184,6 +184,18 @@ body.open-right .drawer.right{transform:translateX(0);}
 .dhdr .h{font-family:var(--display); font-size:18px; font-weight:700; letter-spacing:-0.02em;}
 .toks{margin-left:auto; font-size:11.5px; color:var(--faint); font-family:var(--mono); white-space:nowrap;}
 .toks:empty{display:none;}
+.toks.warn{color:#d6a86a;}
+.toks.crit{color:#e08a8a;}
+.compact-mark{margin:14px 0; border-top:1px dashed var(--line2); padding-top:10px;}
+.compact-mark details{font-size:12.5px; color:var(--faint);}
+.compact-mark summary{cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:center; gap:7px; color:var(--faint);}
+.compact-mark summary::-webkit-details-marker{display:none;}
+.compact-mark .cm-ic{flex:none; opacity:.85;}
+.compact-mark .cm-body{margin-top:8px; white-space:pre-wrap; line-height:1.45; color:var(--muted);}
+.dock .entry{position:relative; z-index:2;}
+.compact-toast{position:absolute; left:50%; bottom:100%; transform:translate(-50%,100%); z-index:1; display:flex; align-items:center; gap:6px; max-width:90%; background:#1c1c22; border:0.5px solid var(--line2); border-radius:999px; padding:7px 14px; font-size:12px; color:var(--muted); white-space:nowrap; opacity:0; pointer-events:none; transition:transform .28s ease, opacity .2s ease;}
+.compact-toast.show{transform:translate(-50%,-6px); opacity:1;}
+.compact-toast:empty{display:none;}
 .thread{display:flex; flex-direction:column; gap:22px; flex:1; min-height:0; overflow-y:auto; padding-bottom:14px;}
 .dock{position:relative; padding:12px 0 16px; background:var(--bg);}
 /* dialog composer: docked to the bottom edge — rounded top only, flush bottom (like our edge tabs) */

@@ -148,7 +148,7 @@
           /* localStorage blocked (private mode / site-data settings): work with the
              token in memory for this page; it will be asked again after a reload */
           uiToken=v; tokenGateShown=false; scrim.hidden=true;
-          refreshSidebar(); loadSettings(); loadDlgToks(); loadDlgErrs(); loadDlgPins(); loadPresets();
+          refreshSidebar(); loadSettings(); loadModelInfo(); loadDlgToks(); loadDlgErrs(); loadDlgPins(); loadPresets();
         }).catch(function(){ fail('Сервер недоступен.'); });
       };
       ok.addEventListener('click', submit);
@@ -250,9 +250,83 @@
   function savePins(){ clearTimeout(dlgPinsTimer); dlgPinsTimer=setTimeout(function(){
     uiFetch('/ui/kv/dlg_pins',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:JSON.stringify(Object.keys(dlgPins))})}).catch(function(){});
   }, 600); }
-  function setCtxToks(n){ var el=document.getElementById('ctxToks'); if(!el) return; el.textContent=(typeof n==='number')?(n.toLocaleString('ru-RU')+' ток.'):''; }
+  /* Model context window (total tokens), auto-detected from the backend by the server
+     (/ui/model-info). null when the backend doesn't expose it → the counter degrades to a
+     plain token figure with no gauge. */
+  var ctxWindow=null;
+  function loadModelInfo(){ pFetchJSON('/ui/model-info').then(function(d){
+    if(d && typeof d.context_window==='number' && d.context_window>0){ ctxWindow=d.context_window; if(activeId) setCtxToks(dlgToks[activeId]); }
+  }).catch(function(){}); }
+  function setCtxToks(n){
+    var el=document.getElementById('ctxToks'); if(!el) return;
+    el.classList.remove('warn','crit');
+    if(typeof n!=='number'){ el.textContent=''; return; }
+    var nf=n.toLocaleString('ru-RU');
+    if(ctxWindow){
+      var pct=Math.min(100, Math.round(n/ctxWindow*100));
+      el.textContent=nf+' / '+ctxWindow.toLocaleString('ru-RU')+' ('+pct+'%)';
+      el.title='Контекст: '+nf+' из '+ctxWindow.toLocaleString('ru-RU')+' токенов окна модели';
+      if(pct>=90){ el.classList.add('crit'); } else if(pct>=75){ el.classList.add('warn'); }
+    } else {
+      el.textContent=nf+' ток.';
+      el.title='Токенов контекста в последнем запросе к модели';
+    }
+  }
+  /* ---- client-side context compaction (persistent, UI-owned) ----
+     When the live context reaches COMPACT_AT of the detected window, fold the older turns into
+     a model-written summary (/ui/summarize), keep the recent tail verbatim, and persist the
+     shorter history in the dialog. Survives across turns — unlike the per-request server-side
+     auto-compaction. Needs a known window (else stays silent). */
+  var COMPACT_AT=0.80, COMPACT_KEEP=6, compacting=false;
+  var COMPACT_RE=/^\[Сводка предыдущей части диалога[^\]]*\]\n?/;
+  function maybeAutoCompact(pt){
+    if(compacting || !ctxWindow || typeof pt!=='number') return;
+    if(pt < Math.round(ctxWindow*COMPACT_AT)) return;
+    if(convo.length <= COMPACT_KEEP+2) return;
+    var older=convo.slice(0, convo.length-COMPACT_KEEP);
+    var tail=convo.slice(convo.length-COMPACT_KEEP);
+    if(older.length===1 && COMPACT_RE.test(older[0].content||'')) return; /* already just a summary */
+    var id=activeId;
+    var text=older.map(function(m){ var c=(typeof m.content==='string')?m.content:''; return (m.role==='user'?'User: ':'Assistant: ')+c; }).join('\n\n');
+    compacting=true;
+    uiFetch('/ui/summarize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){
+        compacting=false;
+        var summary=((d&&d.summary)||'').trim();
+        if(!summary || id!==activeId) return;
+        var est=Math.round((text.length - summary.length)/4); if(est<0) est=0;
+        var header='[Сводка предыдущей части диалога · свёрнуто '+older.length+', ≈'+est.toLocaleString('ru-RU')+' ток.]';
+        convo=[{role:'assistant', content:header+'\n'+summary}].concat(tail);
+        renderConvo(convo); saveActive();
+        showCompactBanner('Контекст сжат · освобождено ≈'+est.toLocaleString('ru-RU')+' ток.');
+      })
+      .catch(function(){ compacting=false; });
+  }
+  /* transient slide-up notice: rises from behind the composer, then retracts back behind it */
+  var compactBannerTimer=null;
+  function showCompactBanner(text){
+    var el=document.getElementById('compactToast'); if(!el) return;
+    el.textContent=text;
+    el.classList.remove('show'); void el.offsetWidth; /* force the hidden start state before animating in */
+    el.classList.add('show');
+    if(compactBannerTimer) clearTimeout(compactBannerTimer);
+    compactBannerTimer=setTimeout(function(){ el.classList.remove('show'); }, 2800);
+  }
+  function compactMark(content){
+    var d=document.createElement('div'); d.className='compact-mark';
+    var m=String(content||'').match(COMPACT_RE);
+    var head=m ? m[0].replace(/^\[|\]\n?$/g,'') : 'Контекст свёрнут';
+    var body=String(content||'').replace(COMPACT_RE,'');
+    var ic='<svg class="cm-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/></svg>';
+    d.innerHTML='<details><summary>'+ic+'<span>'+esc(head)+'</span></summary><div class="cm-body">'+esc(body)+'</div></details>';
+    return d;
+  }
   function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return m.atts ? {role:m.role, content:m.content, atts:m.atts} : {role:m.role, content:m.content}; });
-    convo.forEach(function(m){ thread.appendChild(m.role==='user' ? userTurn(m) : assistantTurnEl(m.content)); });
+    convo.forEach(function(m){
+      if(m.role==='assistant' && COMPACT_RE.test(m.content||'')){ thread.appendChild(compactMark(m.content)); return; }
+      thread.appendChild(m.role==='user' ? userTurn(m) : assistantTurnEl(m.content));
+    });
     var em=dlgErrs[activeId]; /* unrecovered error from a previous session → re-show the box (lives outside convo) */
     if(em!==undefined){ var et=document.createElement('div'); et.className='turn a noconv'; et.innerHTML=errboxHTML(em); attachRetry(et, dlgSend()); thread.appendChild(et); }
     refreshTaskbar(); }
@@ -598,6 +672,7 @@
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
       if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
+      maybeAutoCompact(dlgToks[activeId]); /* fold older turns if context crossed the window threshold */
     }
     fetch('/v1/chat/completions', {
       method:'POST', headers:{'Content-Type':'application/json'},
@@ -1183,6 +1258,7 @@
      Decide after settings load so an empty OPENAI_BASE_URL routes a fresh instance
      to the guided setup instead of a dead-end home screen. */
   refreshSidebar();
+  loadModelInfo();
   loadDlgToks();
   loadDlgErrs();
   loadDlgPins();
