@@ -15,6 +15,28 @@ use crate::sandbox::{
 };
 use crate::ConfigLoader;
 
+/// Default wall-clock cap applied to a single command when the model omits an
+/// explicit `timeout` (mirrors Anthropic Claude Code's 120s default). Without a
+/// cap a slow/hanging command — e.g. a network op against an unreachable host —
+/// blocks the whole agent turn: the backend sits idle until the command returns.
+pub const DEFAULT_COMMAND_TIMEOUT_MS: u64 = 120_000;
+
+/// Hard ceiling for any command timeout, including model-provided values
+/// (mirrors Claude Code's 600s max). Keeps a too-large or typo'd timeout from
+/// reintroducing an effectively unbounded wait.
+pub const MAX_COMMAND_TIMEOUT_MS: u64 = 600_000;
+
+/// Resolve the effective command timeout in milliseconds: use the model-provided
+/// value when present, otherwise the default, and clamp everything to the ceiling.
+/// Shared by every command-spawning tool (bash, PowerShell, REPL, git) so the
+/// "omit = run forever" gap cannot reappear in any single path.
+#[must_use]
+pub fn resolve_command_timeout_ms(requested: Option<u64>) -> u64 {
+    requested
+        .unwrap_or(DEFAULT_COMMAND_TIMEOUT_MS)
+        .min(MAX_COMMAND_TIMEOUT_MS)
+}
+
 /// Input schema for the built-in bash execution tool.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BashCommandInput {
@@ -186,15 +208,21 @@ async fn execute_bash_async(
     detect_and_emit_ship_prepared(&input.command);
 
     let mut command = prepare_tokio_command(&input.command, &cwd, &sandbox_status, true);
+    // Run non-interactively: a command that reads stdin (an ssh password prompt,
+    // `read`, etc.) would otherwise block until the timeout instead of failing
+    // fast. Mirrors the background path and Claude Code's non-interactive shell.
+    command.stdin(Stdio::null());
 
-    let output_result = if let Some(timeout_ms) = input.timeout {
-        if let Ok(result) = timeout(Duration::from_millis(timeout_ms), command.output()).await {
-            (result?, false)
-        } else {
-            return Ok(timeout_output(&input, timeout_ms, sandbox_status));
-        }
+    // Always enforce a wall-clock cap. When the model omits `timeout`, fall back
+    // to the shared default so a slow or hanging command cannot stall the whole
+    // turn with the backend idle; the cap also clamps oversized provided values.
+    let timeout_ms = resolve_command_timeout_ms(input.timeout);
+    let output_result = if let Ok(result) =
+        timeout(Duration::from_millis(timeout_ms), command.output()).await
+    {
+        (result?, false)
     } else {
-        (command.output().await?, false)
+        return Ok(timeout_output(&input, timeout_ms, sandbox_status));
     };
 
     let (output, interrupted) = output_result;

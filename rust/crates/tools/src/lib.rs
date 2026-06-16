@@ -395,7 +395,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string" },
-                    "timeout": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional command timeout in MILLISECONDS (not seconds). Omit to run without an explicit timeout. Typical values: 30000-120000." },
+                    "timeout": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional command timeout in MILLISECONDS (not seconds). Omitted or oversized values are capped: default 120000 ms when omitted, hard ceiling 600000 ms. Typical values: 30000-120000." },
                     "description": { "type": "string" },
                     "run_in_background": { "type": "boolean" },
                     "dangerouslyDisableSandbox": { "type": "boolean" },
@@ -715,7 +715,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "properties": {
                     "code": { "type": "string" },
                     "language": { "type": "string" },
-                    "timeout_ms": { "type": "integer", "minimum": 1 }
+                    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional timeout in MILLISECONDS. Omitted or oversized values are capped: default 120000 ms when omitted, hard ceiling 600000 ms." }
                 },
                 "required": ["code", "language"],
                 "additionalProperties": false
@@ -729,7 +729,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                 "type": "object",
                 "properties": {
                     "command": { "type": "string" },
-                    "timeout": { "type": "integer", "minimum": 1 },
+                    "timeout": { "type": "integer", "minimum": 1, "maximum": 600000, "description": "Optional command timeout in MILLISECONDS. Omitted or oversized values are capped: default 120000 ms when omitted, hard ceiling 600000 ms." },
                     "description": { "type": "string" },
                     "run_in_background": { "type": "boolean" }
                 },
@@ -2113,11 +2113,40 @@ fn git_stdout_in(directory: Option<&str>, args: &[&str]) -> Result<String, Strin
             .map_err(|error| format!("directory {path}: {error}"))?,
         None => workspace,
     };
-    let output = Command::new("git")
+    // Cap git with the shared default timeout: a network subcommand
+    // (fetch/pull/push/clone/ls-remote) against an unreachable remote would
+    // otherwise block the whole turn with the backend idle.
+    let timeout_ms = runtime::resolve_command_timeout_ms(None);
+    let mut child = Command::new("git")
         .args(args)
         .current_dir(&dir)
-        .output()
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
         .map_err(|error| format!("failed to run git: {error}"))?;
+    let started = Instant::now();
+    let output = loop {
+        if child
+            .try_wait()
+            .map_err(|error| format!("failed to run git: {error}"))?
+            .is_some()
+        {
+            break child
+                .wait_with_output()
+                .map_err(|error| format!("failed to run git: {error}"))?;
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "git {} exceeded timeout of {timeout_ms} ms in {}",
+                args.first().unwrap_or(&""),
+                dir.display()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    };
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if stderr.is_empty() {
@@ -6240,7 +6269,11 @@ fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    let output = if let Some(timeout_ms) = input.timeout_ms {
+    // Always enforce a wall-clock cap: default when the model omits `timeout_ms`,
+    // clamped to the ceiling otherwise, so a hanging REPL process cannot stall the
+    // turn with the backend idle.
+    let timeout_ms = runtime::resolve_command_timeout_ms(input.timeout_ms);
+    let output = {
         let mut child = process.spawn().map_err(|error| error.to_string())?;
         loop {
             if child
@@ -6263,12 +6296,6 @@ fn execute_repl(input: ReplInput) -> Result<ReplOutput, String> {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-    } else {
-        process
-            .spawn()
-            .map_err(|error| error.to_string())?
-            .wait_with_output()
-            .map_err(|error| error.to_string())?
     };
 
     Ok(ReplOutput {
@@ -6728,10 +6755,15 @@ fn execute_shell_command(
         .arg("-Command")
         .arg(command);
     process
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    if let Some(timeout_ms) = timeout {
+    // Always enforce a wall-clock cap: default when the model omits `timeout`,
+    // clamped to the ceiling otherwise, so a hanging PowerShell/shell command
+    // cannot stall the turn with the backend idle.
+    let timeout_ms = runtime::resolve_command_timeout_ms(timeout);
+    {
         let mut child = process.spawn()?;
         let started = Instant::now();
         loop {
@@ -6796,29 +6828,6 @@ Command exceeded timeout of {timeout_ms} ms",
             std::thread::sleep(Duration::from_millis(10));
         }
     }
-
-    let output = process.output()?;
-    Ok(runtime::BashCommandOutput {
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-        raw_output_path: None,
-        interrupted: false,
-        is_image: None,
-        background_task_id: None,
-        backgrounded_by_user: None,
-        assistant_auto_backgrounded: None,
-        dangerously_disable_sandbox: None,
-        return_code_interpretation: output
-            .status
-            .code()
-            .filter(|code| *code != 0)
-            .map(|code| format!("exit_code:{code}")),
-        no_output_expected: Some(output.stdout.is_empty() && output.stderr.is_empty()),
-        structured_content: None,
-        persisted_output_path: None,
-        persisted_output_size: None,
-        sandbox_status: None,
-    })
 }
 
 fn is_test_command(command: &str) -> bool {
