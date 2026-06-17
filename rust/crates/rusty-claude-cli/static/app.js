@@ -654,9 +654,9 @@
     function renderLiveTail(){ liveRaf=0; if(!liveBox) return;
       var tail=acc.slice(committed);
       /* Reasoning streams open (<details type="reasoning" done="false"> … not yet closed):
-         peel it out of the tail and show it as an EXPANDED, growing disclosure. When the
-         closing tag arrives, onContent's BLOCK_RE commits it as a normal collapsed block —
-         giving the expand-while-thinking → collapse-on-answer behaviour for free. */
+         peel it out of the tail and show it as a COLLAPSED disclosure that fills quietly (an
+         expanded growing block reflows the whole thread on every token). When the closing tag
+         arrives, onContent's BLOCK_RE commits it as the normal collapsed block. */
       var ro=tail.search(/<details type="reasoning"/);
       if(ro>=0 && tail.indexOf('</details>', ro)<0){
         var before=tail.slice(0, ro);
@@ -673,14 +673,15 @@
     }
     function showReasonLive(text){
       if(!reasonLiveEl){
-        reasonLiveEl=document.createElement('details'); reasonLiveEl.className='tool reason'; reasonLiveEl.open=true;
+        /* Collapsed while streaming: a growing, expanded block reflows/jerks the whole thread
+           on every token. The summary shows it's active; the user expands it if they want. */
+        reasonLiveEl=document.createElement('details'); reasonLiveEl.className='tool reason';
         reasonLiveEl.innerHTML='<summary class="head"><span class="tag">Размышление…</span></summary>';
         var pre=document.createElement('pre'); pre.className='toolout'; reasonLiveEl.appendChild(pre);
         turn.insertBefore(reasonLiveEl, liveBox);
       }
-      var pre=reasonLiveEl.querySelector('pre');
-      pre.textContent=decodeEntities(text.replace(/^\s+|\s+$/g,''));
-      pre.appendChild(caretEl); /* caret rides the reasoning tail while the model thinks */
+      /* keep the (hidden) text current so opening mid-stream shows the latest reasoning */
+      reasonLiveEl.querySelector('pre').textContent=decodeEntities(text.replace(/^\s+|\s+$/g,''));
     }
     function clearReasonLive(){ if(reasonLiveEl){ reasonLiveEl.remove(); reasonLiveEl=null; } }
     function scheduleLiveTail(){ if(liveRaf) return;
