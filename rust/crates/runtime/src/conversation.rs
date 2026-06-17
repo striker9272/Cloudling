@@ -46,6 +46,12 @@ pub enum AssistantEvent {
     },
     Usage(TokenUsage),
     PromptCache(PromptCacheEvent),
+    /// Terminal stop/finish reason for the turn's last model call, already normalized by
+    /// the provider layer (`"end_turn"` | `"length"` | `"tool_use"` | other), or `None`
+    /// when the backend reported none. Telemetry-only: it lets the serve layer surface a
+    /// truncated answer (`"length"`) to the client instead of presenting the cut-off text
+    /// as a complete response. It is not part of the assistant message content.
+    StopReason(Option<String>),
     MessageStop,
 }
 
@@ -843,6 +849,9 @@ fn build_assistant_message(
             }
             AssistantEvent::Usage(value) => usage = Some(value),
             AssistantEvent::PromptCache(event) => prompt_cache_events.push(event),
+            // Sink-only telemetry (serve reads it off the event stream); carries no
+            // message content, so it does not affect the built assistant message.
+            AssistantEvent::StopReason(_) => {}
             AssistantEvent::MessageStop => {
                 finished = true;
             }

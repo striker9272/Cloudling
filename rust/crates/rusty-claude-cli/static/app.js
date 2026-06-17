@@ -645,7 +645,7 @@
     turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
-    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false;
+    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null;
     liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
     /* Coalesce the progressive markdown re-render to one per animation frame. md() reparses
        the whole uncommitted tail, so calling it on every token is O(n^2) on long answers;
@@ -694,7 +694,28 @@
     }
     function finalize(){
       if(errored) return; /* error box already shown — don't overwrite with an empty turn */
+      /* "Answer" = content with reasoning/tool <details> blocks stripped. A turn that
+         yields no answer text (reasoning-only, or the model returned nothing) must NOT be
+         saved silently as a complete answer — that was the "тихий пустой ход". Show the
+         reasoning (if any) + a recoverable notice, keep the turn out of convo (noconv) so
+         history stays clean and a retry regenerates from the user message. */
+      var ans=acc.replace(/<details[\s\S]*?<\/details>/g,'').trim();
+      if(!ans){
+        paintTurn(turn, acc, false); /* renders the reasoning block if present, else empty */
+        turn.classList.add('noconv');
+        turn.insertAdjacentHTML('beforeend',
+          '<div class="errbox"><div class="ehead">'+IC.warn+'Модель не вернула ответ</div>'+
+          '<div class="emsg">Ход завершился без текста ответа'+(acc?' (только рассуждение)':'')+
+          '. Попробуйте перегенерировать.</div>'+
+          '<button class="retry" type="button">'+IC.regen+'Перегенерировать</button></div>');
+        attachRetry(turn, btn);
+        finishGen(btn); maybeScroll();
+        return;
+      }
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
+      if(lastFinish==='length'){ /* backend hit its output/context limit — answer is cut off, not complete */
+        turn.insertAdjacentHTML('beforeend','<div class="note trunc">'+IC.warn+'Ответ оборван по лимиту контекста — перегенерируйте, чтобы получить полный.</div>');
+      }
       turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive(); refreshTaskbar();
@@ -721,8 +742,10 @@
             if(payload==='' || payload==='[DONE]') return;
             try{ var chunk=JSON.parse(payload);
               if(chunk.error){ showError((chunk.error&&chunk.error.message)||chunk.error); return; }
-              var delta=chunk.choices && chunk.choices[0] && chunk.choices[0].delta;
+              var ch0=chunk.choices && chunk.choices[0];
+              var delta=ch0 && ch0.delta;
               if(delta && delta.content){ onContent(delta.content); }
+              if(ch0 && ch0.finish_reason){ lastFinish=ch0.finish_reason; } /* 'length' = backend truncated the answer */
               if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId){ dlgToks[activeId]=pt; saveDlgToks(); } setCtxToks(pt); }
             }catch(e){ /* ignore keep-alives / partial chunks */ }
           });

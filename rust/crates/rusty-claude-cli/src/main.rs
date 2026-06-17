@@ -10559,6 +10559,16 @@ impl AnthropicRuntimeClient {
                     }
                 }
                 ApiStreamEvent::MessageDelta(delta) => {
+                    // Forward the backend's terminal stop reason (normalized "length" /
+                    // "end_turn" / "tool_use") so the serve layer can flag a truncated answer
+                    // instead of presenting the cut-off text as complete. Sink-only signal.
+                    if delta.delta.stop_reason.is_some() {
+                        emit_assistant_event(
+                            &mut events,
+                            &mut event_sink,
+                            AssistantEvent::StopReason(delta.delta.stop_reason.clone()),
+                        );
+                    }
                     emit_assistant_event(
                         &mut events,
                         &mut event_sink,

@@ -271,6 +271,10 @@ fn stream_chat_completions(
         // Track the LATEST model call's prompt size = the full context at the end of the turn.
         // Declared out here (not inside the `result` block) so the final usage chunk can read it.
         let last_ctx = std::rc::Rc::new(std::cell::Cell::new(0u32));
+        // Terminal stop reason from the backend (normalized: "end_turn"/"length"/...), captured
+        // off the event stream like `last_ctx`, so the final chunk can report the real
+        // finish_reason ("length" when the answer was truncated) instead of a hardcoded "stop".
+        let last_stop_reason = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
 
         let result = {
             let StatelessConversation {
@@ -302,6 +306,7 @@ fn stream_chat_completions(
 
             let abort_signal = session.abort_signal();
             let last_ctx_sink = last_ctx.clone();
+            let last_stop_reason_sink = last_stop_reason.clone();
             let mut tool_inputs = HashMap::<String, String>::new();
             let mut event_sink = |event: &AssistantEvent| {
                 if let AssistantEvent::Usage(u) = event {
@@ -310,6 +315,9 @@ fn stream_chat_completions(
                             .saturating_add(u.cache_creation_input_tokens)
                             .saturating_add(u.cache_read_input_tokens),
                     );
+                }
+                if let AssistantEvent::StopReason(reason) = event {
+                    last_stop_reason_sink.replace(reason.clone());
                 }
                 if let Some(chunk) = assistant_event_to_openai_sse_chunk(
                     &id,
@@ -367,12 +375,19 @@ fn stream_chat_completions(
                     last_ctx.get(),
                     response.usage.output_tokens,
                 ));
+                // Report the backend's real terminal reason: a truncated answer ("length")
+                // must not masquerade as a clean "stop" — the UI flags it for regeneration.
+                let finish = if last_stop_reason.borrow().as_deref() == Some("length") {
+                    "length"
+                } else {
+                    "stop"
+                };
                 let _ = sender.send(openai_sse_chunk(
                     &id,
                     created,
                     &response_model,
                     None,
-                    Some("stop"),
+                    Some(finish),
                 ));
             }
             Err(error) => {
