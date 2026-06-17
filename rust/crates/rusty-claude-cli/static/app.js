@@ -101,9 +101,31 @@
   }
 
   /* ---------- copy ---------- */
+  function flashCopied(btn){ if(!btn) return; var o=btn.innerHTML; btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':''); setTimeout(function(){btn.innerHTML=o;},1100); }
   function fallback(t){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);}
-  function copyText(t,btn){ var flash=function(){if(!btn)return;var o=btn.innerHTML;btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':'');setTimeout(function(){btn.innerHTML=o;},1100);};
-    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(flash,function(){fallback(t);flash();});} else {fallback(t);flash();} }
+  function copyText(t,btn){
+    if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){flashCopied(btn);},function(){fallback(t);flashCopied(btn);});} else {fallback(t);flashCopied(btn);} }
+  /* Rich copy: put BOTH text/html (formatted paste into Word/mail/Notion) and text/plain
+     (markdown source for plain editors) on the clipboard. navigator.clipboard.write needs a
+     secure context (https/localhost) — unavailable on the LAN http bind — so we drive it via a
+     `copy`-event override + execCommand, which works on plain http. A throwaway selection is
+     required for the copy event to fire in all browsers. Falls back to plain text on failure. */
+  function copyRich(html, plain, btn){
+    var ok=false;
+    function handler(e){ try{ e.clipboardData.setData('text/html', html); e.clipboardData.setData('text/plain', plain); e.preventDefault(); ok=true; }catch(_){} }
+    var span=document.createElement('span'); span.textContent=plain||' ';
+    span.style.position='fixed'; span.style.left='-9999px'; span.style.whiteSpace='pre';
+    document.body.appendChild(span);
+    var sel=window.getSelection(), saved=(sel&&sel.rangeCount)?sel.getRangeAt(0):null;
+    var range=document.createRange(); range.selectNodeContents(span);
+    if(sel){ sel.removeAllRanges(); sel.addRange(range); }
+    document.addEventListener('copy', handler);
+    try{ document.execCommand('copy'); }catch(_){}
+    document.removeEventListener('copy', handler);
+    if(sel){ sel.removeAllRanges(); if(saved) sel.addRange(saved); }
+    document.body.removeChild(span);
+    if(ok){ flashCopied(btn); } else { copyText(plain, btn); }
+  }
 
   /* ---------- transient error toast ---------- */
   var toastTimer=null;
@@ -950,7 +972,25 @@
   thread.addEventListener('click', function(e){
     var cp=e.target.closest('.code .copy'); if(cp){ copyText(cp.closest('.code').querySelector('pre').textContent, cp); return; }
     var a=e.target.closest('.act'); if(!a) return; var act=a.dataset.act, turn=a.closest('.turn');
-    if(act==='copy'){ var src=turn.querySelector('.md')||turn.querySelector('.bubble'); copyText(src.textContent, a); }
+    if(act==='copy'){
+      /* Assistant answers split into several .md blocks around tool plates. Copy rich (HTML) +
+         markdown source: HTML from the rendered blocks (code-block chrome stripped so the inline
+         "Копировать" button/lang label don't leak into the paste), plain = the raw markdown with
+         tool/reasoning blocks removed. User turns have no .md → plain bubble text. */
+      var mds=turn.querySelectorAll('.md');
+      if(mds.length){
+        var tmp=document.createElement('div');
+        Array.prototype.forEach.call(mds,function(b){ var c=b.cloneNode(true);
+          Array.prototype.forEach.call(c.querySelectorAll('.chead'),function(h){h.remove();}); tmp.appendChild(c); });
+        var html=tmp.innerHTML;
+        var idx=turnIndex(turn), raw=(idx>=0 && convo[idx] && typeof convo[idx].content==='string')?convo[idx].content:'';
+        var plain = raw ? raw.replace(BLOCK_RE,'').replace(/\n{3,}/g,'\n\n').trim()
+                        : Array.prototype.map.call(mds,function(b){return b.textContent;}).join('\n\n').replace(/\n{3,}/g,'\n\n').trim();
+        copyRich(html, plain, a);
+      } else {
+        copyText((turn.querySelector('.bubble')||{textContent:''}).textContent, a);
+      }
+    }
     else if(act==='regen'){ regenTurn(turn); }
     else if(act==='edit'){ editUserTurn(turn); }
   });
