@@ -242,12 +242,13 @@ require_cmd() {
 # --- prebuilt download helpers ---------------------------------------------
 
 # Map this host to the release artifact name from .github/workflows/release.yml
-# (claw-linux-x64, claw-macos-arm64). Echoes the name; returns 1 if unsupported.
+# (currently only claw-linux-x64; Windows ships its own .exe). Echoes the name;
+# returns 1 if unsupported. macOS is intentionally absent: CI does not build a
+# macOS artifact (no macOS port yet), so --prebuilt falls back to build-from-source.
 prebuilt_artifact_name() {
     local os arch
     case "${OS_FAMILY}" in
         linux) os="linux" ;;
-        macos) os="macos" ;;
         *) return 1 ;;
     esac
     case "${UNAME_M}" in

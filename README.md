@@ -42,7 +42,7 @@
 
 На выходе Claw Lab поднимает `/v1/chat/completions` со стримингом, который Open WebUI (или другой клиент) видит как одну модель. Всё остальное — инструменты, поиск, сессии — уже внутри.
 
-> **Статус:** проект экспериментальный, для домашнего сервера. **Основная серверная платформа — Linux** (сервис ставится одной командой или интерактивным мастером — см. «Запуск как сервиса» ниже). Для **Windows** есть нативная десктоп-сборка: тот же `clab.exe` живёт значком в трее (двойной клик → фоновый serve+UI, без Docker и WSL), проверена на Windows 11 — см. [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS — «как есть», без гарантий.
+> **Статус:** проект экспериментальный, для домашнего сервера. **Основная серверная платформа — Linux** (сервис ставится одной командой или интерактивным мастером — см. «Запуск как сервиса» ниже). Для **Windows** есть нативная десктоп-сборка: тот же `clab.exe` живёт значком в трее (двойной клик → фоновый serve+UI, без Docker и WSL), проверена на Windows 11 — см. [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS — только сборка из исходников, best-effort, без гарантий: готовых сборок нет (CI их не делает — порта под macOS пока нет).
 
 ### Что внутри
 
@@ -179,7 +179,7 @@ By design you only need two things:
 
 Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or any client) sees as a single model. Everything else — tools, search, sessions — happens inside.
 
-> **Status:** experimental, built for a home server. **Linux is the primary server platform** (the service installs with a single command or an interactive wizard — see "Run it as a service" below). **Windows** has a native desktop build: the same `clab.exe` lives as a system-tray app (double-click → background serve+UI, no Docker or WSL), tested on Windows 11 — see [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS is best-effort with no guarantees.
+> **Status:** experimental, built for a home server. **Linux is the primary server platform** (the service installs with a single command or an interactive wizard — see "Run it as a service" below). **Windows** has a native desktop build: the same `clab.exe` lives as a system-tray app (double-click → background serve+UI, no Docker or WSL), tested on Windows 11 — see [`docs/windows-install-release.md`](./docs/windows-install-release.md). macOS is build-from-source / best-effort only, with no guarantees: there are no prebuilt binaries (CI does not build for macOS — there is no macOS port yet).
 
 ### What's inside
 

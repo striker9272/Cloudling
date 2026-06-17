@@ -2,9 +2,9 @@
 
 > **Status:** Linux is the primary server platform for Claw Lab. On Windows, the **native desktop app
 > (system tray)** described below is the recommended path and has been tested on Windows 11; the
-> PowerShell CLI / build-from-source paths are also supported for development. macOS release binaries are
-> produced by CI but not tested regularly. For the server/Linux path, see the root [`README.md`](../README.md)
-> and [`USAGE.md`](../USAGE.md).
+> PowerShell CLI / build-from-source paths are also supported for development. macOS is build-from-source
+> / best-effort only — CI does not produce macOS release binaries (there is no macOS port yet). For the
+> server/Linux path, see the root [`README.md`](../README.md) and [`USAGE.md`](../USAGE.md).
 
 ## Native desktop app (system tray)
 

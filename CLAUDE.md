@@ -75,7 +75,11 @@ existing service, use `rust/scripts/deploy-openai-server.sh`. To remove the serv
 
 Releases: pushing a tag `v*` triggers `.github/workflows/release.yml`, which builds and publishes
 assets named `claw-<os>-<arch>` (+ `.sha256`) — asset names keep the `claw-` prefix though the
-binary is `clab`. `install.sh --prebuilt` consumes these. Keep the tag in sync with the workspace
+binary is `clab`. The matrix builds **Linux and Windows only** (`claw-linux-x64` + a `.deb` desktop
+package, `claw-windows-x64.exe`); **macOS is deliberately not built** — there is no macOS port yet
+(the `clab-desktop` tray is Windows/Linux only), so building it would ship an untested artifact. macOS
+stays build-from-source / best-effort until it becomes its own stage. `install.sh --prebuilt` consumes
+these assets (and reports "build from source" on macOS). Keep the tag in sync with the workspace
 version in `rust/Cargo.toml`.
 
 ## Deploy

@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <!-- Claw Lab desktop icon. The in-app "cloud" mark (union of four circles on a
-       40x28 viewBox, color --load #e9ebef) on a dark rounded tile (--bg #0d0d0f),
-       matching the procedural tray icon in clab-desktop. Source of truth for the
-       AppImage/.desktop icon; rasterized to PNG at package time. -->
+  <!-- Claw Lab desktop icon. The in-app cloud mark (union of four circles on a
+       40x28 viewBox, color #e9ebef, the UI load token) on a dark rounded tile
+       (#0d0d0f, the UI bg token), matching the procedural tray icon in
+       clab-desktop. Source of truth for the .deb/.desktop icon; rasterized to
+       PNG at build time. (No double hyphens here: illegal inside XML comments.) -->
   <rect width="256" height="256" rx="48" ry="48" fill="#0d0d0f"/>
   <g transform="translate(19.2 51.84) scale(5.44)" fill="#e9ebef">
     <circle cx="20" cy="14" r="6"/>
