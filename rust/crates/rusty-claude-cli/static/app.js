@@ -279,6 +279,12 @@
   function loadModelInfo(){ pFetchJSON('/ui/model-info').then(function(d){
     if(d && typeof d.context_window==='number' && d.context_window>0){ ctxWindow=d.context_window; if(activeId) setCtxToks(dlgToks[activeId]); }
   }).catch(function(){}); }
+  /* small version tag on the home screen — source is /health (ungated), so it works before any
+     token is entered; version/git_sha come from the binary (CARGO_PKG_VERSION/GIT_SHA), not hardcoded */
+  function loadVersion(){ fetch('/health',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){
+    var el=document.getElementById('homeVer'); if(!el||!d||!d.version) return;
+    el.textContent='v'+d.version; el.title=d.git_sha?('clab v'+d.version+' · '+d.git_sha):('clab v'+d.version);
+  }).catch(function(){}); }
   function setCtxToks(n){
     var el=document.getElementById('ctxToks'); if(!el) return;
     el.classList.remove('warn','crit');
@@ -1302,6 +1308,7 @@
      to the guided setup instead of a dead-end home screen. */
   refreshSidebar();
   loadModelInfo();
+  loadVersion();
   loadDlgToks();
   loadDlgErrs();
   loadDlgPins();

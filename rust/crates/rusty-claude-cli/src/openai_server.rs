@@ -141,6 +141,11 @@ struct HealthResponse {
     ok: bool,
     service: &'static str,
     model: String,
+    /// Workspace version (`CARGO_PKG_VERSION`) + git sha, surfaced to the built-in UI so the
+    /// home page can show a version tag without hardcoding it. `git_sha` is `None` when the
+    /// build script didn't inject `GIT_SHA` (e.g. a plain `cargo build`).
+    version: &'static str,
+    git_sha: Option<&'static str>,
 }
 
 #[derive(Serialize)]
@@ -283,6 +288,8 @@ async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
         ok: true,
         service: "claw-openai-serve",
         model: state.served_model_id(),
+        version: env!("CARGO_PKG_VERSION"),
+        git_sha: option_env!("GIT_SHA"),
     })
 }
 

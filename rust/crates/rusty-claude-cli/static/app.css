@@ -43,8 +43,11 @@ html,body{height:100%;}
 /* home: center the hero+composer group vertically, biased slightly above center.
    :not([hidden]) so the id specificity doesn't override .view[hidden]{display:none}
    (that bug kept the home view visible over an open dialog → broke navigation). */
-#view-home:not([hidden]){display:flex; flex-direction:column; justify-content:center; padding-top:24px; padding-bottom:14vh;}
+#view-home:not([hidden]){display:flex; flex-direction:column; justify-content:center; padding-top:24px; padding-bottom:14vh; position:relative;}
 #view-home .entry{margin-top:18px;}
+/* pinned to the bottom, out of flow — must not shift the centered hero/composer above it */
+#view-home .ver{position:absolute; left:0; right:0; bottom:18px; text-align:center; font-family:var(--mono); font-size:11px; letter-spacing:.02em; color:var(--env);}
+#view-home .ver:empty{display:none;}
 .hero .sub{flex:1; min-width:240px; color:#9498a1; line-height:1.55; font-size:14.5px;}
 
 .entry{background:var(--card); border:1px solid var(--line); border-radius:20px; padding:6px; margin-top:28px; transition:border-color .15s;}
