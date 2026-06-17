@@ -1,3 +1,8 @@
 # Shell scripts must use LF line endings so they run on the Linux deploy host,
 # regardless of the editor or filesystem they were saved from.
 *.sh text eol=lf
+
+# The desktop entry must use LF: `.desktop` parsers expect it. Keeps the
+# packaged .deb correct regardless of the OS the file was committed from.
+*.desktop text eol=lf
+

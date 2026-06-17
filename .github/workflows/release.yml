@@ -72,6 +72,57 @@ jobs:
           chmod +x "dist/${{ matrix.artifact_name }}"
           (cd dist && { if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.artifact_name }}"; else shasum -a 256 "${{ matrix.artifact_name }}"; fi; } > "${{ matrix.artifact_name }}.sha256")
 
+      # Linux desktop artifact: a .deb so it installs with a double-click (the
+      # graphical App Center / gdebi — no terminal), places "Claw Lab" in the
+      # apps menu, and launches the tray role (`clab tray`: server + UI + tray
+      # icon) like the Windows .exe. Reuses the static musl binary + assets/.
+      - name: Build .deb (Linux desktop)
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y librsvg2-bin   # rsvg-convert for the icon
+          # Version: from the tag on a release; otherwise the workspace version
+          # plus a -dev suffix for workflow_dispatch test builds. No hardcoding.
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')-dev"
+          fi
+          pkg="$(mktemp -d)/claw-lab"
+          mkdir -p "$pkg/DEBIAN" "$pkg/usr/bin" \
+                   "$pkg/usr/share/applications" \
+                   "$pkg/usr/share/icons/hicolor/256x256/apps" \
+                   "$pkg/usr/share/icons/hicolor/scalable/apps"
+          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$pkg/usr/bin/clab"
+          install -m 644 "$GITHUB_WORKSPACE/assets/claw-lab.desktop" "$pkg/usr/share/applications/claw-lab.desktop"
+          rsvg-convert -w 256 -h 256 "$GITHUB_WORKSPACE/assets/claw-lab.svg" \
+            -o "$pkg/usr/share/icons/hicolor/256x256/apps/claw-lab.png"
+          install -m 644 "$GITHUB_WORKSPACE/assets/claw-lab.svg" \
+            "$pkg/usr/share/icons/hicolor/scalable/apps/claw-lab.svg"
+          # control file built line-by-line (avoids YAML/heredoc whitespace pitfalls;
+          # Description continuation lines must start with a single space).
+          {
+            echo "Package: claw-lab"
+            echo "Version: ${version}"
+            echo "Section: utils"
+            echo "Priority: optional"
+            echo "Architecture: amd64"
+            echo "Maintainer: Claw Lab <noreply@users.noreply.github.com>"
+            echo "Description: Local agentic layer - model, agent, chat"
+            echo " Wraps an OpenAI-compatible backend with built-in tools, web search,"
+            echo " and an agent workflow; serves an OpenAI-compatible endpoint with a"
+            echo " built-in web UI. 'clab tray' runs it as a desktop tray app."
+          } > "$pkg/DEBIAN/control"
+          deb="claw-lab_${version}_amd64.deb"
+          dpkg-deb --build --root-owner-group "$pkg" "dist/${deb}"
+          ( cd dist && sha256sum "${deb}" > "${deb}.sha256" )
+          echo "DEB_NAME=${deb}" >> "$GITHUB_ENV"
+          dpkg-deb --info "dist/${deb}"
+          dpkg-deb --contents "dist/${deb}"
+          ls -la dist
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v6
         with:
@@ -80,6 +131,15 @@ jobs:
             rust/dist/${{ matrix.artifact_name }}
             rust/dist/${{ matrix.artifact_name }}.sha256
 
+      - name: Upload .deb workflow artifact
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        uses: actions/upload-artifact@v6
+        with:
+          name: claw-lab-deb
+          path: |
+            rust/dist/*.deb
+            rust/dist/*.deb.sha256
+
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
@@ -87,4 +147,13 @@ jobs:
           files: |
             rust/dist/${{ matrix.artifact_name }}
             rust/dist/${{ matrix.artifact_name }}.sha256
+          fail_on_unmatched_files: true
+
+      - name: Upload .deb release asset
+        if: matrix.target == 'x86_64-unknown-linux-musl' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            rust/dist/*.deb
+            rust/dist/*.deb.sha256
           fail_on_unmatched_files: true

@@ -18,6 +18,17 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# Linux-only desktop integration deps. `ksni` is a pure-Rust implementation of
+# the freedesktop StatusNotifierItem (tray) spec over D-Bus (via `zbus`) — it
+# pulls NO gtk/appindicator C libraries, so the Linux build of `clab` stays a
+# fully static musl binary (see the release pipeline). The `blocking` feature
+# gives a non-async API so the tray coexists with the server's own runtime
+# without nesting executors. Tray icons appear on desktops with a
+# StatusNotifier host (KDE, and GNOME with the AppIndicator extension that
+# Ubuntu ships by default).
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = { version = "0.3", features = ["blocking"] }
+
 # This crate is the quarantine for the unavoidable Windows FFI `unsafe` (tray,
 # console hiding, registry). The rest of the workspace keeps the upstream
 # `unsafe_code = "forbid"`; we deliberately do NOT inherit the workspace lints

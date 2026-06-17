@@ -19,14 +19,19 @@ and deploy tooling are Claw Lab's.
 
 - Language: Rust. The workspace lives in `rust/` (members under `rust/crates/*`).
 - Binary: **`clab`** (defined in crate `clab-cli`). Other notable crates: `clab-desktop`
-  (Windows tray/desktop integration), `clab-analog`, `clab-rag-service`.
+  (desktop integration — Windows + Linux tray), `clab-analog`, `clab-rag-service`.
 - `USAGE.md` — task-oriented usage guide. `docs/` — Windows, local providers, containers,
   model compatibility, RAG/web-ui, navigation/file-context.
 - `src/` + `tests/` — companion reference/audit workspace, not the primary runtime.
-- **Windows desktop:** `clab tray` runs serve + the built-in UI in the background as a
-  system-tray app with no console window (a bare double-click does the same; `clab` in a
-  terminal stays the CLI/REPL); `clab uninstall` removes per-user data + the autostart
-  entry. All Windows FFI lives in the `clab-desktop` crate. See `docs/windows-install-release.md`.
+- **Desktop (`clab tray` / `clab uninstall`):** `clab tray` runs serve + the built-in UI in
+  the background as a system-tray app (a bare double-click does the same on Windows; `clab` in
+  a terminal stays the CLI/REPL); `clab uninstall` removes per-user data + the autostart entry.
+  Lives in the `clab-desktop` crate, gated by `cfg`: **Windows** uses win32 FFI (`tray-icon`,
+  hidden-console relaunch, `HKCU\...\Run`); **Linux** uses `ksni` — a pure-Rust StatusNotifierItem
+  tray over D-Bus (no gtk, no `unsafe`), `~/.config/autostart`, `xdg-open` — so the Linux build
+  stays a static musl binary. The Linux desktop artifact is a `.deb` (double-click install via the
+  graphical App Center, then "Claw Lab" in the apps menu; built in `release.yml`); the in-repo
+  `assets/` holds its `.desktop` entry and `claw-lab.svg` icon. See `docs/windows-install-release.md`.
 
 ## Build, verify, test
 
@@ -108,9 +113,10 @@ deploy interactively.
 - **Language:** code, commits, and public docs in English; maintainer conversation may
   be in another language.
 - **Unsafe code:** the workspace sets `unsafe_code = "forbid"` (from upstream) — keep it. The one
-  exception is `clab-desktop` (Windows tray/console/registry FFI), which opts out via its own
-  crate-level `[lints]` and documents every `unsafe` block with `// SAFETY:`. Do not introduce
-  `unsafe` anywhere else; new unavoidable FFI belongs in `clab-desktop` (or a similarly-quarantined crate).
+  exception is `clab-desktop`, which opts out via its own crate-level `[lints]` so its **Windows**
+  FFI (tray/console/registry) may use `unsafe`, each block documented with `// SAFETY:`. The
+  crate's **Linux** path (the `ksni` tray) uses no `unsafe`. Do not introduce `unsafe` anywhere
+  else; new unavoidable FFI belongs in `clab-desktop` (or a similarly-quarantined crate).
 - **CI:** GitHub Actions does **not** gate on the build. `.github/workflows/rust-ci.yml`
   (push/PR to `main`) runs only the docs source-of-truth job — two Python checks
   (`check_doc_source_of_truth.py` for branding/links and `check_release_readiness.py`);

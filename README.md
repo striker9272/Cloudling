@@ -54,6 +54,7 @@
 - **Изоляция** — живой сервис работает в нейтральной директории и не тянет в обычные чаты `CLAUDE.md`, git-статус и настройки проекта.
 - **Встроенный веб-интерфейс (необязательно)** — с флагом `--ui` тот же бинарник отдаёт на том же порту страницу чата: стрим, сворачиваемые tool-call'ы, markdown, вложения-картинки, серверное хранилище диалогов/пресетов/настроек. По умолчанию headless — UI не мешает API. Подробности — [`docs/web-ui.md`](./docs/web-ui.md).
 - **Нативное десктоп-приложение для Windows (необязательно)** — тот же `clab.exe` умеет жить значком в трее: двойной клик → фоновый serve+UI без окна консоли; меню «открыть в браузере / автозапуск / удалить»; без Docker и WSL. В терминале `clab` остаётся обычным CLI/REPL. Подробности — [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+- **Десктоп-приложение для Linux (необязательно)** — пакет `.deb`: двойной клик → графический установщик (App Center / gdebi, без терминала) → «Claw Lab» появляется в меню приложений → запуск кликом: фоновый serve+UI и значок в трее (открыть в браузере / автозапуск при входе / удалить). Бинарник статический (musl) — запускается на любом дистрибутиве, без подгонки под glibc. Удаление — через центр приложений или `apt remove`; пользовательские данные сносит `clab uninstall` (или пункт «Удалить» в меню). (Значок в трее показывают KDE и GNOME с расширением AppIndicator, которое в Ubuntu стоит из коробки.)
 
 ### Быстрый старт
 
@@ -69,7 +70,9 @@ cd claw-lab
 
 > Ручная сборка (`cd rust && cargo build --release -p clab-cli`) тоже работает, но **не проверяет зависимости** — используй её, только если окружение уже настроено.
 
-> Не хочешь ставить Rust? Скачай готовый бинарник из релиза: `./install.sh --prebuilt` (нужен `gh` или `curl`; для приватного репо — авторизованный `gh`). Конкретную версию — `--prebuilt-tag vX.Y.Z`.
+> Не хочешь ставить Rust? Скачай готовый бинарник из релиза: `./install.sh --prebuilt` (нужен `gh` или `curl`; для приватного репо — авторизованный `gh`). Конкретную версию — `--prebuilt-tag vX.Y.Z`. Сам бинарник `claw-linux-x64` статический (musl) — запускается на любом дистрибутиве, без подгонки под версию glibc.
+
+> **Десктоп без терминала (Linux).** Скачай `claw-lab_*_amd64.deb` из релиза и открой двойным кликом — установится через графический центр приложений (или, если предпочитаешь терминал, `sudo apt install ./claw-lab_*_amd64.deb`). После установки запусти «Claw Lab» из меню приложений: поднимется фоновый serve+UI, появится значок в трее (открыть / автозапуск / удалить), браузер откроется сам. Бэкенд задаётся в браузере при первом запуске.
 
 ### Запуск как сервиса
 
@@ -188,6 +191,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 - **Isolation** — the live service runs in a neutral workdir and won't pull `CLAUDE.md`, git status, or project settings into ordinary chats.
 - **Built-in web UI (optional)** — with the `--ui` flag the same binary serves a chat page on the same port: streaming, collapsible tool calls, markdown, image attachments, and server-side storage of dialogs/presets/settings. Headless by default — the UI never gets in the API's way. See [`docs/web-ui.md`](./docs/web-ui.md).
 - **Native Windows desktop app (optional)** — the same `clab.exe` can run as a system-tray app: double-click → background serve+UI with no console window; tray menu to open it in the browser, toggle start-at-login, or uninstall; no Docker or WSL. In a terminal `clab` stays a normal CLI/REPL. See [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+- **Linux desktop app (optional)** — a `.deb` package: double-click → graphical installer (App Center / gdebi, no terminal) → "Claw Lab" appears in the apps menu → click to launch: background serve+UI and a tray icon (open in browser / start at login / uninstall). The binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching. Uninstall via the App Center or `apt remove`; `clab uninstall` (or the "Uninstall" menu item) removes user data. (The tray icon shows on KDE and on GNOME with the AppIndicator extension that Ubuntu ships by default.)
 
 ### Quick start
 
@@ -203,7 +207,9 @@ The binary lands in `rust/target/release/clab` (`.exe` on Windows); the installe
 
 > A manual build (`cd rust && cargo build --release -p clab-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
 
-> Don't want to install Rust? Download a prebuilt release binary: `./install.sh --prebuilt` (needs `gh` or `curl`; for a private repo, an authenticated `gh`). Pin a version with `--prebuilt-tag vX.Y.Z`.
+> Don't want to install Rust? Download a prebuilt release binary: `./install.sh --prebuilt` (needs `gh` or `curl`; for a private repo, an authenticated `gh`). Pin a version with `--prebuilt-tag vX.Y.Z`. The `claw-linux-x64` binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching.
+
+> **No-terminal desktop (Linux).** Download `claw-lab_*_amd64.deb` from a release and open it with a double-click — it installs via the graphical App Center (or, if you prefer the terminal, `sudo apt install ./claw-lab_*_amd64.deb`). Then launch "Claw Lab" from the apps menu: it starts the background serve+UI, shows a tray icon (open / start at login / uninstall), and opens the browser for you. Configure the backend in the browser on first run.
 
 ### Run it as a service
 

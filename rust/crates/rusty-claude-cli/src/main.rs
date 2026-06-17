@@ -796,19 +796,20 @@ enum CliAction {
         ui: bool,
     },
     /// Windows desktop mode: run serve + built-in UI in the background, place a
-    /// tray icon with a right-click menu, and hide the console window. The same
-    /// `clab.exe` in a different role (see `desktop` module). Windows-only at
-    /// runtime; the variant itself is cross-platform so the parser/dispatch
-    /// compile everywhere (non-Windows returns a clear "Windows-only" error).
+    /// tray icon with a menu, and (on Windows) hide the console window. The same
+    /// `clab` binary in a different role (see `desktop` module). Implemented on
+    /// Windows (win32 tray) and Linux (SNI tray via `ksni`); on other platforms
+    /// the dispatch returns a clear "not available" error. The variant itself is
+    /// cross-platform so the parser/dispatch compile everywhere.
     Tray {
         bind: String,
         model: String,
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     },
-    /// Windows desktop mode: remove what the desktop integration created
-    /// (shortcuts, autostart entry) and, after confirmation, the per-user data
-    /// directory. Windows-only at runtime.
+    /// Desktop mode: remove what the desktop integration created (autostart
+    /// entry) and, after confirmation, the per-user data directories. Implemented
+    /// on Windows and Linux.
     Uninstall {
         /// Skip the interactive confirmation (CLI `--yes`). The tray menu path
         /// shows its own GUI confirmation dialog instead.

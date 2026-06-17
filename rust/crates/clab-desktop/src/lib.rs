@@ -1,53 +1,143 @@
-//! Windows desktop integration for Claw Lab.
+//! Desktop integration for Claw Lab (Windows + Linux).
 //!
 //! This is the quarantine crate for the small amount of unavoidable Windows FFI
-//! `unsafe` needed by the tray icon, console-window handling, and registry
-//! autostart. The rest of the workspace keeps the upstream
+//! `unsafe` needed by the Windows tray icon, console-window handling, and
+//! registry autostart. The rest of the workspace keeps the upstream
 //! `unsafe_code = "forbid"`; only this crate permits `unsafe`, and every block
-//! carries a `// SAFETY:` note.
+//! carries a `// SAFETY:` note. The Linux path uses no `unsafe` at all.
 //!
-//! The `tray` role runs the server + built-in web UI in the background, with no
-//! console window, and shows a tray icon with a right-click menu (Open / Start
-//! at login / Uninstall / Quit). The `uninstall` role removes the optional
-//! autostart entry and, after confirmation, the per-user data directories.
+//! The `tray` role runs the server + built-in web UI in the background and shows
+//! a tray icon with a menu (Open / Start at login / Uninstall / Quit). The
+//! `uninstall` role removes the optional autostart entry and, after
+//! confirmation, the per-user data directories.
 //!
 //! The crate is decoupled from the rest of Claw Lab: the caller passes a `serve`
 //! closure (which starts the HTTP server) and the list of `data_dirs` to remove
-//! on uninstall, so this crate depends on nothing but `tray-icon`/`windows-sys`
-//! (Windows only). The public API exists on every platform — off Windows it
-//! returns a clear "Windows-only" error — so the workspace still builds on
-//! Linux/macOS.
+//! on uninstall. Platform glue is gated by `cfg`:
+//! - **Windows** — `tray-icon`/`windows-sys`: hidden-console relaunch, win32
+//!   message-loop tray, `HKCU\...\Run` autostart.
+//! - **Linux** — `ksni` (pure-Rust StatusNotifierItem over D-Bus, no gtk): SNI
+//!   tray, `~/.config/autostart` autostart, `xdg-open` for the browser. Keeps
+//!   the static musl binary dependency-free.
+//! - **Other (macOS, …)** — the public API exists but returns a clear
+//!   "not available on this platform" error, so the workspace still builds.
 
-/// Run the desktop tray: start `serve` in the background, with no console
-/// window, and show the tray icon + menu. `bind` builds the browser URL for the
-/// "Open" item. Windows-only.
-#[cfg(not(windows))]
+/// Run the desktop tray: start `serve` in the background and show the tray icon
+/// + menu. `bind` builds the browser URL for the "Open" item. Implemented on
+/// Windows and Linux; a no-op error elsewhere.
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::Error>>
 where
     F: FnOnce() + Send + 'static,
 {
-    Err("`clab tray` is only available on Windows".into())
+    Err("`clab tray` is only available on Windows and Linux".into())
 }
 
 /// Remove the autostart entry and (after confirmation, unless `assume_yes`) each
-/// of the per-user `data_dirs`. Windows-only.
-#[cfg(not(windows))]
+/// of the per-user `data_dirs`. Implemented on Windows and Linux.
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn run_uninstall(
     _data_dirs: Vec<std::path::PathBuf>,
     _assume_yes: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    Err("`clab uninstall` is only available on Windows".into())
+    Err("`clab uninstall` is only available on Windows and Linux".into())
 }
 
 /// Whether the executable was started by a bare double-click (its own fresh
 /// console) rather than from an existing terminal. Always false off Windows.
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub fn launched_by_double_click() -> bool {
     false
 }
 
 #[cfg(windows)]
 pub use imp::{launched_by_double_click, run_tray, run_uninstall};
+
+#[cfg(target_os = "linux")]
+pub use linux_imp::{launched_by_double_click, run_tray, run_uninstall};
+
+/// Procedurally rendered Claw Lab tray icon, shared by the Windows and Linux
+/// trays so the mark is identical and no asset file needs shipping/embedding.
+#[cfg(any(windows, target_os = "linux"))]
+mod icon {
+    /// A dark rounded tile (the UI background `--bg` #0d0d0f) with the in-app
+    /// cloud mark on top (union of four circles on a 40x28 viewBox, color
+    /// `--load` #e9ebef), anti-aliased via 4x4 supersampling onto a 32x32 canvas.
+    /// The dark tile keeps the light cloud readable on any panel/taskbar theme.
+    /// Returns `(width, height, rgba)` with 8-bit RGBA pixels.
+    pub(crate) fn cloud_icon_rgba() -> (u32, u32, Vec<u8>) {
+        const SIZE: usize = 32;
+        const SS: usize = 4; // supersamples per axis
+        const N: u32 = (SS * SS) as u32;
+
+        // Cloud circles in the UI viewBox (40 wide x 28 tall): center + left +
+        // right + top lobe (see static/index.html `.cloud`).
+        let circles = [
+            (20.0_f32, 14.0_f32, 6.0_f32),
+            (14.0, 15.0, 5.0),
+            (26.0, 15.0, 5.0),
+            (20.0, 11.0, 5.0),
+        ];
+        let (vb_w, vb_h) = (40.0_f32, 28.0_f32);
+        // Cloud fills ~85% of the tile width, centered, leaving a small margin.
+        let scale = (SIZE as f32 * 0.85) / vb_w;
+        let off_x = (SIZE as f32 - vb_w * scale) / 2.0;
+        let off_y = (SIZE as f32 - vb_h * scale) / 2.0;
+        let tile_radius = 6.0_f32;
+
+        let mut rgba = vec![0u8; SIZE * SIZE * 4];
+        for py in 0..SIZE {
+            for px in 0..SIZE {
+                let mut tile_hits = 0u32;
+                let mut cloud_hits = 0u32;
+                for sy in 0..SS {
+                    for sx in 0..SS {
+                        let fx = px as f32 + (sx as f32 + 0.5) / SS as f32;
+                        let fy = py as f32 + (sy as f32 + 0.5) / SS as f32;
+                        if in_rounded_square(fx, fy, SIZE as f32, tile_radius) {
+                            tile_hits += 1;
+                        }
+                        let vx = (fx - off_x) / scale;
+                        let vy = (fy - off_y) / scale;
+                        if circles.iter().any(|&(cx, cy, r)| {
+                            let dx = vx - cx;
+                            let dy = vy - cy;
+                            dx * dx + dy * dy <= r * r
+                        }) {
+                            cloud_hits += 1;
+                        }
+                    }
+                }
+                if tile_hits == 0 {
+                    continue; // outside the rounded tile: transparent
+                }
+                // Base = dark tile; blend the light cloud over it by coverage.
+                let cc = cloud_hits as f32 / N as f32;
+                let lerp = |dark: f32, light: f32| (dark * (1.0 - cc) + light * cc) as u8;
+                let idx = (py * SIZE + px) * 4;
+                rgba[idx] = lerp(0x0d as f32, 0xe9 as f32);
+                rgba[idx + 1] = lerp(0x0d as f32, 0xeb as f32);
+                rgba[idx + 2] = lerp(0x0f as f32, 0xef as f32);
+                // Tile edge is anti-aliased via its coverage; the cloud is fully
+                // inside the tile, so alpha follows the tile coverage.
+                rgba[idx + 3] = (tile_hits * 255 / N) as u8;
+            }
+        }
+        (SIZE as u32, SIZE as u32, rgba)
+    }
+
+    /// Whether point (x, y) lies inside a `size`x`size` square with rounded
+    /// corners of the given `radius` (rounded-rectangle signed-distance test).
+    fn in_rounded_square(x: f32, y: f32, size: f32, radius: f32) -> bool {
+        if x < 0.0 || x > size || y < 0.0 || y > size {
+            return false;
+        }
+        // Distance outside the corner-deflated inner rectangle, per axis.
+        let dx = (radius - x).max(x - (size - radius)).max(0.0);
+        let dy = (radius - y).max(y - (size - radius)).max(0.0);
+        dx * dx + dy * dy <= radius * radius
+    }
+}
 
 #[cfg(windows)]
 mod imp {
@@ -378,81 +468,257 @@ mod imp {
         text.encode_utf16().chain(std::iter::once(0)).collect()
     }
 
-    /// Tray icon: a dark rounded tile (the UI background `--bg` #0d0d0f) with the
-    /// in-app cloud mark on top (the union of four circles on a 40x28 viewBox,
-    /// color `--load` #e9ebef). Rendered procedurally — no asset file to ship or
-    /// embed — anti-aliased via 4x4 supersampling onto a 32x32 canvas. The dark
-    /// tile keeps the light cloud readable on any taskbar theme.
+    /// Tray icon as tray-icon's RGBA `Icon`, rendered by the shared procedural
+    /// generator (`crate::icon`) so Windows and Linux show the identical mark.
     fn load_icon() -> Icon {
-        const SIZE: usize = 32;
-        const SS: usize = 4; // supersamples per axis
-        const N: u32 = (SS * SS) as u32;
+        let (w, h, rgba) = crate::icon::cloud_icon_rgba();
+        Icon::from_rgba(rgba, w, h).expect("cloud icon dimensions are valid")
+    }
+}
 
-        // Cloud circles in the UI viewBox (40 wide x 28 tall): center + left +
-        // right + top lobe (see static/index.html `.cloud`).
-        let circles = [
-            (20.0_f32, 14.0_f32, 6.0_f32),
-            (14.0, 15.0, 5.0),
-            (26.0, 15.0, 5.0),
-            (20.0, 11.0, 5.0),
-        ];
-        let (vb_w, vb_h) = (40.0_f32, 28.0_f32);
-        // Cloud fills ~85% of the tile width, centered, leaving a small margin.
-        let scale = (SIZE as f32 * 0.85) / vb_w;
-        let off_x = (SIZE as f32 - vb_w * scale) / 2.0;
-        let off_y = (SIZE as f32 - vb_h * scale) / 2.0;
-        let tile_radius = 6.0_f32;
+#[cfg(target_os = "linux")]
+mod linux_imp {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
 
-        let mut rgba = vec![0u8; SIZE * SIZE * 4];
-        for py in 0..SIZE {
-            for px in 0..SIZE {
-                let mut tile_hits = 0u32;
-                let mut cloud_hits = 0u32;
-                for sy in 0..SS {
-                    for sx in 0..SS {
-                        let fx = px as f32 + (sx as f32 + 0.5) / SS as f32;
-                        let fy = py as f32 + (sy as f32 + 0.5) / SS as f32;
-                        if in_rounded_square(fx, fy, SIZE as f32, tile_radius) {
-                            tile_hits += 1;
-                        }
-                        let vx = (fx - off_x) / scale;
-                        let vy = (fy - off_y) / scale;
-                        if circles.iter().any(|&(cx, cy, r)| {
-                            let dx = vx - cx;
-                            let dy = vy - cy;
-                            dx * dx + dy * dy <= r * r
-                        }) {
-                            cloud_hits += 1;
-                        }
-                    }
-                }
-                if tile_hits == 0 {
-                    continue; // outside the rounded tile: transparent
-                }
-                // Base = dark tile; blend the light cloud over it by coverage.
-                let cc = cloud_hits as f32 / N as f32;
-                let lerp = |dark: f32, light: f32| (dark * (1.0 - cc) + light * cc) as u8;
-                let idx = (py * SIZE + px) * 4;
-                rgba[idx] = lerp(0x0d as f32, 0xe9 as f32);
-                rgba[idx + 1] = lerp(0x0d as f32, 0xeb as f32);
-                rgba[idx + 2] = lerp(0x0f as f32, 0xef as f32);
-                // Tile edge is anti-aliased via its coverage; the cloud is fully
-                // inside the tile, so alpha follows the tile coverage.
-                rgba[idx + 3] = (tile_hits * 255 / N) as u8;
-            }
-        }
-        Icon::from_rgba(rgba, SIZE as u32, SIZE as u32).expect("cloud icon dimensions are valid")
+    use ksni::blocking::TrayMethods;
+    use ksni::{Icon, Tray};
+
+    /// Autostart desktop-entry path: `$XDG_CONFIG_HOME/autostart/claw-lab.desktop`
+    /// (falls back to `~/.config/autostart/...`). Writing it makes the desktop
+    /// launch `clab tray` at login; removing it disables autostart. No hardcoded
+    /// home path — derived from the environment so the build stays portable.
+    fn autostart_path() -> Option<PathBuf> {
+        let config_home = std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| !p.as_os_str().is_empty())
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        Some(config_home.join("autostart").join("claw-lab.desktop"))
     }
 
-    /// Whether point (x, y) lies inside a `size`x`size` square with rounded
-    /// corners of the given `radius` (rounded-rectangle signed-distance test).
-    fn in_rounded_square(x: f32, y: f32, size: f32, radius: f32) -> bool {
-        if x < 0.0 || x > size || y < 0.0 || y > size {
+    fn autostart_enabled() -> bool {
+        autostart_path().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn set_autostart(enable: bool) {
+        let Some(path) = autostart_path() else {
+            return;
+        };
+        if enable {
+            let exe = std::env::current_exe()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "clab".to_string());
+            let entry = format!(
+                "[Desktop Entry]\nType=Application\nName=Claw Lab\nExec={exe} tray\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+            );
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&path, entry);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    /// Build a `http://host:port/` URL from the bind address, rewriting wildcard
+    /// hosts to localhost so the browser can reach it. Mirrors the Windows helper.
+    fn browser_url(bind: &str) -> String {
+        let (host, port) = bind.rsplit_once(':').unwrap_or(("127.0.0.1", "4097"));
+        let host = match host {
+            "0.0.0.0" | "::" | "[::]" | "" => "127.0.0.1",
+            other => other,
+        };
+        format!("http://{host}:{port}/")
+    }
+
+    fn open_in_browser(url: &str) {
+        let _ = Command::new("xdg-open").arg(url).spawn();
+    }
+
+    /// The shared procedural icon as a ksni `Icon` (ARGB32, network byte order).
+    /// The generator emits RGBA; `rotate_right(1)` reorders each pixel to ARGB.
+    fn tray_icon() -> Icon {
+        let (width, height, mut data) = crate::icon::cloud_icon_rgba();
+        for pixel in data.chunks_exact_mut(4) {
+            pixel.rotate_right(1);
+        }
+        Icon {
+            width: width as i32,
+            height: height as i32,
+            data,
+        }
+    }
+
+    struct ClawTray {
+        url: String,
+        autostart: bool,
+    }
+
+    impl Tray for ClawTray {
+        fn id(&self) -> String {
+            "claw-lab".into()
+        }
+        fn title(&self) -> String {
+            "Claw Lab".into()
+        }
+        fn icon_pixmap(&self) -> Vec<Icon> {
+            vec![tray_icon()]
+        }
+        /// Left-click opens the UI in the browser.
+        fn activate(&mut self, _x: i32, _y: i32) {
+            open_in_browser(&self.url);
+        }
+        fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+            use ksni::menu::*;
+            vec![
+                StandardItem {
+                    label: "Open Claw Lab".into(),
+                    activate: Box::new(|this: &mut Self| open_in_browser(&this.url)),
+                    ..Default::default()
+                }
+                .into(),
+                MenuItem::Separator,
+                CheckmarkItem {
+                    label: "Start at login".into(),
+                    checked: self.autostart,
+                    activate: Box::new(|this: &mut Self| {
+                        this.autostart = !this.autostart;
+                        set_autostart(this.autostart);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                MenuItem::Separator,
+                StandardItem {
+                    label: "Uninstall\u{2026}".into(),
+                    activate: Box::new(|_this: &mut Self| {
+                        // Hand off to a detached `clab uninstall --yes` so this
+                        // process (holding the dialogs DB) can exit and release
+                        // its locks first, then quit.
+                        let _ = spawn_uninstall_detached();
+                        std::process::exit(0);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: "Quit".into(),
+                    activate: Box::new(|_this: &mut Self| std::process::exit(0)),
+                    ..Default::default()
+                }
+                .into(),
+            ]
+        }
+    }
+
+    pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnOnce() + Send + 'static,
+    {
+        let url = browser_url(&bind);
+
+        // Show the tray icon. `spawn` runs the SNI service on its own background
+        // thread and returns a handle we keep alive for the process lifetime. A
+        // desktop with no StatusNotifier host (no panel/extension) returns an
+        // error — log it and carry on so the server still runs and the browser
+        // still opens.
+        let tray = ClawTray {
+            url: url.clone(),
+            autostart: autostart_enabled(),
+        };
+        let _tray_handle = match tray.spawn() {
+            Ok(handle) => Some(handle),
+            Err(error) => {
+                eprintln!("clab tray: system tray unavailable ({error}); running without an icon");
+                None
+            }
+        };
+
+        // Open the UI in the browser shortly after launch (the double-click UX),
+        // once the server has had a moment to start accepting connections.
+        let open_url = url;
+        thread::Builder::new()
+            .name("clab-open-browser".into())
+            .spawn(move || {
+                thread::sleep(Duration::from_millis(1200));
+                open_in_browser(&open_url);
+            })?;
+
+        // Run the HTTP server on this (the main) thread; it blocks until exit.
+        // Keep `_tray_handle` in scope so the tray lives as long as the server.
+        serve();
+        drop(_tray_handle);
+        Ok(())
+    }
+
+    pub fn run_uninstall(
+        data_dirs: Vec<PathBuf>,
+        assume_yes: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !assume_yes && !confirm_cli(&data_dirs) {
+            eprintln!("Aborted. Nothing was removed.");
+            return Ok(());
+        }
+        // Always clear the autostart entry so a removed install does not try to
+        // launch a deleted binary at next login.
+        set_autostart(false);
+        for dir in &data_dirs {
+            if dir.exists() {
+                remove_dir_all_retry(dir)?;
+                println!("Removed {}", dir.display());
+            }
+        }
+        Ok(())
+    }
+
+    /// Always false on Linux: the AppImage / autostart entry launches `clab tray`
+    /// explicitly, so there is no double-click-vs-terminal console heuristic.
+    pub fn launched_by_double_click() -> bool {
+        false
+    }
+
+    /// Launch a detached `clab uninstall --yes` that deletes the data directories
+    /// once this process releases its file locks.
+    fn spawn_uninstall_detached() -> std::io::Result<()> {
+        let exe = std::env::current_exe()?;
+        Command::new(exe).arg("uninstall").arg("--yes").spawn()?;
+        Ok(())
+    }
+
+    /// Remove a directory tree, retrying briefly while the just-exiting tray
+    /// process releases the dialogs-DB lock.
+    fn remove_dir_all_retry(dir: &Path) -> std::io::Result<()> {
+        let mut last = Ok(());
+        for _ in 0..20 {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => return Ok(()),
+                Err(error) => last = Err(error),
+            }
+            if !dir.exists() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        last
+    }
+
+    /// Interactive CLI confirmation for `clab uninstall` (no `--yes`).
+    fn confirm_cli(dirs: &[PathBuf]) -> bool {
+        use std::io::Write;
+        eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
+        for dir in dirs {
+            eprintln!("  {}", dir.display());
+        }
+        eprint!("Type 'yes' to confirm: ");
+        if std::io::stderr().flush().is_err() {
             return false;
         }
-        // Distance outside the corner-deflated inner rectangle, per axis.
-        let dx = (radius - x).max(x - (size - radius)).max(0.0);
-        let dy = (radius - y).max(y - (size - radius)).max(0.0);
-        dx * dx + dy * dy <= radius * radius
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() {
+            return false;
+        }
+        line.trim() == "yes"
     }
 }
