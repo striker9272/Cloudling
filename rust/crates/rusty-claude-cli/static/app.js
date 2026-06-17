@@ -645,17 +645,44 @@
     turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
-    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null;
+    var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null, reasonLiveEl=null;
     liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
     /* Coalesce the progressive markdown re-render to one per animation frame. md() reparses
        the whole uncommitted tail, so calling it on every token is O(n^2) on long answers;
        rAF batches it without changing the output (finalize() does the authoritative render). */
     var liveRaf=0;
     function renderLiveTail(){ liveRaf=0; if(!liveBox) return;
-      liveBox.innerHTML=md(acc.slice(committed));
+      var tail=acc.slice(committed);
+      /* Reasoning streams open (<details type="reasoning" done="false"> … not yet closed):
+         peel it out of the tail and show it as an EXPANDED, growing disclosure. When the
+         closing tag arrives, onContent's BLOCK_RE commits it as a normal collapsed block —
+         giving the expand-while-thinking → collapse-on-answer behaviour for free. */
+      var ro=tail.search(/<details type="reasoning"/);
+      if(ro>=0 && tail.indexOf('</details>', ro)<0){
+        var before=tail.slice(0, ro);
+        var rinner=tail.slice(ro).replace(/<details[^>]*>/,'').replace(/<summary>[\s\S]*?<\/summary>/i,'');
+        liveBox.innerHTML=md(before);
+        showReasonLive(rinner);
+        maybeScroll();
+        return;
+      }
+      clearReasonLive();
+      liveBox.innerHTML=md(tail);
       (liveBox.lastElementChild || liveBox).appendChild(caretEl);
       maybeScroll();
     }
+    function showReasonLive(text){
+      if(!reasonLiveEl){
+        reasonLiveEl=document.createElement('details'); reasonLiveEl.className='tool reason'; reasonLiveEl.open=true;
+        reasonLiveEl.innerHTML='<summary class="head"><span class="tag">Размышление…</span></summary>';
+        var pre=document.createElement('pre'); pre.className='toolout'; reasonLiveEl.appendChild(pre);
+        turn.insertBefore(reasonLiveEl, liveBox);
+      }
+      var pre=reasonLiveEl.querySelector('pre');
+      pre.textContent=decodeEntities(text.replace(/^\s+|\s+$/g,''));
+      pre.appendChild(caretEl); /* caret rides the reasoning tail while the model thinks */
+    }
+    function clearReasonLive(){ if(reasonLiveEl){ reasonLiveEl.remove(); reasonLiveEl=null; } }
     function scheduleLiveTail(){ if(liveRaf) return;
       liveRaf=(window.requestAnimationFrame||function(f){return setTimeout(f,16);})(renderLiveTail);
     }
@@ -685,6 +712,7 @@
         if(m.index < committed) continue;
         var pre=acc.slice(committed, m.index);
         if(pre.replace(/\s/g,'')){ var b=document.createElement('div'); b.className='md'; b.innerHTML=md(pre); turn.insertBefore(b, liveBox); }
+        if(m[1]==='reasoning') clearReasonLive(); /* live block now closed → commit collapsed, drop the growing one */
         var cel=blockEl(m[1], m[2], m[3]);
         if(cel){ turn.insertBefore(cel, liveBox); } else { todoTouched=true; } /* null = suppressed TodoWrite → feed the bar */
         committed=m.index+m[0].length;

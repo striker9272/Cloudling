@@ -10513,6 +10513,14 @@ impl AnthropicRuntimeClient {
                             render_thinking_block_summary(out, None, false)?;
                             block_has_thinking_summary = true;
                         }
+                        // Forward each reasoning chunk live so the serve UI can grow the
+                        // reasoning block as it streams (the terminal/CLI path ignores this
+                        // event and renders via `out` above).
+                        emit_assistant_event(
+                            &mut events,
+                            &mut event_sink,
+                            AssistantEvent::ThinkingDelta(thinking.clone()),
+                        );
                         // 累积 thinking 文本到 pending_thinking（让 session 持久化能拿到）
                         if let Some((t, _)) = &mut pending_thinking {
                             t.push_str(&thinking);

@@ -275,6 +275,11 @@ fn stream_chat_completions(
         // off the event stream like `last_ctx`, so the final chunk can report the real
         // finish_reason ("length" when the answer was truncated) instead of a hardcoded "stop".
         let last_stop_reason = std::rc::Rc::new(std::cell::RefCell::new(None::<String>));
+        // Progressive reasoning streaming (see the event sink): whether a
+        // `<details type="reasoning">` block is currently open, and whether any reasoning was
+        // streamed as deltas (so the trailing full `Thinking` block is not sent twice).
+        let reasoning_open = std::rc::Rc::new(std::cell::Cell::new(false));
+        let reasoning_streamed = std::rc::Rc::new(std::cell::Cell::new(false));
 
         let result = {
             let StatelessConversation {
@@ -307,7 +312,17 @@ fn stream_chat_completions(
             let abort_signal = session.abort_signal();
             let last_ctx_sink = last_ctx.clone();
             let last_stop_reason_sink = last_stop_reason.clone();
+            let reasoning_open_sink = reasoning_open.clone();
+            let reasoning_streamed_sink = reasoning_streamed.clone();
             let mut tool_inputs = HashMap::<String, String>::new();
+            // Client-disconnect detection: once the SSE receiver is dropped (tab closed / Stop
+            // pressed), `send` fails. Trip the turn-level abort so the agent loop halts between
+            // steps instead of running on in the background — the OWUI pattern (client gone -> stop).
+            let send = |chunk: Result<Event, Infallible>| {
+                if sender.send(chunk).is_err() {
+                    abort_signal.abort();
+                }
+            };
             let mut event_sink = |event: &AssistantEvent| {
                 if let AssistantEvent::Usage(u) = event {
                     last_ctx_sink.set(
@@ -319,6 +334,71 @@ fn stream_chat_completions(
                 if let AssistantEvent::StopReason(reason) = event {
                     last_stop_reason_sink.replace(reason.clone());
                 }
+                // Stream the model's reasoning live as a progressive OpenWebUI-style
+                // `<details type="reasoning">` block: open on the first delta, append each
+                // chunk, close it before any answer/tool content (or end of turn). Gated by the
+                // `show_reasoning` toggle. The trailing full `Thinking` event is only a fallback
+                // for backends that never streamed deltas.
+                if forward_reasoning {
+                    match event {
+                        AssistantEvent::ThinkingDelta(delta) if !delta.is_empty() => {
+                            if !reasoning_open_sink.get() {
+                                reasoning_open_sink.set(true);
+                                reasoning_streamed_sink.set(true);
+                                send(openai_sse_chunk(
+                                    &id,
+                                    created,
+                                    &response_model,
+                                    Some(reasoning_open_chunk()),
+                                    None,
+                                ));
+                            }
+                            send(openai_sse_chunk(
+                                &id,
+                                created,
+                                &response_model,
+                                Some(escape_html_text(delta)),
+                                None,
+                            ));
+                            return;
+                        }
+                        AssistantEvent::Thinking { thinking, .. } if !thinking.is_empty() => {
+                            // Already streamed via deltas → closed by the answer/stop branch
+                            // below; don't resend the whole block.
+                            if reasoning_streamed_sink.get() {
+                                return;
+                            }
+                            send(openai_sse_chunk(
+                                &id,
+                                created,
+                                &response_model,
+                                Some(openwebui_reasoning_details(thinking)),
+                                None,
+                            ));
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
+                // Close an open reasoning block before the answer text, a tool block, or the end.
+                if reasoning_open_sink.get()
+                    && matches!(
+                        event,
+                        AssistantEvent::TextDelta(_)
+                            | AssistantEvent::ToolUse { .. }
+                            | AssistantEvent::ToolResult { .. }
+                            | AssistantEvent::MessageStop
+                    )
+                {
+                    reasoning_open_sink.set(false);
+                    send(openai_sse_chunk(
+                        &id,
+                        created,
+                        &response_model,
+                        Some(reasoning_close_chunk()),
+                        None,
+                    ));
+                }
                 if let Some(chunk) = assistant_event_to_openai_sse_chunk(
                     &id,
                     created,
@@ -327,13 +407,7 @@ fn stream_chat_completions(
                     &mut tool_inputs,
                     forward_reasoning,
                 ) {
-                    // Client-disconnect detection: once the SSE receiver is dropped
-                    // (tab closed / Stop pressed), `send` fails. Trip the turn-level
-                    // abort so the agent loop halts between steps instead of running on
-                    // in the background — the OWUI pattern (client gone -> stop).
-                    if sender.send(chunk).is_err() {
-                        abort_signal.abort();
-                    }
+                    send(chunk);
                 }
             };
 
@@ -508,6 +582,18 @@ fn openwebui_reasoning_details(thinking: &str) -> String {
         "\n<details type=\"reasoning\" done=\"true\">\n<summary>Reasoning</summary>\n{}\n</details>\n",
         escape_html_text(thinking),
     )
+}
+
+/// Opening of a *progressive* reasoning block (same shape as [`openwebui_reasoning_details`]
+/// but left open with `done="false"`). Reasoning text deltas are streamed after this, and the
+/// block is closed by [`reasoning_close_chunk`] once the answer/tool content begins.
+fn reasoning_open_chunk() -> String {
+    "\n<details type=\"reasoning\" done=\"false\">\n<summary>Reasoning</summary>\n".to_string()
+}
+
+/// Closing tag for a progressive reasoning block opened by [`reasoning_open_chunk`].
+fn reasoning_close_chunk() -> String {
+    "\n</details>\n".to_string()
 }
 
 fn escape_html_attr(value: &str) -> String {

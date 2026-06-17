@@ -32,6 +32,11 @@ pub enum AssistantEvent {
         thinking: String,
         signature: Option<String>,
     },
+    /// One incremental chunk of the model's reasoning, emitted live as it streams (before the
+    /// final [`AssistantEvent::Thinking`] block). Lets the serve layer forward reasoning
+    /// progressively to the UI. Display-only: the final `Thinking` event still carries the full
+    /// text for history/session, so `build_assistant_message` ignores these deltas.
+    ThinkingDelta(String),
     TextDelta(String),
     ToolUse {
         id: String,
@@ -837,6 +842,9 @@ fn build_assistant_message(
                     signature,
                 });
             }
+            // Live reasoning deltas are display-only; the full reasoning arrives in the
+            // terminal `Thinking` block below, which is what history/session persist.
+            AssistantEvent::ThinkingDelta(_) => {}
             AssistantEvent::TextDelta(delta) => text.push_str(&delta),
             AssistantEvent::ToolUse { id, name, input } => {
                 flush_text_block(&mut text, &mut blocks);
