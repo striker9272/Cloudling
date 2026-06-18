@@ -176,7 +176,13 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_TARGET: Option<&str> = option_env!("TARGET");
 const GIT_SHA: Option<&str> = option_env!("GIT_SHA");
 const INTERNAL_PROGRESS_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(3);
-const POST_TOOL_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+// Max wait for the first event of a post-tool continuation before nudging the
+// model with a re-send (see `consume_stream`). Raised from upstream's 10s to 15s
+// to give slow / self-hosted backends more headroom on the post-tool prefill of a
+// large context (a 10s cold-cache prefill would otherwise trigger a wasteful
+// double prefill). Only bounds the wait *before* the first token; streaming of the
+// answer itself is never time-capped.
+const POST_TOOL_STALL_TIMEOUT: Duration = Duration::from_secs(15);
 const PRIMARY_SESSION_EXTENSION: &str = "jsonl";
 const LEGACY_SESSION_EXTENSION: &str = "json";
 const OFFICIAL_REPO_URL: &str = "https://github.com/ultraworkers/claw-code";

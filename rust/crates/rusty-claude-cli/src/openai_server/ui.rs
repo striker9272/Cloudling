@@ -586,6 +586,22 @@ fn as_pos_u64(value: &Value) -> Option<u64> {
         .filter(|n| *n > 0)
 }
 
+/// Total timeout for backend metadata probes (`/models`, Ollama `/api/show`).
+///
+/// These response bodies are tiny, but the probe must tolerate a high-latency link —
+/// a LAN backend reached over a VPN, or a cloud endpoint. The previous fixed 5s was
+/// *shorter* than the backend connect timeout itself (10s default), so a slow link
+/// aborted the probe before it could even connect, leaving the context gauge blank
+/// while the chat (which sets no total request timeout) still worked. Scale with the
+/// configured connect timeout so this tracks `CLAW_BACKEND_CONNECT_TIMEOUT_SECS`
+/// instead of hardcoding a second, inconsistent number.
+fn probe_timeout() -> std::time::Duration {
+    api::TimeoutConfig::from_env()
+        .connect_timeout
+        .unwrap_or_else(|| std::time::Duration::from_secs(10))
+        + std::time::Duration::from_secs(5)
+}
+
 /// Extract the model context window from an OpenAI-compatible `/models` JSON body.
 ///
 /// There is no standard field for this across backends, so probe the known shapes in
@@ -645,7 +661,7 @@ async fn ollama_context_window(base: &str, key: &str, model: &str) -> Option<u64
     // Accept both the current (`model`) and legacy (`name`) parameter spellings.
     let mut req = client
         .post(&url)
-        .timeout(std::time::Duration::from_secs(5))
+        .timeout(probe_timeout())
         .json(&serde_json::json!({ "model": model, "name": model }));
     if !key.is_empty() {
         req = req.bearer_auth(key);
@@ -696,7 +712,7 @@ pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -
     }
     let url = format!("{base}/models");
     let client = api::build_http_client_or_default();
-    let mut probe = client.get(&url).timeout(std::time::Duration::from_secs(5));
+    let mut probe = client.get(&url).timeout(probe_timeout());
     let key = request.api_key.trim();
     if !key.is_empty() {
         probe = probe.bearer_auth(key);
@@ -743,7 +759,7 @@ pub(super) async fn ui_model_info(State(state): State<Arc<OpenAiServerState>>) -
         .unwrap_or_default();
     let url = format!("{base}/models");
     let client = api::build_http_client_or_default();
-    let mut req = client.get(&url).timeout(std::time::Duration::from_secs(5));
+    let mut req = client.get(&url).timeout(probe_timeout());
     if !key.is_empty() {
         req = req.bearer_auth(key.clone());
     }
