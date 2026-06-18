@@ -58,7 +58,25 @@
 
 ### Быстрый старт
 
-Репозиторий — только build-from-source. Установщик `install.sh` сам определит ОС, проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config), а если каких-то системных пакетов не хватает — покажет команду и предложит доустановить (`y/n`):
+Два пути: взять **готовый бинарник** (быстро, Rust не нужен) или **собрать из исходников**.
+
+**Готовый бинарник (без Rust).** Проще всего — установщик сам скачает нужный ассет из релиза:
+
+```bash
+./install.sh --prebuilt              # нужен gh или curl; для приватного репо — авторизованный gh
+# конкретная версия: ./install.sh --prebuilt-tag vX.Y.Z
+```
+
+Или вручную: со страницы Releases скачай `claw-linux-x64`, сделай исполняемым и проверь запуск:
+
+```bash
+chmod +x claw-linux-x64
+./claw-linux-x64 --version
+```
+
+Бинарник статический (musl) — запускается на любом дистрибутиве, без подгонки под версию glibc. Для Windows — ассет `claw-windows-x64.exe` (см. [`docs/windows-install-release.md`](./docs/windows-install-release.md)); десктоп без терминала на Linux — `.deb` ниже. Дальше настрой сервис (раздел «Запуск как сервиса»).
+
+**Сборка из исходников.** Установщик `install.sh` сам определит ОС, проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config), а если каких-то системных пакетов не хватает — покажет команду и предложит доустановить (`y/n`):
 
 ```bash
 git clone https://github.com/striker9272/claw-lab
@@ -69,8 +87,6 @@ cd claw-lab
 Бинарник появится в `rust/target/release/clab` (`.exe` на Windows); установщик сам проверит `clab --version`. Дальше настрой сервис — раздел «Запуск как сервиса» ниже (бэкенд и ключ задаются там, в одном месте). CLI-команды (`clab doctor`, `clab prompt`), провайдеры, сессии и заметки по Windows/PowerShell — в [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
 
 > Ручная сборка (`cd rust && cargo build --release -p clab-cli`) тоже работает, но **не проверяет зависимости** — используй её, только если окружение уже настроено.
-
-> Не хочешь ставить Rust? Скачай готовый бинарник из релиза: `./install.sh --prebuilt` (нужен `gh` или `curl`; для приватного репо — авторизованный `gh`). Конкретную версию — `--prebuilt-tag vX.Y.Z`. Сам бинарник `claw-linux-x64` статический (musl) — запускается на любом дистрибутиве, без подгонки под версию glibc.
 
 > **Десктоп без терминала (Linux).** Скачай `claw-lab_*_amd64.deb` из релиза и открой двойным кликом — установится через графический центр приложений (или, если предпочитаешь терминал, `sudo apt install ./claw-lab_*_amd64.deb`). После установки запусти «Claw Lab» из меню приложений: поднимется фоновый serve+UI, появится значок в трее (открыть / автозапуск / удалить), браузер откроется сам. Бэкенд задаётся в браузере при первом запуске.
 
@@ -195,7 +211,25 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 
 ### Quick start
 
-This repo is build-from-source only. The `install.sh` installer detects your OS, checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config), and — if system packages are missing — shows the command and offers to install them (`y/n`):
+Two paths: grab a **prebuilt binary** (fast, no Rust) or **build from source**.
+
+**Prebuilt binary (no Rust).** Easiest — let the installer fetch the right release asset:
+
+```bash
+./install.sh --prebuilt              # needs gh or curl; for a private repo, an authenticated gh
+# pin a version: ./install.sh --prebuilt-tag vX.Y.Z
+```
+
+Or manually: download `claw-linux-x64` from the Releases page, make it executable, and check it runs:
+
+```bash
+chmod +x claw-linux-x64
+./claw-linux-x64 --version
+```
+
+The binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching. For Windows, grab the `claw-windows-x64.exe` asset (see [`docs/windows-install-release.md`](./docs/windows-install-release.md)); for a no-terminal Linux desktop, the `.deb` below. Then set up the service ("Run it as a service").
+
+**Build from source.** The `install.sh` installer detects your OS, checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config), and — if system packages are missing — shows the command and offers to install them (`y/n`):
 
 ```bash
 git clone https://github.com/striker9272/claw-lab
@@ -206,8 +240,6 @@ cd claw-lab
 The binary lands in `rust/target/release/clab` (`.exe` on Windows); the installer also runs `clab --version` for you. Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`clab doctor`, `clab prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
 
 > A manual build (`cd rust && cargo build --release -p clab-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
-
-> Don't want to install Rust? Download a prebuilt release binary: `./install.sh --prebuilt` (needs `gh` or `curl`; for a private repo, an authenticated `gh`). Pin a version with `--prebuilt-tag vX.Y.Z`. The `claw-linux-x64` binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching.
 
 > **No-terminal desktop (Linux).** Download `claw-lab_*_amd64.deb` from a release and open it with a double-click — it installs via the graphical App Center (or, if you prefer the terminal, `sudo apt install ./claw-lab_*_amd64.deb`). Then launch "Claw Lab" from the apps menu: it starts the background serve+UI, shows a tray icon (open / start at login / uninstall), and opens the browser for you. Configure the backend in the browser on first run.
 
