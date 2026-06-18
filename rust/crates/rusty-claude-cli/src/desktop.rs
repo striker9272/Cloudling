@@ -22,15 +22,10 @@ pub(crate) fn run_tray(
     clab_desktop::run_tray(bind, move || {
         // The tray always serves the built-in UI; an unconfigured engine is
         // fine (configured in the browser), exactly like `openai-serve --ui`.
-        if let Err(error) = crate::openai_server::serve_blocking(
-            serve_bind,
-            model,
-            allowed_tools,
-            permission_mode,
-            true,
-        ) {
-            eprintln!("clab tray: server stopped with error: {error}");
-        }
+        // Return the outcome as a string so the tray can surface a startup
+        // failure (e.g. the port already in use) instead of vanishing.
+        crate::openai_server::serve_blocking(serve_bind, model, allowed_tools, permission_mode, true)
+            .map_err(|error| error.to_string())
     })
 }
 

@@ -28,7 +28,7 @@
 #[cfg(not(any(windows, target_os = "linux")))]
 pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::Error>>
 where
-    F: FnOnce() + Send + 'static,
+    F: FnOnce() -> Result<(), String> + Send + 'static,
 {
     Err("`clab tray` is only available on Windows and Linux".into())
 }
@@ -176,7 +176,7 @@ mod imp {
 
     pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce() -> Result<(), String> + Send + 'static,
     {
         // A console-subsystem binary gets a console window when double-clicked,
         // launched from autostart, or run as `clab tray` in a terminal. On
@@ -201,10 +201,15 @@ mod imp {
 
         // Run the HTTP server on a background thread. The tray icon and the
         // win32 message loop must own the foreground thread — a hard requirement
-        // of tray-icon on Windows.
+        // of tray-icon on Windows. The message loop keeps the tray alive
+        // independently of the server, so a server error just gets logged here.
         thread::Builder::new()
             .name("clab-serve".into())
-            .spawn(serve)?;
+            .spawn(move || {
+                if let Err(error) = serve() {
+                    eprintln!("clab tray: server stopped with error: {error}");
+                }
+            })?;
 
         // Build the tray menu. Item ids are compared against menu events below.
         let menu = Menu::new();
@@ -554,6 +559,10 @@ mod linux_imp {
     struct ClawTray {
         url: String,
         autostart: bool,
+        /// Set when the background server stops with an error (e.g. the port is
+        /// already in use). Surfaced as a disabled menu item so the icon stays
+        /// visible and explains itself instead of silently vanishing.
+        error: Option<String>,
     }
 
     impl Tray for ClawTray {
@@ -572,7 +581,25 @@ mod linux_imp {
         }
         fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
             use ksni::menu::*;
-            vec![
+            let mut items: Vec<ksni::MenuItem<Self>> = Vec::new();
+            // When the server has stopped with an error, show it (disabled) at
+            // the top so the still-present icon explains why the UI is down.
+            if let Some(error) = &self.error {
+                let mut shown = error.clone();
+                if shown.chars().count() > 80 {
+                    shown = shown.chars().take(77).collect::<String>() + "\u{2026}";
+                }
+                items.push(
+                    StandardItem {
+                        label: format!("\u{26a0} Server stopped: {shown}"),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+                items.push(MenuItem::Separator);
+            }
+            items.extend([
                 StandardItem {
                     label: "Open Claw Lab".into(),
                     activate: Box::new(|this: &mut Self| open_in_browser(&this.url)),
@@ -609,15 +636,25 @@ mod linux_imp {
                     ..Default::default()
                 }
                 .into(),
-            ]
+            ]);
+            items
         }
     }
 
     pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
     where
-        F: FnOnce() + Send + 'static,
+        F: FnOnce() -> Result<(), String> + Send + 'static,
     {
         let url = browser_url(&bind);
+
+        // Single-instance: if a Claw Lab server already answers `/health` on this
+        // port, a copy is already running. Starting a second one would fail to
+        // bind (EADDRINUSE) and used to make the new icon vanish; instead just
+        // open the browser at the running instance and exit cleanly.
+        if health_ok(&bind) {
+            open_in_browser(&url);
+            return Ok(());
+        }
 
         // Show the tray icon. `spawn` runs the SNI service on its own background
         // thread and returns a handle we keep alive for the process lifetime. A
@@ -627,8 +664,9 @@ mod linux_imp {
         let tray = ClawTray {
             url: url.clone(),
             autostart: autostart_enabled(),
+            error: None,
         };
-        let _tray_handle = match tray.spawn() {
+        let tray_handle = match tray.spawn() {
             Ok(handle) => Some(handle),
             Err(error) => {
                 eprintln!("clab tray: system tray unavailable ({error}); running without an icon");
@@ -636,21 +674,98 @@ mod linux_imp {
             }
         };
 
-        // Open the UI in the browser shortly after launch (the double-click UX),
-        // once the server has had a moment to start accepting connections.
-        let open_url = url;
+        // Run the HTTP server on a background thread (it used to run on this, the
+        // main, thread). That lets the main thread keep the tray alive even when
+        // the server stops — a bind error no longer silently kills the icon. The
+        // server's outcome comes back over a channel.
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::Builder::new()
+            .name("clab-serve".into())
+            .spawn(move || {
+                let _ = tx.send(serve());
+            })?;
+
+        // Open the UI once the server is actually accepting connections rather
+        // than after a fixed delay (more robust on a cold start). If the server
+        // never comes up, the poll times out and we simply don't open a browser.
+        let open_bind = bind.clone();
+        let open_url = url.clone();
         thread::Builder::new()
             .name("clab-open-browser".into())
             .spawn(move || {
-                thread::sleep(Duration::from_millis(1200));
-                open_in_browser(&open_url);
+                if wait_for_health(&open_bind, Duration::from_secs(15)) {
+                    open_in_browser(&open_url);
+                }
             })?;
 
-        // Run the HTTP server on this (the main) thread; it blocks until exit.
-        // Keep `_tray_handle` in scope so the tray lives as long as the server.
-        serve();
-        drop(_tray_handle);
+        // Wait for the server to finish. While it runs this just blocks; the tray
+        // lives on its own thread and `Quit` exits the process directly. If the
+        // server stops with an error, surface it on the still-present tray icon
+        // and keep the process alive so the user sees it and quits deliberately.
+        match rx.recv() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                eprintln!("clab tray: server stopped with error: {error}");
+                if let Some(handle) = &tray_handle {
+                    let _ = handle.update(move |tray: &mut ClawTray| {
+                        tray.error = Some(error);
+                    });
+                    // Keep the icon (and process) alive; the user quits via menu.
+                    loop {
+                        thread::park();
+                    }
+                }
+            }
+            Err(_) => {}
+        }
+        drop(tray_handle);
         Ok(())
+    }
+
+    /// Whether a Claw Lab server already answers `GET /health` with `200` on this
+    /// bind's port. Used for single-instance detection and browser-open
+    /// readiness. Dependency-free (raw TCP + a minimal HTTP request) so the
+    /// static musl binary needs no HTTP-client crate; the loopback address means
+    /// no DNS is involved (sidesteps musl's resolver entirely).
+    fn health_ok(bind: &str) -> bool {
+        use std::io::{Read, Write};
+        use std::net::{SocketAddr, TcpStream};
+
+        let port = bind.rsplit_once(':').map(|(_, p)| p).unwrap_or("4097");
+        let Ok(addr) = format!("127.0.0.1:{port}").parse::<SocketAddr>() else {
+            return false;
+        };
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+            return false;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+        let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+        let request =
+            format!("GET /health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        if stream.write_all(request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut buf = [0u8; 64];
+        let Ok(read) = stream.read(&mut buf) else {
+            return false;
+        };
+        // Status line is e.g. "HTTP/1.0 200 OK" / "HTTP/1.1 200 OK".
+        let head = String::from_utf8_lossy(&buf[..read]);
+        head.starts_with("HTTP/1.") && head.contains(" 200")
+    }
+
+    /// Poll [`health_ok`] until it succeeds or `timeout` elapses.
+    fn wait_for_health(bind: &str, timeout: Duration) -> bool {
+        let start = std::time::Instant::now();
+        loop {
+            if health_ok(bind) {
+                return true;
+            }
+            if start.elapsed() >= timeout {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
     }
 
     pub fn run_uninstall(
