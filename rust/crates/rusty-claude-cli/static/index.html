@@ -44,7 +44,6 @@
       <div class="fld"><div class="lab">Ключ API <span class="env">OPENAI_API_KEY</span></div><input id="key" data-key="OPENAI_API_KEY" type="password" value="" /><button class="eye" type="button" onclick="var k=document.getElementById('key');k.type=k.type==='password'?'text':'password'">👁</button></div>
       <div class="fld"><div class="lab">Модель <span class="env">OPENAI_MODEL</span></div><input data-key="OPENAI_MODEL" value="" /></div>
       <div class="fld"><div class="lab">Имя модели <span class="env">CLAW_SERVED_MODEL_ID</span></div><input data-key="CLAW_SERVED_MODEL_ID" value="" /></div>
-      <div class="fld"><div class="lab">Режим прав <span class="env">CLAW_PERMISSION_MODE</span></div><select data-key="CLAW_PERMISSION_MODE"><option value="read-only">безопасный</option><option value="workspace-write">запись в рабочей папке</option><option value="danger-full-access">полный доступ</option></select></div>
       <div class="fld"><div class="lab">Адрес веб-поиска <span class="env">CLAWD_WEB_SEARCH_BASE_URL</span></div><input data-key="CLAWD_WEB_SEARCH_BASE_URL" value="" /></div>
       <div class="note">Изменения применяются сразу — перезапуск не нужен.</div>
       <div class="acts"><button class="primary" id="saveRestart">Сохранить</button></div>
@@ -77,20 +76,28 @@
   <details class="acc">
     <summary>Безопасность <span class="chev">▾</span></summary>
     <div class="body">
-      <div class="subhead subhead-row" style="margin-top:10px;">Песочница<label class="switch"><input type="checkbox" data-sb="enabled"><span class="track"></span></label></div>
-      <div id="sbParams">
-      <div class="fld"><div class="lab">Файловая система <span class="env">filesystemMode</span></div><select data-sb="filesystemMode"><option value="off">без ограничений</option><option value="workspace-only">только рабочая папка</option><option value="allow-list">по списку доверенных</option></select></div>
-      <div class="fld row"><div class="lab">Сетевая изоляция <span class="env">networkIsolation</span></div><label class="switch"><input type="checkbox" data-sb="networkIsolation"><span class="track"></span></label></div>
-      <div class="fld row"><div class="lab">Ограничения namespace <span class="env">namespaceRestrictions</span></div><label class="switch"><input type="checkbox" data-sb="namespaceRestrictions"><span class="track"></span></label></div>
+      <div class="fld" style="margin-top:10px;"><div class="lab">Уровень доступа</div>
+        <select id="accessPreset">
+          <option value="read">Только чтение</option>
+          <option value="workspace">Рабочая папка</option>
+          <option value="full">Полный доступ</option>
+        </select>
       </div>
-      <div class="subhead">Доверенные папки <span class="env">trustedRoots</span></div>
-      <div class="fld"><textarea class="cfgta" id="cfgTrusted" placeholder="По одному пути на строку, например /home/user/projects"></textarea></div>
-      <div class="subhead">Правила доступа <span class="env">permissions</span></div>
-      <div class="fld"><div class="lab">Разрешить <span class="env">allow</span></div><textarea class="cfgta" id="cfgAllow" placeholder="По одному правилу на строку"></textarea></div>
-      <div class="fld"><div class="lab">Запретить <span class="env">deny</span></div><textarea class="cfgta" id="cfgDeny" placeholder="По одному правилу на строку"></textarea></div>
+      <div class="note" id="accessNote"></div>
+      <div class="fld" id="accessFolderFld"><div class="lab">Рабочая папка</div><input id="accessFolder" placeholder="путь к рабочей папке" /></div>
       <div class="note">Применяется со следующего сообщения — перезапуск не нужен.</div>
-      <div class="acts"><button class="primary" id="cfgSave">Сохранить</button></div>
-      <div class="savemsg" id="cfgMsg" hidden></div>
+      <div class="acts"><button class="primary" id="accessSave">Сохранить</button></div>
+      <div class="savemsg" id="accessMsg" hidden></div>
+      <details class="adv">
+        <summary>Расширенные</summary>
+        <div class="subhead" style="margin-top:8px;">Дополнительные доверенные папки</div>
+        <div class="note" style="margin-top:0;">Папки вне рабочей, к которым агенту тоже разрешён доступ (в режиме «Рабочая папка»). По одному пути на строку.</div>
+        <div class="fld"><textarea class="cfgta" id="cfgTrusted" placeholder="например, /home/user/shared"></textarea></div>
+        <div class="subhead">Правила доступа к инструментам</div>
+        <div class="note" style="margin-top:0;">Тонкая настройка для опытных: какие инструменты всегда разрешать или запрещать. По одному правилу на строку.</div>
+        <div class="fld"><div class="lab">Разрешить</div><textarea class="cfgta" id="cfgAllow" placeholder="По одному правилу на строку"></textarea></div>
+        <div class="fld"><div class="lab">Запретить</div><textarea class="cfgta" id="cfgDeny" placeholder="По одному правилу на строку"></textarea></div>
+      </details>
     </div>
   </details>
 </aside>

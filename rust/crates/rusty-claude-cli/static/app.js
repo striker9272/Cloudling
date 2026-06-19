@@ -1158,48 +1158,74 @@
       .catch(function(e){ btn.disabled=false; mcpStatus(false,'Не удалось сохранить: '+((e&&e.message)||'')); });
   });
 
-  /* ---------- security section: settings.json-backed config (no restart) ---------- */
-  function cfgSandboxFields(){ return document.querySelectorAll('.drawer.right [data-sb]'); }
-  function gateSandbox(){ var m=document.querySelector('.drawer.right [data-sb="enabled"]'); var p=document.getElementById('sbParams'); if(!m||!p) return; var off=!m.checked; p.classList.toggle('sb-off', off); p.querySelectorAll('input,select').forEach(function(x){ x.disabled=off; }); }
+  /* ---------- access level: one preset → permission mode + filesystem scope + folder ---------- */
   function linesToArray(s){ return (s||'').split('\n').map(function(x){ return x.trim(); }).filter(function(x){ return x.length; }); }
+
+  /* Preset → underlying axes. "read" reads the whole machine but changes nothing; "workspace"
+     reads/writes/runs confined to the working folder; "full" is unrestricted. Sandbox namespace
+     isolation is always off here — confinement is the working folder, not the (server-inert) sandbox. */
+  var PRESET_PERM={ read:'read-only', workspace:'danger-full-access', full:'danger-full-access' };
+  var PRESET_FS={ read:'off', workspace:'allow-list', full:'off' };
+  var PRESET_NOTE={
+    read:'Агент читает файлы и ищет по всему компьютеру, но ничего не меняет и не выполняет команды.',
+    workspace:'Агент читает, меняет файлы и выполняет команды — только в рабочей папке (и своём временном черновике). Остального не касается.',
+    full:'Агент читает, меняет и выполняет всё и везде на этой машине. Без ограничений.'
+  };
+  function presetFromState(perm, fs){
+    if(perm==='read-only') return 'read';
+    if(fs==='off') return 'full';
+    return 'workspace'; /* полный доступ + ограничение по папке (allow-list / workspace-only / иное) */
+  }
+  function updateAccessNote(){
+    var p=document.getElementById('accessPreset').value;
+    document.getElementById('accessNote').textContent=PRESET_NOTE[p]||'';
+    var ff=document.getElementById('accessFolderFld'); if(ff) ff.style.opacity=(p==='workspace')?'':'0.5';
+  }
   function loadConfig(){
-    return uiFetch('/ui/config').then(function(r){ return r.ok?r.json():null; }).then(function(c){
-      if(!c) return;
-      var sb=c.sandbox||{};
-      var defaults={enabled:true, filesystemMode:'workspace-only', networkIsolation:false, namespaceRestrictions:true};
-      cfgSandboxFields().forEach(function(el){
-        var k=el.getAttribute('data-sb');
-        var v=(sb && k in sb)?sb[k]:defaults[k];
-        if(typeof v==='boolean') v=v?'true':'false';
-        if(el.type==='checkbox') el.checked=(v==='true'); else el.value=(v==null?'':String(v));
-      });
-      gateSandbox();
+    return Promise.all([
+      uiFetch('/ui/settings').then(function(r){ return r.ok?r.json():{}; }).catch(function(){ return {}; }),
+      uiFetch('/ui/config').then(function(r){ return r.ok?r.json():{}; }).catch(function(){ return {}; })
+    ]).then(function(res){
+      var s=res[0]||{}, c=res[1]||{};
+      var perm=s['CLAW_PERMISSION_MODE']||'';
+      var fs=((c.sandbox||{}).filesystemMode)||'';
+      document.getElementById('accessPreset').value=presetFromState(perm, fs);
+      var af=document.getElementById('accessFolder');
+      af.value=c.workspaceFolder||'';
+      if(c.workspaceFolderDefault) af.placeholder=c.workspaceFolderDefault;
       document.getElementById('cfgTrusted').value=(c.trustedRoots||[]).join('\n');
-      var perm=c.permissions||{};
-      document.getElementById('cfgAllow').value=(perm.allow||[]).join('\n');
-      document.getElementById('cfgDeny').value=(perm.deny||[]).join('\n');
+      var perms=c.permissions||{};
+      document.getElementById('cfgAllow').value=(perms.allow||[]).join('\n');
+      document.getElementById('cfgDeny').value=(perms.deny||[]).join('\n');
       var ms=c.mcpServers||{};
       mcpServers=Object.keys(ms).map(function(n){ var e=ms[n]||{};
         return { name:n, command:e.command||'', args:e.args||[], framing:e.framing||'newline', timeout:e.toolCallTimeoutMs }; });
       renderMcp();
+      updateAccessNote();
     }).catch(function(){});
   }
-  function cfgMsg(ok,text){ var m=document.getElementById('cfgMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2400); }
-  document.getElementById('cfgSave').addEventListener('click', function(){
-    var btn=this; btn.disabled=true; document.getElementById('cfgMsg').hidden=true;
-    var sandbox={};
-    cfgSandboxFields().forEach(function(el){
-      var k=el.getAttribute('data-sb'), v=(el.type==='checkbox')?(el.checked?'true':'false'):el.value;
-      sandbox[k]=(v==='true')?true:(v==='false')?false:v;
-    });
-    var body={ sandbox:sandbox, trustedRoots:linesToArray(document.getElementById('cfgTrusted').value), permissions:{ allow:linesToArray(document.getElementById('cfgAllow').value), deny:linesToArray(document.getElementById('cfgDeny').value) } };
-    uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  function accessMsg(ok,text){ var m=document.getElementById('accessMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2600); }
+  document.getElementById('accessPreset').addEventListener('change', updateAccessNote);
+  document.getElementById('accessSave').addEventListener('click', function(){
+    var btn=this; btn.disabled=true; document.getElementById('accessMsg').hidden=true;
+    var preset=document.getElementById('accessPreset').value;
+    var folder=(document.getElementById('accessFolder').value||'').trim();
+    /* 1) permission mode → env, applied live (no restart). Send the full «Основное» set so the
+          served-id isn't reset, then override the access mode. */
+    var sBody={}; settingsFields().forEach(function(el){ sBody[el.getAttribute('data-key')]=el.value||''; });
+    sBody['CLAW_PERMISSION_MODE']=PRESET_PERM[preset]||'read-only';
+    /* 2) filesystem scope + working folder + advanced → settings.json (no restart). */
+    var cBody={ sandbox:{ enabled:false, filesystemMode:(PRESET_FS[preset]||'off') }, workspaceFolder:folder,
+      trustedRoots:linesToArray(document.getElementById('cfgTrusted').value),
+      permissions:{ allow:linesToArray(document.getElementById('cfgAllow').value), deny:linesToArray(document.getElementById('cfgDeny').value) } };
+    uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(sBody)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.disabled=false; cfgMsg(true,'Сохранено — применится со следующего сообщения'); })
-      .catch(function(err){ btn.disabled=false; cfgMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
+      .then(function(){ return uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cBody)}); })
+      .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
+      .then(function(){ btn.disabled=false; accessMsg(true,'Сохранено — применится со следующего сообщения'); })
+      .catch(function(err){ btn.disabled=false; accessMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
   });
   loadConfig();
-  (function(){ var m=document.querySelector('.drawer.right [data-sb="enabled"]'); if(m) m.addEventListener('change', gateSandbox); })();
 
   /* ---------- reasoning display toggle (ui_kv show_reasoning, default ON) ---------- */
   (function(){
