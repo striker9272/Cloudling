@@ -200,6 +200,10 @@ Supported permission modes:
 - `workspace-write`
 - `danger-full-access`
 
+In the built-in web UI these are presented as a single **Access level** preset
+(read-only / working folder / full access) plus a server-side working-folder
+picker — see [`docs/web-ui.md`](docs/web-ui.md#settings-panels).
+
 Model aliases currently supported by the CLI:
 
 - `opus` → `claude-opus-4-6`

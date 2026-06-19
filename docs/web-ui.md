@@ -60,8 +60,9 @@ re-entering your backend.
 | `CLAB_UI_DIR` | *(unset)* | Dev override: serve `index.html` / `app.css` / `app.js` from this directory at runtime instead of the embedded copies, so UI edits don't need a rebuild. Leave unset in production to serve the embedded assets. |
 | `CLAW_OPENAI_UI` | *(unset)* | Set to `1` by the installer's UI mode. The generated service wrapper turns it into the `--ui` flag and relaxes the backend requirement so the service can start unconfigured. Read by the wrapper, not by `clab` itself. |
 
-The UI also reads and writes the sandbox/permission config in `settings.json`
-(via `/ui/config`) and the agent backend settings (`OPENAI_BASE_URL`,
+The UI also reads and writes the access/permission config in `settings.json`
+(`filesystemMode`, `workspaceFolder`, `trustedRoots`, `permissions`, `mcpServers`;
+via `/ui/config`) and the agent backend settings (`OPENAI_BASE_URL`,
 `OPENAI_MODEL`, `CLAW_PERMISSION_MODE`, `CLAWD_WEB_SEARCH_BASE_URL`, …) through
 the env file above. Backend timeout/retry tuning is via the `CLAW_BACKEND_*`
 variables documented in [`../USAGE.md`](../USAGE.md).
@@ -70,8 +71,8 @@ variables documented in [`../USAGE.md`](../USAGE.md).
 
 The chat API (`/v1/*`) and the static page are never gated — the page itself is
 where the user enters the token. Only the `/ui/*` data endpoints are protected,
-because they can read the API key, rewrite the env file, and change the sandbox
-config. The decision is:
+because they can read the API key, rewrite the env file, browse the host
+filesystem, and change the access/permission config. The decision is:
 
 - **Token configured** (`CLAW_UI_TOKEN` set) → `/ui/*` require a matching
   `Authorization: Bearer <token>`; a wrong/missing token returns 401.
@@ -106,17 +107,25 @@ directory resets the UI to a clean slate without affecting the agent;
 
 The right-hand drawer groups settings into:
 
-- **General** — engine URL, API key, backend model, served model id, permission
-  mode, web-search URL. Saving rewrites the env file (`CLAW_OPENAI_ENV_FILE`) and
-  restarts the core; needs `Restart=always` on the systemd unit so the process
-  comes back up.
+- **General** — engine URL, API key, backend model, served model id, web-search
+  URL. Saving applies live and persists to the env file (`CLAW_OPENAI_ENV_FILE`).
 - **System prompt** — manage presets.
 - **Chat** — toggle whether the model's reasoning block is shown.
 - **Tools** — configure MCP servers (`mcpServers` in `settings.json`); applied on
   the next message, no restart. See [MCP servers](#mcp-servers) below.
-- **Security** — sandbox on/off, filesystem mode, network isolation, namespace
-  restrictions, trusted roots, and allow/deny permission rules. Applied on the
-  next message, no restart.
+- **Security** — a single **Access level** preset that the UI maps onto the
+  underlying axes (applied on the next message, no restart):
+  - *Read-only* — read and search files anywhere on the machine; no writes or
+    shell commands (`CLAW_PERMISSION_MODE=read-only`, `filesystemMode=off`).
+  - *Working folder* — read, write, and run commands confined to a working folder
+    you pick (`danger-full-access` + `filesystemMode=allow-list` with the folder
+    in the allowed roots). A **Browse** button opens a server-side folder picker
+    (lists directories and drives/mounts on the host).
+  - *Full access* — unrestricted (`danger-full-access`, `filesystemMode=off`).
+
+  The working folder is the `workspaceFolder` key in `settings.json`. The bash
+  namespace sandbox is no longer exposed here (confinement is the working folder);
+  trusted extra roots and allow/deny permission rules live under **Advanced**.
 
 ## MCP servers
 
