@@ -136,6 +136,26 @@ pub(super) fn load_env_file_into_process(path: &std::path::Path) {
     }
 }
 
+/// Resolve the effective permission (access) mode for a serve/tray launch.
+///
+/// `Some` is an explicit `--permission-mode` CLI override and is used as-is. `None`
+/// means no flag was given: adopt the persisted `CLAW_PERMISSION_MODE` — read from the
+/// process environment *after* the env file has been loaded by
+/// [`load_env_file_into_process`] — and fall back to read-only when nothing is
+/// persisted. This is the symmetric counterpart to re-reading `OPENAI_MODEL` from the
+/// env after load, and fixes a saved access mode silently reverting to read-only on a
+/// relaunch (e.g. after upgrading the binary without clearing settings).
+fn resolve_serve_permission_mode(explicit: Option<PermissionMode>) -> PermissionMode {
+    if let Some(mode) = explicit {
+        return mode;
+    }
+    std::env::var("CLAW_PERMISSION_MODE")
+        .ok()
+        .and_then(|value| crate::normalize_permission_mode(&value))
+        .map(crate::permission_mode_from_label)
+        .unwrap_or(PermissionMode::ReadOnly)
+}
+
 #[derive(Serialize)]
 struct HealthResponse {
     ok: bool,
@@ -165,7 +185,7 @@ pub(crate) fn serve_blocking(
     bind: String,
     model: String,
     allowed_tools: Option<crate::AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
     ui: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -179,7 +199,7 @@ async fn serve(
     bind: String,
     model: String,
     allowed_tools: Option<crate::AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
     ui: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let addr: SocketAddr = bind.parse()?;
@@ -198,6 +218,12 @@ async fn serve(
     };
     let served_model_id =
         served_model_id_from_value(std::env::var("CLAW_SERVED_MODEL_ID").ok(), &model);
+    // Resolve the effective access (permission) mode now that the env file is loaded.
+    // Symmetric to re-reading OPENAI_MODEL above: an explicit `--permission-mode` flag
+    // (Some) wins; otherwise adopt the persisted CLAW_PERMISSION_MODE so a mode saved in
+    // the UI takes effect at startup instead of silently reverting to read-only after a
+    // relaunch (the env file is the same source systemd loads as `EnvironmentFile`).
+    let permission_mode = resolve_serve_permission_mode(permission_mode);
     // Dialog persistence is opt-in with the UI; a failure to open it disables storage
     // but never blocks serving.
     let dialog_store = if ui {

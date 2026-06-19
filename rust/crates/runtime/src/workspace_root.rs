@@ -120,10 +120,25 @@ pub fn load_filesystem_policy_for(cwd: Option<&Path>) -> FilesystemPolicy {
         None => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
     };
     match crate::config::ConfigLoader::default_for(cwd).load() {
-        Ok(config) => FilesystemPolicy {
-            mode: config.sandbox().filesystem_mode.unwrap_or_default(),
-            trusted_roots: config.trusted_roots().iter().map(PathBuf::from).collect(),
-        },
+        Ok(config) => {
+            // Effective allow-list roots = configured trusted roots ∪ the single working
+            // folder (when set). The working folder is the source of truth surfaced in the
+            // UI; merging it here lets the "Рабочая папка" preset (allow-list mode) reach it
+            // without duplicating the path into `trustedRoots`. In `off`/`workspace-only`
+            // modes the extra root is simply unused.
+            let mut trusted_roots: Vec<PathBuf> =
+                config.trusted_roots().iter().map(PathBuf::from).collect();
+            if let Some(folder) = config.workspace_folder() {
+                let folder = PathBuf::from(folder);
+                if !trusted_roots.contains(&folder) {
+                    trusted_roots.push(folder);
+                }
+            }
+            FilesystemPolicy {
+                mode: config.sandbox().filesystem_mode.unwrap_or_default(),
+                trusted_roots,
+            }
+        }
         Err(_) => FilesystemPolicy::default(),
     }
 }

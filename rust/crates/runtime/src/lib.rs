@@ -69,7 +69,8 @@ pub use compact::{
     get_compact_continuation_message, should_compact, CompactionConfig, CompactionResult,
 };
 pub use config::{
-    default_config_home, suppress_config_warnings_for_json_mode, ConfigEntry, ConfigError,
+    default_config_home, default_workspace_folder, suppress_config_warnings_for_json_mode,
+    ConfigEntry, ConfigError,
     ConfigLoader, ConfigSource,
     McpConfigCollection, McpManagedProxyServerConfig, McpOAuthConfig, McpRemoteServerConfig,
     McpSdkServerConfig, McpServerConfig, McpStdioServerConfig, McpTransport,

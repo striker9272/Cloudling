@@ -491,7 +491,10 @@ fn merge_json_value(base: &mut Value, overlay: &Value) {
 }
 
 /// Keys the security UI section owns inside `settings.json` (deep-merged on save).
-const UI_CONFIG_KEYS: &[&str] = &["sandbox", "trustedRoots", "permissions"];
+/// `workspaceFolder` is the single user-chosen working folder (a scalar path; deep
+/// merge replaces it, and an empty string clears it). It is distinct from the advanced
+/// `trustedRoots` list and is surfaced to the model as the folder "we work in".
+const UI_CONFIG_KEYS: &[&str] = &["sandbox", "trustedRoots", "permissions", "workspaceFolder"];
 /// Keys the UI owns wholesale: replaced, not merged, on save. `mcpServers` must be
 /// replaceable because a deep merge can never DELETE a server entry.
 const UI_CONFIG_REPLACE_KEYS: &[&str] = &["mcpServers"];
@@ -513,6 +516,24 @@ pub(super) async fn ui_config_get() -> Response {
     out.insert(
         "permissions".to_string(),
         existing.get("permissions").cloned().unwrap_or(Value::Null),
+    );
+    // The user-chosen working folder (empty string when unset). `workspaceFolderDefault`
+    // is a non-binding per-OS suggestion (home dir) the UI can prefill; the effective
+    // folder stays empty until the user picks one.
+    out.insert(
+        "workspaceFolder".to_string(),
+        existing
+            .get("workspaceFolder")
+            .cloned()
+            .unwrap_or_else(|| Value::String(String::new())),
+    );
+    out.insert(
+        "workspaceFolderDefault".to_string(),
+        Value::String(
+            runtime::default_workspace_folder()
+                .map(|path| path.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+        ),
     );
     out.insert(
         "mcpServers".to_string(),

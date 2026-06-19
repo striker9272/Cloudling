@@ -556,7 +556,10 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             "127.0.0.1:4097".to_string(),
             String::new(),
             None,
-            PermissionMode::ReadOnly,
+            // No CLI flag on a bare double-click: adopt the persisted access mode at
+            // startup (fallback read-only) instead of forcing read-only, so a mode
+            // saved in the UI survives a relaunch without re-saving.
+            None,
         );
     }
     // #824: suppress config deprecation prose warnings to stderr when JSON
@@ -796,7 +799,11 @@ enum CliAction {
         bind: String,
         model: String,
         allowed_tools: Option<AllowedToolSet>,
-        permission_mode: PermissionMode,
+        /// `None` when no `--permission-mode` flag was given: the serve path adopts
+        /// the persisted `CLAW_PERMISSION_MODE` from the env file at startup (falling
+        /// back to read-only), so an access mode saved in the UI takes effect without
+        /// re-saving. `Some` = an explicit CLI override that wins over the persisted value.
+        permission_mode: Option<PermissionMode>,
         /// Serve the built-in web UI (page + assets) alongside the API. Off by
         /// default so the headless service is unchanged unless explicitly enabled.
         ui: bool,
@@ -811,7 +818,9 @@ enum CliAction {
         bind: String,
         model: String,
         allowed_tools: Option<AllowedToolSet>,
-        permission_mode: PermissionMode,
+        /// `None` = adopt persisted `CLAW_PERMISSION_MODE` at startup (fallback
+        /// read-only); `Some` = explicit CLI override. See `OpenAiServe`.
+        permission_mode: Option<PermissionMode>,
     },
     /// Desktop mode: remove what the desktop integration created (autostart
     /// entry) and, after confirmation, the per-user data directories. Implemented
@@ -1412,14 +1421,16 @@ fn parse_args(args: &[String]) -> Result<CliAction, String> {
             model,
             model_flag_raw.is_some(),
             allowed_tools,
-            permission_mode_override.unwrap_or(PermissionMode::ReadOnly),
+            // Pass the raw override through: `None` (no `--permission-mode` flag) tells
+            // the serve path to adopt the persisted CLAW_PERMISSION_MODE at startup.
+            permission_mode_override,
         ),
         "tray" => parse_tray_args(
             &rest[1..],
             model,
             model_flag_raw.is_some(),
             allowed_tools,
-            permission_mode_override.unwrap_or(PermissionMode::ReadOnly),
+            permission_mode_override,
         ),
         "uninstall" => parse_uninstall_args(&rest[1..]),
         "acp" => parse_acp_args(&rest[1..], output_format),
@@ -1751,7 +1762,7 @@ fn parse_openai_serve_args(
     model: String,
     model_was_explicit: bool,
     allowed_tools: Option<AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
 ) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
     let mut ui = false;
@@ -1844,7 +1855,7 @@ fn parse_tray_args(
     model: String,
     model_was_explicit: bool,
     allowed_tools: Option<AllowedToolSet>,
-    permission_mode: PermissionMode,
+    permission_mode: Option<PermissionMode>,
 ) -> Result<CliAction, String> {
     let mut bind = "127.0.0.1:4097".to_string();
     let mut index = 0;
@@ -9576,7 +9587,28 @@ fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::E
          requests."
             .to_string(),
     );
+    // If the user picked a working folder (the "Доступ агента" → Рабочая папка setting), tell the
+    // model to operate there by default. The path is read from settings.json; absent → no section.
+    if let Some(folder) = configured_workspace_folder() {
+        prompt.push(format!(
+            "The user has set a working folder: {folder}\nThis is the folder you work in by \
+             default — read, create, and edit files there and run commands against it, unless the \
+             user points you somewhere else. You also have a private temporary scratch directory \
+             for throwaway work."
+        ));
+    }
     Ok(prompt)
+}
+
+/// The user-chosen working folder from `settings.json` (the "Доступ агента" → Рабочая папка
+/// setting), if set. Read fresh so a change applies on the next request without a restart;
+/// returns `None` when unset or the config can't be loaded.
+fn configured_workspace_folder() -> Option<String> {
+    let cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    ConfigLoader::default_for(cwd)
+        .load()
+        .ok()
+        .and_then(|config| config.workspace_folder().map(str::to_string))
 }
 
 struct PluginsCommandPayload {

@@ -95,6 +95,10 @@ pub struct RuntimeFeatureConfig {
     sandbox: SandboxConfig,
     provider_fallbacks: ProviderFallbackConfig,
     trusted_roots: Vec<String>,
+    /// Single user-chosen working folder (Claw Lab serve UI). Surfaced to the model as
+    /// the folder "we work in" and merged into the allow-list roots so the file tools can
+    /// reach it. Distinct from `trusted_roots`, which stays the advanced extra-folders list.
+    workspace_folder: Option<String>,
 }
 
 /// Ordered chain of fallback model identifiers used when the primary
@@ -365,6 +369,7 @@ impl ConfigLoader {
             sandbox: parse_optional_sandbox_config(&merged_value)?,
             provider_fallbacks: parse_optional_provider_fallbacks(&merged_value)?,
             trusted_roots: parse_optional_trusted_roots(&merged_value)?,
+            workspace_folder: parse_optional_workspace_folder(&merged_value),
         };
 
         Ok(RuntimeConfig {
@@ -422,6 +427,7 @@ impl ConfigLoader {
             sandbox: parse_optional_sandbox_config(&merged_value)?,
             provider_fallbacks: parse_optional_provider_fallbacks(&merged_value)?,
             trusted_roots: parse_optional_trusted_roots(&merged_value)?,
+            workspace_folder: parse_optional_workspace_folder(&merged_value),
         };
 
         let config = RuntimeConfig {
@@ -533,6 +539,12 @@ impl RuntimeConfig {
     pub fn trusted_roots_with_overrides(&self, per_call_roots: &[String]) -> Vec<String> {
         merge_trusted_roots(self.trusted_roots(), per_call_roots)
     }
+
+    /// The single user-chosen working folder, if set (empty/unset → `None`).
+    #[must_use]
+    pub fn workspace_folder(&self) -> Option<&str> {
+        self.feature_config.workspace_folder.as_deref()
+    }
 }
 
 impl RuntimeFeatureConfig {
@@ -607,6 +619,12 @@ impl RuntimeFeatureConfig {
     #[must_use]
     pub fn trusted_roots_with_overrides(&self, per_call_roots: &[String]) -> Vec<String> {
         merge_trusted_roots(self.trusted_roots(), per_call_roots)
+    }
+
+    /// The single user-chosen working folder, if set (empty/unset → `None`).
+    #[must_use]
+    pub fn workspace_folder(&self) -> Option<&str> {
+        self.workspace_folder.as_deref()
     }
 }
 
@@ -705,6 +723,20 @@ pub fn default_config_home() -> PathBuf {
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".claw")))
         .or_else(|| std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join(".claw")))
         .unwrap_or_else(|| PathBuf::from(".claw"))
+}
+
+/// Suggested default working folder when the user hasn't chosen one: the per-user
+/// home directory (`$HOME` on Unix, `%USERPROFILE%` on Windows, mirroring
+/// [`default_config_home`]'s home resolution). Returns `None` when no home variable is
+/// set. Portable — derived from the environment, never hardcoded. This is only a
+/// *suggestion* for the UI to prefill; the effective working folder is the
+/// `workspaceFolder` setting, which stays empty until the user picks one.
+#[must_use]
+pub fn default_workspace_folder() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
 }
 
 /// Save provider settings to the user-level `~/.claw/settings.json`.
@@ -1180,6 +1212,17 @@ fn parse_optional_trusted_roots(root: &JsonValue) -> Result<Vec<String>, ConfigE
         optional_string_array(object, "trustedRoots", "merged settings.trustedRoots")?
             .unwrap_or_default(),
     )
+}
+
+/// Parse the optional `workspaceFolder` scalar (the single user-chosen working folder).
+/// Trimmed; empty or missing → `None`. Infallible: a malformed value simply yields `None`.
+fn parse_optional_workspace_folder(root: &JsonValue) -> Option<String> {
+    root.as_object()
+        .and_then(|object| object.get("workspaceFolder"))
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn parse_filesystem_mode_label(value: &str) -> Result<FilesystemIsolationMode, ConfigError> {

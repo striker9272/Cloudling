@@ -16,7 +16,9 @@ pub(crate) fn run_tray(
     bind: String,
     model: String,
     allowed_tools: Option<AllowedToolSet>,
-    permission_mode: PermissionMode,
+    // `None` = no explicit `--permission-mode`; the serve path adopts the persisted
+    // CLAW_PERMISSION_MODE at startup (fallback read-only). `Some` = explicit override.
+    permission_mode: Option<PermissionMode>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let serve_bind = bind.clone();
     clab_desktop::run_tray(bind, move || {
