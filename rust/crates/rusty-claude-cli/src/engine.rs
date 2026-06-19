@@ -222,7 +222,7 @@ impl ClawEngineSession {
         seed_history: Vec<ConversationMessage>,
         extra_system_prompt: Vec<String>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut system_prompt = crate::build_system_prompt(&model)?;
+        let mut system_prompt = crate::build_system_prompt(&model, permission_mode)?;
         system_prompt.extend(extra_system_prompt);
         let workspace_tempdir = tempfile::Builder::new().prefix("clab-ws-").tempdir()?;
         let working_dir = workspace_tempdir.path().to_path_buf();

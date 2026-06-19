@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -596,6 +596,116 @@ pub(super) async fn ui_config_save(Json(incoming): Json<Value>) -> Response {
             .into_response();
     }
     Json(serde_json::json!({ "ok": true })).into_response()
+}
+
+/// The top-level drives/roots the folder picker can jump to. Cross-platform: Windows
+/// returns the existing drive letters (`C:\`, `D:\`, …); macOS returns `/` plus mounted
+/// volumes under `/Volumes`; Linux returns `/` plus the real disk mount points from
+/// `/proc/mounts` (e.g. `/DATA`), filtering out pseudo-filesystems. A future macOS port
+/// already gets its branch here.
+#[cfg(windows)]
+fn drive_roots() -> Vec<String> {
+    let mut roots = Vec::new();
+    for letter in b'A'..=b'Z' {
+        let path = format!("{}:\\", letter as char);
+        if std::path::Path::new(&path).exists() {
+            roots.push(path);
+        }
+    }
+    roots
+}
+
+#[cfg(target_os = "macos")]
+fn drive_roots() -> Vec<String> {
+    let mut roots = vec!["/".to_string()];
+    if let Ok(entries) = std::fs::read_dir("/Volumes") {
+        for entry in entries.flatten() {
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                roots.push(entry.path().to_string_lossy().into_owned());
+            }
+        }
+    }
+    roots
+}
+
+#[cfg(target_os = "linux")]
+fn drive_roots() -> Vec<String> {
+    // Real on-disk filesystems only — skip tmpfs/proc/sysfs/cgroup/overlay/etc. so the list
+    // shows actual disks (the root plus extra mounts like /DATA), not kernel pseudo-mounts.
+    const REAL_FS: &[&str] = &[
+        "ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "reiserfs", "jfs", "zfs", "vfat",
+        "exfat", "ntfs", "ntfs3", "fuseblk", "udf", "hfsplus",
+    ];
+    let mut roots = vec!["/".to_string()];
+    if let Ok(mounts) = std::fs::read_to_string("/proc/mounts") {
+        for line in mounts.lines() {
+            let mut fields = line.split_whitespace();
+            let _device = fields.next();
+            let mount_point = fields.next();
+            let fs_type = fields.next();
+            if let (Some(mount_point), Some(fs_type)) = (mount_point, fs_type) {
+                // /proc/mounts octal-escapes spaces (\040) and a few others; decode the common one.
+                let mount_point = mount_point.replace("\\040", " ");
+                if REAL_FS.contains(&fs_type) && mount_point != "/" && !roots.contains(&mount_point) {
+                    roots.push(mount_point);
+                }
+            }
+        }
+    }
+    roots
+}
+
+#[cfg(all(unix, not(target_os = "linux"), not(target_os = "macos")))]
+fn drive_roots() -> Vec<String> {
+    vec!["/".to_string()]
+}
+
+/// List directories under a path so the UI can pick a working folder *on this server*.
+/// A browser folder picker would target the user's own machine, not the agent host, so we
+/// expose the server's own filesystem here. Read-only — returns directory names only, never
+/// file contents. Gated by `CLAW_UI_TOKEN` like every `/ui/*` endpoint. With no `path` it
+/// starts at the per-OS home; callers climb via the returned `parent`.
+pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<String, String>>) -> Response {
+    use std::path::PathBuf;
+    let requested = params
+        .get("path")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let base: PathBuf = match requested {
+        Some(p) => PathBuf::from(p),
+        None => runtime::default_workspace_folder().unwrap_or_else(|| PathBuf::from("/")),
+    };
+    // Resolve symlinks/.. where possible so `parent` navigation is stable; fall back to the
+    // lexical path if canonicalization fails (e.g. a dangling entry).
+    let dir = std::fs::canonicalize(&base).unwrap_or(base);
+    if !std::fs::metadata(&dir).map(|m| m.is_dir()).unwrap_or(false) {
+        return (
+            StatusCode::BAD_REQUEST,
+            format!("not a directory: {}", dir.display()),
+        )
+            .into_response();
+    }
+    let mut dirs: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            // Directories only; skip entries we can't stat. Hidden dirs are kept — an operator
+            // may legitimately want `~/.config` and the like as a working folder.
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                if let Some(name) = entry.file_name().to_str() {
+                    dirs.push(name.to_string());
+                }
+            }
+        }
+    }
+    dirs.sort_by_key(|name| name.to_lowercase());
+    let parent = dir.parent().map(|p| p.to_string_lossy().into_owned());
+    Json(serde_json::json!({
+        "path": dir.to_string_lossy(),
+        "parent": parent,
+        "dirs": dirs,
+        "roots": drive_roots(),
+    }))
+    .into_response()
 }
 
 /// Coerce a JSON value to a positive integer, accepting both numbers and numeric strings

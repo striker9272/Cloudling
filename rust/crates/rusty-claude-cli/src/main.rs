@@ -5956,7 +5956,7 @@ impl LiveCli {
         allowed_tools: Option<AllowedToolSet>,
         permission_mode: PermissionMode,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let system_prompt = build_system_prompt(&model)?;
+        let system_prompt = build_system_prompt(&model, permission_mode)?;
         let session_state = new_cli_session()?;
         let session = create_managed_session_handle(&session_state.session_id)?;
         let runtime = build_runtime(
@@ -9572,7 +9572,10 @@ fn short_tool_id(id: &str) -> String {
     format!("{prefix}…")
 }
 
-fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+fn build_system_prompt(
+    model: &str,
+    permission_mode: PermissionMode,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut prompt = load_system_prompt(
         env::current_dir()?,
         DEFAULT_DATE,
@@ -9596,6 +9599,25 @@ fn build_system_prompt(model: &str) -> Result<Vec<String>, Box<dyn std::error::E
              user points you somewhere else. You also have a private temporary scratch directory \
              for throwaway work."
         ));
+    }
+    // In read-only mode the filesystem is NOT confined to the workspace — reads and searches
+    // are allowed machine-wide. The model otherwise assumes it can only look inside the
+    // workspace (its usual `bash` search is blocked here), so spell out that it should reach
+    // out with absolute paths. (See the "Только чтение" access preset.)
+    if matches!(permission_mode, PermissionMode::ReadOnly) {
+        prompt.push(
+            "Your current access level is read-only: you may READ and SEARCH files ANYWHERE on \
+             this machine, not just the working directory. Shell commands and file changes are \
+             disabled. CRITICAL — the working directory above does NOT limit your search: \
+             glob_search and grep_search only look inside one directory, and a bare pattern like \
+             \"**/Caddyfile\" searches just the working directory. To search elsewhere, put an \
+             ABSOLUTE directory into the pattern itself, e.g. glob_search {pattern: \
+             \"/etc/**/Caddyfile\"}, glob_search {pattern: \"/**/nginx.conf\"} for the whole tree, \
+             or grep_search with an absolute `path`. When the user asks where a file lives on the \
+             server, search the likely absolute roots (/etc, /opt, /srv, /usr/local, /home) with \
+             absolute patterns before saying it is missing. read_file also takes absolute paths."
+                .to_string(),
+        );
     }
     Ok(prompt)
 }

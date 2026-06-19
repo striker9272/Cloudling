@@ -84,7 +84,9 @@
         </select>
       </div>
       <div class="note" id="accessNote"></div>
-      <div class="fld" id="accessFolderFld"><div class="lab">Рабочая папка</div><input id="accessFolder" placeholder="путь к рабочей папке" /></div>
+      <div class="fld" id="accessFolderFld"><div class="lab">Рабочая папка</div>
+        <div class="fieldrow"><input id="accessFolder" placeholder="путь к рабочей папке" /><button class="verify" id="accessBrowse" type="button" title="Выбрать папку на сервере" aria-label="Выбрать папку на сервере"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg></button></div>
+      </div>
       <div class="note">Применяется со следующего сообщения — перезапуск не нужен.</div>
       <div class="acts"><button class="primary" id="accessSave">Сохранить</button></div>
       <div class="savemsg" id="accessMsg" hidden></div>
@@ -183,6 +185,16 @@
     <input class="minput" id="tokenInput" type="password" placeholder="Токен" autocomplete="off" />
     <div class="merr" id="tokenErr" hidden></div>
     <div class="mact"><button class="msave" id="tokenOk">Войти</button></div>
+  </div>
+</div>
+
+<div class="modal-scrim" id="browseScrim" hidden>
+  <div class="modal browse">
+    <div class="mtitle">Папка на этом сервере</div>
+    <div class="browse-roots" id="browseRoots"></div>
+    <div class="browse-path" id="browsePath"></div>
+    <div class="browse-list" id="browseList"></div>
+    <div class="mact"><button class="mcancel" id="browseCancel">Отмена</button><button class="msave" id="browsePick">Выбрать эту папку</button></div>
   </div>
 </div>
 

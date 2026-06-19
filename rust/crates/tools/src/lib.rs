@@ -456,7 +456,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "glob_search",
-            description: "Find files by glob pattern.",
+            description: "Find files by glob pattern under the `path` directory (absolute, or relative to the working directory). `path` defaults to the working directory, so a bare pattern searches only there; to search elsewhere on this machine, set `path` to an absolute directory such as \"/etc\" or \"/opt\".",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -470,7 +470,7 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "grep_search",
-            description: "Search file contents with a regex pattern.",
+            description: "Search file contents with a regex pattern under the `path` directory (absolute, or relative to the working directory). `path` defaults to the working directory; set it to an absolute directory such as \"/etc\" to search elsewhere on this machine.",
             input_schema: json!({
                 "type": "object",
                 "properties": {

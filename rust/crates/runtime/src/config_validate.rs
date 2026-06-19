@@ -198,6 +198,10 @@ const TOP_LEVEL_FIELDS: &[FieldSpec] = &[
         expected: FieldType::StringArray,
     },
     FieldSpec {
+        name: "workspaceFolder",
+        expected: FieldType::String,
+    },
+    FieldSpec {
         name: "provider",
         expected: FieldType::Object,
     },

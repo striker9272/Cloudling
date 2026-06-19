@@ -22,9 +22,9 @@ use serde::Serialize;
 
 use chat::chat_completions;
 use ui::{
-    ui_auth_middleware, ui_check_backend, ui_config_get, ui_config_save, ui_css, ui_dialog_delete,
-    ui_dialog_get, ui_dialog_put, ui_dialogs_list, ui_index, ui_js, ui_kv_get, ui_kv_put,
-    ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list, ui_settings_get,
+    ui_auth_middleware, ui_browse, ui_check_backend, ui_config_get, ui_config_save, ui_css,
+    ui_dialog_delete, ui_dialog_get, ui_dialog_put, ui_dialogs_list, ui_index, ui_js, ui_kv_get,
+    ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list, ui_settings_get,
     ui_settings_save_restart, ui_summarize, ui_title,
 };
 
@@ -289,6 +289,7 @@ async fn serve(
             .route("/ui/config/save", post(ui_config_save))
             .route("/ui/check-backend", post(ui_check_backend))
             .route("/ui/model-info", get(ui_model_info))
+            .route("/ui/browse", get(ui_browse))
             .route("/ui/title", post(ui_title))
             .route("/ui/summarize", post(ui_summarize))
             .route_layer(middleware::from_fn_with_state(

@@ -1179,7 +1179,8 @@
   function updateAccessNote(){
     var p=document.getElementById('accessPreset').value;
     document.getElementById('accessNote').textContent=PRESET_NOTE[p]||'';
-    var ff=document.getElementById('accessFolderFld'); if(ff) ff.style.opacity=(p==='workspace')?'':'0.5';
+    /* the working folder only applies to «Рабочая папка» — hide it entirely otherwise */
+    var ff=document.getElementById('accessFolderFld'); if(ff) ff.style.display=(p==='workspace')?'':'none';
   }
   function loadConfig(){
     return Promise.all([
@@ -1225,6 +1226,45 @@
       .then(function(){ btn.disabled=false; accessMsg(true,'Сохранено — применится со следующего сообщения'); })
       .catch(function(err){ btn.disabled=false; accessMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
   });
+
+  /* ---------- server-side folder picker (browses THIS server's filesystem) ---------- */
+  var browseCur='';
+  function browseRender(data){
+    browseCur=data.path||'';
+    document.getElementById('browsePath').textContent=browseCur||'/';
+    var rootsBar=document.getElementById('browseRoots'); rootsBar.innerHTML='';
+    (data.roots||[]).forEach(function(r){
+      var rb=document.createElement('button'); rb.type='button';
+      rb.className='browse-root'+(browseCur===r?' on':''); rb.textContent=r;
+      rb.addEventListener('click', function(){ browseLoad(r); });
+      rootsBar.appendChild(rb);
+    });
+    var list=document.getElementById('browseList'); list.innerHTML='';
+    if(data.parent){
+      var up=document.createElement('div'); up.className='browse-row up'; up.textContent='↑  ..';
+      up.addEventListener('click', function(){ browseLoad(data.parent); });
+      list.appendChild(up);
+    }
+    (data.dirs||[]).forEach(function(name){
+      var row=document.createElement('div'); row.className='browse-row'; row.textContent='📁  '+name;
+      row.addEventListener('click', function(){ browseLoad(browseCur.replace(/\/+$/,'')+'/'+name); });
+      list.appendChild(row);
+    });
+    if(!(data.dirs||[]).length){ var e=document.createElement('div'); e.className='browse-empty'; e.textContent='Вложенных папок нет.'; list.appendChild(e); }
+  }
+  function browseLoad(path){
+    uiFetch('/ui/browse'+(path?('?path='+encodeURIComponent(path)):''))
+      .then(function(r){ return r.ok?r.json():null; })
+      .then(function(d){ if(d) browseRender(d); }).catch(function(){});
+  }
+  (function(){
+    var openBtn=document.getElementById('accessBrowse'); if(!openBtn) return;
+    var scrim=document.getElementById('browseScrim');
+    openBtn.addEventListener('click', function(){ scrim.hidden=false; browseLoad((document.getElementById('accessFolder').value||'').trim()); });
+    document.getElementById('browseCancel').addEventListener('click', function(){ scrim.hidden=true; });
+    scrim.addEventListener('click', function(e){ if(e.target===scrim) scrim.hidden=true; });
+    document.getElementById('browsePick').addEventListener('click', function(){ document.getElementById('accessFolder').value=browseCur; scrim.hidden=true; });
+  })();
   loadConfig();
 
   /* ---------- reasoning display toggle (ui_kv show_reasoning, default ON) ---------- */
