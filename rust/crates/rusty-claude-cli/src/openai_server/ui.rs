@@ -708,7 +708,7 @@ pub(super) struct CheckBackendRequest {
 pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -> Response {
     let base = request.base_url.trim().trim_end_matches('/').to_string();
     if base.is_empty() || !(base.starts_with("http://") || base.starts_with("https://")) {
-        return Json(serde_json::json!({ "ok": false, "error": "invalid URL" })).into_response();
+        return no_store_json(serde_json::json!({ "ok": false, "error": "invalid URL" }));
     }
     let url = format!("{base}/models");
     let client = api::build_http_client_or_default();
@@ -724,17 +724,29 @@ pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -
                 Ok(body) => window_from_models_or_ollama(&base, key, &body, None).await,
                 Err(_) => None,
             };
-            Json(serde_json::json!({ "ok": true, "context_window": window })).into_response()
+            no_store_json(serde_json::json!({ "ok": true, "context_window": window }))
         }
-        Ok(response) => Json(serde_json::json!({
+        Ok(response) => no_store_json(serde_json::json!({
             "ok": false,
             "error": format!("HTTP {}", response.status()),
-        }))
-        .into_response(),
+        })),
         Err(error) => {
-            Json(serde_json::json!({ "ok": false, "error": error.to_string() })).into_response()
+            no_store_json(serde_json::json!({ "ok": false, "error": error.to_string() }))
         }
     }
+}
+
+/// Wrap a JSON body with `Cache-Control: no-store`. Used by the live backend probes
+/// (`/ui/model-info`, `/ui/check-backend`): their value is a fresh per-request probe, so a
+/// browser or proxy must never serve a stale copy — otherwise a `null` cached on the first
+/// load (backend not yet reachable, e.g. over VPN) sticks until a hard refresh.
+fn no_store_json(value: Value) -> Response {
+    let mut resp = Json(value).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    resp
 }
 
 /// Report the active backend's context window to the UI (for the context-usage gauge).
@@ -749,8 +761,7 @@ pub(super) async fn ui_model_info(State(state): State<Arc<OpenAiServerState>>) -
         .filter(|b| b.starts_with("http://") || b.starts_with("https://"));
     let model = state.backend_model();
     let Some(base) = base else {
-        return Json(serde_json::json!({ "context_window": Value::Null, "model": model }))
-            .into_response();
+        return no_store_json(serde_json::json!({ "context_window": Value::Null, "model": model }));
     };
     let key = std::env::var("OPENAI_API_KEY")
         .ok()
@@ -770,7 +781,7 @@ pub(super) async fn ui_model_info(State(state): State<Arc<OpenAiServerState>>) -
         },
         _ => None,
     };
-    Json(serde_json::json!({ "context_window": window, "model": model })).into_response()
+    no_store_json(serde_json::json!({ "context_window": window, "model": model }))
 }
 
 #[derive(Deserialize)]

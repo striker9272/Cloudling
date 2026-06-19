@@ -276,7 +276,10 @@
      (/ui/model-info). null when the backend doesn't expose it → the counter degrades to a
      plain token figure with no gauge. */
   var ctxWindow=null;
-  function loadModelInfo(){ pFetchJSON('/ui/model-info').then(function(d){
+  /* fetched no-store: the window is a live backend probe, so a cached null (e.g. backend not
+     yet reachable on first load over VPN) must not stick — that was the "only Ctrl+F5 fixes it"
+     bug. Safe to call again on events (settings save, opening a chat) to refresh dynamically. */
+  function loadModelInfo(){ pFetchJSON('/ui/model-info',{cache:'no-store'}).then(function(d){
     if(d && typeof d.context_window==='number' && d.context_window>0){ ctxWindow=d.context_window; if(activeId) setCtxToks(dlgToks[activeId]); }
   }).catch(function(){}); }
   /* small version tag on the home screen — source is /health (ungated), so it works before any
@@ -400,6 +403,7 @@
   function openDialog(id, el){
     var wasDialog=(viewDlg.hidden===false), wasHome=(viewHome.hidden===false);
     activeId=id; document.getElementById('view-setup').hidden=true; document.getElementById('view-preset').hidden=true;
+    if(ctxWindow===null) loadModelInfo(); /* window still unknown (slow/late backend) — re-probe, no manual reload needed */
     /* take home out of flow FIRST (dissolve), THEN show the dialog — otherwise the dialog is
        briefly pushed below the fold and jumps up when home leaves the flow */
     if(wasHome && viewHome.animate){ dissolveOut(viewHome); } else { viewHome.hidden=true; }
@@ -425,7 +429,7 @@
   }
   function newDialog(){
     var wasDialog=(viewDlg.hidden===false);
-    document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[]; refreshTaskbar();
+    document.getElementById('view-setup').hidden=true; viewHome.hidden=false; activeId=null; activeItem=null; convo=[]; setCtxToks(); refreshTaskbar();
     leftDrawer.querySelectorAll('.item').forEach(function(it){ it.classList.remove('active'); });
     /* dialog → new chat: dissolve the dialog to reveal home, fade the hero in */
     if(wasDialog && viewDlg.animate){
@@ -464,10 +468,12 @@
      (clab is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
      convo entry, so we can rewind both together on regenerate / edit. */
   var convo = [], currentAbort = null, liveAcc = '', pendingLiveCancel = null;
-  /* Invariant: every *real* `.turn` maps 1:1 onto a `convo` entry. Error boxes are
-     marked `.noconv` (they have no history entry) and are excluded from index math,
-     so regenerate/edit slice `convo` at the right spot even after a failed turn. */
-  function realTurns(){ return Array.prototype.filter.call(thread.querySelectorAll('.turn'), function(t){ return !t.classList.contains('noconv'); }); }
+  /* Invariant: every convo entry maps 1:1, in DOM order, onto a `.turn` OR a `.compact-mark`
+     (the folded-history summary is a real `convo` entry but rendered as a compact-mark, not a
+     turn). Both are counted for index math; error boxes are marked `.noconv` (no history entry)
+     and excluded — so regenerate/edit slice `convo` at the right spot even after a failed turn
+     or a context compaction. Missing the compact-mark here drifts every later index by one. */
+  function realTurns(){ return Array.prototype.filter.call(thread.querySelectorAll('.turn, .compact-mark'), function(t){ return !t.classList.contains('noconv'); }); }
   function turnIndex(turn){ return realTurns().indexOf(turn); }
   /* remove `turn` (if inclusive) and every turn after it — incl. stray error boxes */
   function removeTurnsFrom(turn, inclusive){
@@ -833,7 +839,7 @@
       var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
-      activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[]; refreshTaskbar();
+      activeItem=it; dtitle.textContent=title; thread.innerHTML=''; convo=[]; setCtxToks(dlgToks[activeId]); refreshTaskbar();
       viewDlg.hidden=false; updateDialogList(); leaveHome();
       btn = dlgSend() || btn; /* we switched to the dialog view — drive stop/send on its (visible) button */
       if(fromRect) dockMorph(fromRect); /* slide the composer from center down into the dock */
@@ -1073,7 +1079,7 @@
       (function poll(){ tries++;
         fetch('/health',{cache:'no-store'}).then(function(r){ return r.ok; }).catch(function(){ return false; })
           .then(function(ok){
-            if(ok){ btn.innerHTML=IC.check+' Готово'; loadSettings(); setTimeout(function(){ btn.innerHTML=orig; btn.disabled=false; }, 1200); }
+            if(ok){ btn.innerHTML=IC.check+' Готово'; loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=orig; btn.disabled=false; }, 1200); }
             else if(tries>45){ btn.innerHTML=orig; btn.disabled=false; saveError('Сервер не вернулся — проверь вручную'); }
             else setTimeout(poll, 600);
           });
@@ -1087,7 +1093,7 @@
     btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Сохранение…</span>';
     uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.innerHTML=IC.check+' Готово'; loadSettings(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
+      .then(function(){ btn.innerHTML=IC.check+' Готово'; loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
   });
 
@@ -1270,7 +1276,7 @@
     {name:'Кодер', prompt:'Ты — старший инженер. Пиши идиоматичный код, кратко поясняй решения, предлагай тесты. Ответы — на русском, код и комментарии — на английском.'},
     {name:'Краткий', prompt:'Отвечай максимально кратко — одно-два предложения, без воды.'}
   ];
-  function pFetchJSON(url){ return uiFetch(url).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
+  function pFetchJSON(url, opts){ return uiFetch(url, opts).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
   function savePreset(id,name,prompt){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,prompt:prompt})}).catch(function(){}); }
   function deletePresetReq(id){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){}); }
   function setActivePreset(id){ activePresetId=id||null; return uiFetch('/ui/kv/active_preset',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id||''})}).catch(function(){}); }
