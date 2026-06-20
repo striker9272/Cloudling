@@ -1229,8 +1229,14 @@
 
   /* ---------- server-side folder picker (browses THIS server's filesystem) ---------- */
   var browseCur='';
+  var browseSep='/';
+  /* Join a child folder onto the current path using the server's OS separator (so Windows
+     gets `D:\Claude`, not the verbatim `\\?\D:\/Claude` that broke navigation). Strips
+     trailing separators of either kind first. */
+  function browseJoin(base,name){ return base.replace(/[\/\\]+$/,'')+browseSep+name; }
   function browseRender(data){
     browseCur=data.path||'';
+    if(data.sep) browseSep=data.sep;
     document.getElementById('browsePath').textContent=browseCur||'/';
     var rootsBar=document.getElementById('browseRoots'); rootsBar.innerHTML='';
     (data.roots||[]).forEach(function(r){
@@ -1247,7 +1253,7 @@
     }
     (data.dirs||[]).forEach(function(name){
       var row=document.createElement('div'); row.className='browse-row'; row.textContent='📁  '+name;
-      row.addEventListener('click', function(){ browseLoad(browseCur.replace(/\/+$/,'')+'/'+name); });
+      row.addEventListener('click', function(){ browseLoad(browseJoin(browseCur,name)); });
       list.appendChild(row);
     });
     if(!(data.dirs||[]).length){ var e=document.createElement('div'); e.className='browse-empty'; e.textContent='Вложенных папок нет.'; list.appendChild(e); }

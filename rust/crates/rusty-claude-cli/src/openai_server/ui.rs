@@ -698,14 +698,39 @@ pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<Str
         }
     }
     dirs.sort_by_key(|name| name.to_lowercase());
-    let parent = dir.parent().map(|p| p.to_string_lossy().into_owned());
+    let parent = dir.parent().map(display_path);
     Json(serde_json::json!({
-        "path": dir.to_string_lossy(),
+        "path": display_path(&dir),
         "parent": parent,
         "dirs": dirs,
         "roots": drive_roots(),
+        // The OS path separator, so the browser joins child paths correctly regardless of
+        // which platform's filesystem it is browsing (`\` on Windows, `/` elsewhere).
+        "sep": std::path::MAIN_SEPARATOR.to_string(),
     }))
     .into_response()
+}
+
+/// Render a filesystem path for the UI. On Windows, `std::fs::canonicalize` yields the
+/// extended-length "verbatim" form (`\\?\D:\…`, or `\\?\UNC\server\share` for UNC paths);
+/// strip that prefix so the picker shows — and re-navigates with — ordinary native paths.
+/// Inside the verbatim namespace `/` is not a separator, so leaving the prefix in also broke
+/// child navigation. No-op on Unix.
+#[cfg(windows)]
+fn display_path(p: &std::path::Path) -> String {
+    let s = p.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+        rest.to_string()
+    } else {
+        s.into_owned()
+    }
+}
+
+#[cfg(not(windows))]
+fn display_path(p: &std::path::Path) -> String {
+    p.to_string_lossy().into_owned()
 }
 
 /// Coerce a JSON value to a positive integer, accepting both numbers and numeric strings
