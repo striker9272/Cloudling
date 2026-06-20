@@ -677,7 +677,12 @@ pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<Str
     };
     // Resolve symlinks/.. where possible so `parent` navigation is stable; fall back to the
     // lexical path if canonicalization fails (e.g. a dangling entry).
-    let dir = std::fs::canonicalize(&base).unwrap_or(base);
+    // Canonicalize to stabilize `parent` navigation, then drop the Windows verbatim prefix
+    // (`\\?\…`) so the picker shows and re-navigates with ordinary native paths. Falls back to
+    // the lexical path if canonicalization fails (e.g. a dangling entry).
+    let dir = std::fs::canonicalize(&base)
+        .map(|resolved| runtime::strip_verbatim_prefix(&resolved))
+        .unwrap_or(base);
     if !std::fs::metadata(&dir).map(|m| m.is_dir()).unwrap_or(false) {
         return (
             StatusCode::BAD_REQUEST,
@@ -698,9 +703,9 @@ pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<Str
         }
     }
     dirs.sort_by_key(|name| name.to_lowercase());
-    let parent = dir.parent().map(display_path);
+    let parent = dir.parent().map(|p| p.to_string_lossy().into_owned());
     Json(serde_json::json!({
-        "path": display_path(&dir),
+        "path": dir.to_string_lossy(),
         "parent": parent,
         "dirs": dirs,
         "roots": drive_roots(),
@@ -709,28 +714,6 @@ pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<Str
         "sep": std::path::MAIN_SEPARATOR.to_string(),
     }))
     .into_response()
-}
-
-/// Render a filesystem path for the UI. On Windows, `std::fs::canonicalize` yields the
-/// extended-length "verbatim" form (`\\?\D:\…`, or `\\?\UNC\server\share` for UNC paths);
-/// strip that prefix so the picker shows — and re-navigates with — ordinary native paths.
-/// Inside the verbatim namespace `/` is not a separator, so leaving the prefix in also broke
-/// child navigation. No-op on Unix.
-#[cfg(windows)]
-fn display_path(p: &std::path::Path) -> String {
-    let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        format!(r"\\{rest}")
-    } else if let Some(rest) = s.strip_prefix(r"\\?\") {
-        rest.to_string()
-    } else {
-        s.into_owned()
-    }
-}
-
-#[cfg(not(windows))]
-fn display_path(p: &std::path::Path) -> String {
-    p.to_string_lossy().into_owned()
 }
 
 /// Coerce a JSON value to a positive integer, accepting both numbers and numeric strings

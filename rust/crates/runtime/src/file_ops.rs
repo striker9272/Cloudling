@@ -402,9 +402,8 @@ fn glob_search_impl(
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.to_string()))?;
         let walk_root = derive_glob_walk_root(pat);
         if let Some(boundary) = boundary {
-            let canonical_walk_root = walk_root
-                .canonicalize()
-                .unwrap_or_else(|_| walk_root.clone());
+            let canonical_walk_root =
+                canonicalize_native(&walk_root).unwrap_or_else(|_| walk_root.clone());
             boundary.check(&canonical_walk_root)?;
         }
         let entries = WalkDir::new(&walk_root)
@@ -417,7 +416,7 @@ fn glob_search_impl(
                 && seen.insert(candidate.to_path_buf())
             {
                 if let Some(boundary) = boundary {
-                    let canonical_candidate = candidate.canonicalize()?;
+                    let canonical_candidate = canonicalize_native(candidate)?;
                     boundary.check(&canonical_candidate)?;
                 }
                 matches.push(candidate.to_path_buf());
@@ -491,7 +490,7 @@ fn grep_search_impl(
 
     for file_path in collect_search_files(&base_path)? {
         if let Some(boundary) = boundary {
-            let canonical_file = file_path.canonicalize()?;
+            let canonical_file = canonicalize_native(&file_path)?;
             boundary.check(&canonical_file)?;
         }
         if !matches_optional_filters(&file_path, glob_filter.as_ref(), file_type) {
@@ -585,10 +584,40 @@ fn build_grep_content_output(
     }
 }
 
+/// Strip the Windows extended-length ("verbatim") prefix that [`Path::canonicalize`]
+/// produces on Windows (`\\?\C:\…`, or `\\?\UNC\server\share` for UNC paths). Returns the
+/// path unchanged on Unix and for already-plain paths.
+///
+/// Centralizing this keeps two things correct at once: glob never sees the `?` inside
+/// `\\?\` (the glob syntax would treat it as a single-char wildcard and mis-derive the
+/// search root), and boundary comparisons stay consistent because every canonical path —
+/// the resolved candidate and every trusted root — is normalized the same way.
+#[cfg(windows)]
+pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    let text = path.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(not(windows))]
+pub fn strip_verbatim_prefix(path: &Path) -> PathBuf {
+    path.to_path_buf()
+}
+
+/// Canonicalize a path, then strip the Windows verbatim prefix (see
+/// [`strip_verbatim_prefix`]) so callers get an ordinary native path.
+fn canonicalize_native(path: &Path) -> io::Result<PathBuf> {
+    path.canonicalize()
+        .map(|resolved| strip_verbatim_prefix(&resolved))
+}
+
 fn canonicalize_workspace_root(workspace_root: &Path) -> PathBuf {
-    workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf())
+    canonicalize_native(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf())
 }
 
 fn should_skip_glob_dir(entry: &DirEntry) -> bool {
@@ -706,7 +735,7 @@ fn normalize_path(path: &str) -> io::Result<PathBuf> {
     } else {
         crate::current_workspace_root()?.join(path)
     };
-    candidate.canonicalize()
+    canonicalize_native(&candidate)
 }
 
 fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
@@ -716,14 +745,12 @@ fn normalize_path_allow_missing(path: &str) -> io::Result<PathBuf> {
         crate::current_workspace_root()?.join(path)
     };
 
-    if let Ok(canonical) = candidate.canonicalize() {
+    if let Ok(canonical) = canonicalize_native(&candidate) {
         return Ok(canonical);
     }
 
     if let Some(parent) = candidate.parent() {
-        let canonical_parent = parent
-            .canonicalize()
-            .unwrap_or_else(|_| parent.to_path_buf());
+        let canonical_parent = canonicalize_native(parent).unwrap_or_else(|_| parent.to_path_buf());
         if let Some(name) = candidate.file_name() {
             return Ok(canonical_parent.join(name));
         }
@@ -805,7 +832,7 @@ pub fn resolve_dir_in_workspace(path: &str, workspace_root: &Path) -> io::Result
     } else {
         workspace_root.join(path)
     };
-    let resolved = candidate.canonicalize()?;
+    let resolved = canonicalize_native(&candidate)?;
     if !resolved.is_dir() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -821,10 +848,9 @@ pub fn is_symlink_escape(path: &Path, workspace_root: &Path) -> io::Result<bool>
     if !metadata.is_symlink() {
         return Ok(false);
     }
-    let resolved = path.canonicalize()?;
-    let canonical_root = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
+    let resolved = canonicalize_native(path)?;
+    let canonical_root =
+        canonicalize_native(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
     Ok(!resolved.starts_with(&canonical_root))
 }
 
