@@ -515,42 +515,72 @@
      a free-text field; a click POSTs to /ui/answer, which unblocks the server. Re-renders
      (finalize / reloaded dialogs) pass live=false → a static, disabled view; `askAnswered`
      keeps the chosen value across the in-session re-render so the choice stays highlighted. */
-  var askAnswered={}; /* qid -> chosen answer */
+  var askAnswered={}; /* qid -> chosen answer (in-memory; baked into saved markup on finalize) */
   function attrVal(attrs, key){ var m=attrs.match(new RegExp('\\b'+key+'="([^"]*)"')); return m?decodeEntities(m[1]):''; }
+  function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  /* Persist chosen answers into the ask-block markup so a reload keeps the selection
+     highlighted (the in-memory map is wiped on refresh; the saved dialog content survives). */
+  function bakeAskAnswers(text){
+    return text.replace(/<details type="ask"([^>]*)>/g, function(m, a){
+      if(/\banswer=/.test(a)) return m;
+      var idm=a.match(/\bid="([^"]+)"/); if(!idm) return m;
+      var qid=decodeEntities(idm[1]);
+      if(!Object.prototype.hasOwnProperty.call(askAnswered, qid)) return m;
+      return '<details type="ask"'+a+' answer="'+escAttr(askAnswered[qid])+'">';
+    });
+  }
+  var ASKCHECK='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
   function buildAskEl(attrs, live){
     var qid=attrVal(attrs,'id'), question=attrVal(attrs,'question');
     var options=[]; try{ options=JSON.parse(attrVal(attrs,'options'))||[]; }catch(e){}
-    var answered=Object.prototype.hasOwnProperty.call(askAnswered, qid);
+    var fromAttr=attrVal(attrs,'answer');
+    var chosen=fromAttr!==''?fromAttr:(Object.prototype.hasOwnProperty.call(askAnswered,qid)?askAnswered[qid]:null);
     var box=document.createElement('div'); box.className='askw';
     var q=document.createElement('div'); q.className='askq'; q.textContent=question||'Вопрос'; box.appendChild(q);
-    var opts=document.createElement('div'); opts.className='askopts';
-    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder='Свой ответ…';
-    var sendBtn=document.createElement('button'); sendBtn.type='button'; sendBtn.className='askbtn'; sendBtn.textContent='Ответить';
-    var btns=[];
-    function lock(val){
-      btns.forEach(function(b){ b.disabled=true; b.classList.toggle('on', b.getAttribute('data-v')===val); });
-      inp.disabled=true; sendBtn.disabled=true;
-      if(!options.some(function(o){return o===val;})) inp.value=val;
+    /* once answered, the widget collapses to a compact question→answer view (chat-style):
+       the chosen value with a check, options/input removed. */
+    function answerRow(val){
+      var a=document.createElement('div'); a.className='askans';
+      var c=document.createElement('span'); c.className='askck'; c.innerHTML=ASKCHECK;
+      var v=document.createElement('span'); v.textContent=val;
+      a.appendChild(c); a.appendChild(v); return a;
     }
+    function collapse(val){
+      box.classList.add('answered');
+      while(box.children.length>1) box.removeChild(box.lastChild);
+      box.appendChild(answerRow(val));
+    }
+    if(chosen!=null){ box.classList.add('answered'); box.appendChild(answerRow(chosen)); return box; }
+    /* interactive (unanswered): large full-width option rows + free-text (design variant 1) */
+    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder='Свой ответ…';
+    var go=document.createElement('button'); go.type='button'; go.className='askgo'; go.textContent='Ответить';
     function choose(val){
       if(Object.prototype.hasOwnProperty.call(askAnswered, qid)) return;
       askAnswered[qid]=val;
       uiFetch('/ui/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:qid,answer:val})}).catch(function(){});
-      lock(val);
+      collapse(val);
     }
     options.forEach(function(o){
-      var b=document.createElement('button'); b.type='button'; b.className='askbtn'; b.textContent=o; b.setAttribute('data-v', o);
-      if(live && !answered){ b.addEventListener('click', function(){ choose(o); }); } else { b.disabled=true; }
-      opts.appendChild(b); btns.push(b);
+      var r=document.createElement('button'); r.type='button'; r.className='askrow'; r.setAttribute('data-v', o);
+      var dot=document.createElement('span'); dot.className='askradio';
+      var lab=document.createElement('span'); lab.textContent=o;
+      r.appendChild(dot); r.appendChild(lab);
+      if(live){ r.addEventListener('click', function(){ choose(o); }); } else { r.disabled=true; }
+      box.appendChild(r);
     });
-    if(options.length) box.appendChild(opts);
+    if(options.length){
+      var or=document.createElement('div'); or.className='askor';
+      var l1=document.createElement('span'); l1.className='askln';
+      var l2=document.createElement('span'); l2.className='askln';
+      var t=document.createElement('span'); t.textContent='или впишите свой';
+      or.appendChild(l1); or.appendChild(t); or.appendChild(l2); box.appendChild(or);
+    }
     var row=document.createElement('div'); row.className='askother';
     function submitOther(){ var v=inp.value.trim(); if(v) choose(v); }
-    sendBtn.addEventListener('click', submitOther);
+    go.addEventListener('click', submitOther);
     inp.addEventListener('keydown', function(e){ if(e.key==='Enter') submitOther(); });
-    if(!live || answered){ inp.disabled=true; sendBtn.disabled=true; }
-    row.appendChild(inp); row.appendChild(sendBtn); box.appendChild(row);
-    if(answered) lock(askAnswered[qid]);
+    if(!live){ inp.disabled=true; go.disabled=true; }
+    row.appendChild(inp); row.appendChild(go); box.appendChild(row);
     return box;
   }
   /* The tool invocation lives in the block's arguments="…" attr (HTML-escaped JSON). Show it
@@ -792,6 +822,7 @@
         finishGen(btn); maybeScroll();
         return;
       }
+      acc=bakeAskAnswers(acc); /* persist any chosen AskUserQuestion answers into the saved markup (survives reload) */
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       if(lastFinish==='length'){ /* backend hit its output/context limit — answer is cut off, not complete */
         turn.insertAdjacentHTML('beforeend','<div class="note trunc">'+IC.warn+'Ответ оборван по лимиту контекста — перегенерируйте, чтобы получить полный.</div>');

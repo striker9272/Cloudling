@@ -540,13 +540,28 @@ fn ask_via_ui(
         state.clear_pending_question(&q_id);
         return None;
     }
-    // Wait for the answer, polling so an aborted turn (Stop / disconnect) is noticed too. The
-    // hard cap keeps a forgotten/closed tab from pinning this blocking thread forever.
+    // Wait for the answer, polling so an aborted turn is noticed too. The hard cap keeps a
+    // forgotten/closed tab from pinning this blocking thread forever.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    let mut ticks: u32 = 0;
     loop {
         match rx.recv_timeout(std::time::Duration::from_millis(200)) {
             Ok(answer) => return Some(answer),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                ticks += 1;
+                // ~every 2s, probe the SSE connection with an ignored comment line: nothing is
+                // sent through our channel during the wait, so a closed tab / Stop would otherwise
+                // go unnoticed until the cap. A failed send means the client is gone — trip the
+                // turn abort so the agent loop halts and release the pending slot.
+                if ticks % 10 == 0
+                    && sender
+                        .send(Ok(Event::default().comment("await-answer")))
+                        .is_err()
+                {
+                    abort.abort();
+                    state.clear_pending_question(&q_id);
+                    return None;
+                }
                 if abort.is_aborted() || std::time::Instant::now() >= deadline {
                     state.clear_pending_question(&q_id);
                     return None;
