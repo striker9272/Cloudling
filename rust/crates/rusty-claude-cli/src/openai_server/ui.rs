@@ -316,6 +316,27 @@ pub(super) async fn ui_kv_put(
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub(super) struct AnswerRequest {
+    id: String,
+    answer: String,
+}
+
+/// Deliver a user's answer to an in-flight interactive `AskUserQuestion` (built-in UI). The
+/// streaming chat thread is blocked waiting on this `id`; resolving it unblocks the tool so
+/// the agent loop continues. Returns 404 when no question is waiting (already answered or it
+/// timed out). Gated by `ui_auth_middleware` like every `/ui/*` endpoint.
+pub(super) async fn ui_answer(
+    State(state): State<Arc<OpenAiServerState>>,
+    Json(body): Json<AnswerRequest>,
+) -> Response {
+    if state.resolve_pending_question(&body.id, body.answer) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "no pending question for that id").into_response()
+    }
+}
+
 // ---- "Основное" settings: read active env, save to the env file, self-restart ----
 
 /// The env keys the UI may read and edit. Saving touches only these; everything else in

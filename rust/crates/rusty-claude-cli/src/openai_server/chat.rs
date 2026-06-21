@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -112,10 +112,15 @@ struct ErrorBody {
 
 pub(super) async fn chat_completions(
     State(state): State<Arc<OpenAiServerState>>,
+    headers: HeaderMap,
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
+    // The built-in UI tags its requests with `X-Clab-UI` so AskUserQuestion can render an
+    // interactive widget; other clients (OWUI, raw API) omit it and keep the stdin/
+    // "unavailable" fallback. Header lookups are case-insensitive.
+    let interactive_ui = headers.contains_key("x-clab-ui");
     if request.stream {
-        return stream_chat_completions(state, request);
+        return stream_chat_completions(state, request, interactive_ui);
     }
 
     let conversation = match stateless_conversation_from_messages(&request.messages) {
@@ -236,6 +241,7 @@ pub(super) async fn chat_completions(
 fn stream_chat_completions(
     state: Arc<OpenAiServerState>,
     request: ChatCompletionRequest,
+    interactive_ui: bool,
 ) -> Response {
     let conversation = match stateless_conversation_from_messages(&request.messages) {
         Ok(conversation) => conversation,
@@ -411,6 +417,28 @@ fn stream_chat_completions(
                 }
             };
 
+            // Built-in UI only: install an ambient provider so AskUserQuestion renders an
+            // interactive widget and blocks for the user's click (see `ask_via_ui`). It runs
+            // on THIS spawn_blocking thread during tool execution, so the thread-local install
+            // is correct; the guard restores the prior provider when the turn ends. Without
+            // the marker we install `None` → the tool keeps its stdin/"unavailable" fallback.
+            let _prompt_guard = if interactive_ui {
+                let psender = sender.clone();
+                let pstate = state.clone();
+                let pabort = abort_signal.clone();
+                let pid = id.clone();
+                let pmodel = response_model.clone();
+                tools::scoped_user_prompt_provider(Some(Box::new(
+                    move |question: &str, options: Option<&[String]>| {
+                        ask_via_ui(
+                            &psender, &pstate, &pabort, &pid, created, &pmodel, question, options,
+                        )
+                    },
+                )))
+            } else {
+                tools::scoped_user_prompt_provider(None)
+            };
+
             if input_images.is_empty() {
                 session.run_prompt_json_with_event_sink(&input, &mut event_sink)
             } else {
@@ -483,6 +511,77 @@ fn stream_chat_completions(
         .into_response()
 }
 
+/// Drive one interactive `AskUserQuestion` round-trip for the built-in UI: emit a question
+/// widget into the SSE stream, then block this `spawn_blocking` thread until the browser POSTs
+/// an answer to `/ui/answer`, the turn is aborted (Stop / tab closed), or a safety cap
+/// elapses. Returns the chosen answer, or `None` to fall back to the "unavailable" result.
+#[allow(clippy::too_many_arguments)]
+fn ask_via_ui(
+    sender: &mpsc::UnboundedSender<Result<Event, Infallible>>,
+    state: &Arc<OpenAiServerState>,
+    abort: &runtime::HookAbortSignal,
+    id: &str,
+    created: u64,
+    model: &str,
+    question: &str,
+    options: Option<&[String]>,
+) -> Option<String> {
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let q_id = format!(
+        "{id}:{}",
+        SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let rx = state.register_pending_question(q_id.clone());
+    // Emit the widget. If the client is already gone, the send fails — bail to the fallback.
+    if sender
+        .send(ask_widget_chunk(id, created, model, &q_id, question, options))
+        .is_err()
+    {
+        state.clear_pending_question(&q_id);
+        return None;
+    }
+    // Wait for the answer, polling so an aborted turn (Stop / disconnect) is noticed too. The
+    // hard cap keeps a forgotten/closed tab from pinning this blocking thread forever.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(600);
+    loop {
+        match rx.recv_timeout(std::time::Duration::from_millis(200)) {
+            Ok(answer) => return Some(answer),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if abort.is_aborted() || std::time::Instant::now() >= deadline {
+                    state.clear_pending_question(&q_id);
+                    return None;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                state.clear_pending_question(&q_id);
+                return None;
+            }
+        }
+    }
+}
+
+/// Build the SSE content chunk the built-in UI renders as an interactive question widget
+/// (clickable option buttons). Mirrors `openwebui_tool_details`' attribute escaping; the
+/// client matches `type="ask"` and reads `id` / `question` / `options` (a JSON array).
+fn ask_widget_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    q_id: &str,
+    question: &str,
+    options: Option<&[String]>,
+) -> Result<Event, Infallible> {
+    let options_json =
+        serde_json::to_string(options.unwrap_or(&[])).unwrap_or_else(|_| "[]".to_string());
+    let markup = format!(
+        "\n<details type=\"ask\" done=\"false\" id=\"{}\" question=\"{}\" options=\"{}\">\n</details>\n",
+        escape_html_attr(q_id),
+        escape_html_attr(question),
+        escape_html_attr(&options_json),
+    );
+    openai_sse_chunk(id, created, model, Some(markup), None)
+}
+
 fn assistant_event_to_openai_sse_chunk(
     id: &str,
     created: u64,
@@ -526,6 +625,12 @@ fn assistant_event_to_openai_sse_chunk(
             output,
             is_error,
         } => {
+            // The interactive widget (built-in UI) already shows the AskUserQuestion prompt and
+            // the chosen answer; for other clients its result is just the "unavailable" stub.
+            // Either way, suppress the redundant tool-call block for it.
+            if tool_name == "AskUserQuestion" {
+                return None;
+            }
             let arguments = tool_inputs
                 .get(tool_use_id)
                 .map(String::as_str)

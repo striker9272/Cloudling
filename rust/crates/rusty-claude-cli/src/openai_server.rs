@@ -22,10 +22,10 @@ use serde::Serialize;
 
 use chat::chat_completions;
 use ui::{
-    ui_auth_middleware, ui_browse, ui_check_backend, ui_config_get, ui_config_save, ui_css,
-    ui_dialog_delete, ui_dialog_get, ui_dialog_put, ui_dialogs_list, ui_index, ui_js, ui_kv_get,
-    ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list, ui_settings_get,
-    ui_settings_save_restart, ui_summarize, ui_title,
+    ui_answer, ui_auth_middleware, ui_browse, ui_check_backend, ui_config_get, ui_config_save,
+    ui_css, ui_dialog_delete, ui_dialog_get, ui_dialog_put, ui_dialogs_list, ui_index, ui_js,
+    ui_kv_get, ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list,
+    ui_settings_get, ui_settings_save_restart, ui_summarize, ui_title,
 };
 
 pub(crate) struct OpenAiServerState {
@@ -45,6 +45,11 @@ pub(crate) struct OpenAiServerState {
     /// Whether the listen address is loopback. Decides the no-token default: open on
     /// localhost (dev convenience), disabled anywhere else (fail closed).
     bind_is_loopback: bool,
+    /// In-flight interactive `AskUserQuestion` prompts awaiting a UI answer, keyed by a
+    /// per-question correlation id. The streaming chat thread registers a sender and blocks
+    /// on its receiver; `POST /ui/answer` looks the id up and delivers the user's choice.
+    pending_questions:
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<String>>>,
 }
 
 impl OpenAiServerState {
@@ -67,6 +72,41 @@ impl OpenAiServerState {
             .permission_mode
             .read()
             .expect("permission_mode lock poisoned")
+    }
+
+    /// Register an in-flight interactive question; the returned receiver yields the user's
+    /// answer once `POST /ui/answer` delivers it for this `id`.
+    pub(crate) fn register_pending_question(
+        &self,
+        id: String,
+    ) -> std::sync::mpsc::Receiver<String> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.pending_questions
+            .lock()
+            .expect("pending_questions lock poisoned")
+            .insert(id, tx);
+        rx
+    }
+
+    /// Deliver an answer to a pending question. Returns `true` if a waiter was found.
+    pub(crate) fn resolve_pending_question(&self, id: &str, answer: String) -> bool {
+        let sender = self
+            .pending_questions
+            .lock()
+            .expect("pending_questions lock poisoned")
+            .remove(id);
+        match sender {
+            Some(tx) => tx.send(answer).is_ok(),
+            None => false,
+        }
+    }
+
+    /// Drop a pending question without answering (timeout / client gone).
+    pub(crate) fn clear_pending_question(&self, id: &str) {
+        self.pending_questions
+            .lock()
+            .expect("pending_questions lock poisoned")
+            .remove(id);
     }
 
     /// Apply edited engine settings to the live state (no restart). `OPENAI_BASE_URL`,
@@ -257,6 +297,7 @@ async fn serve(
         dialog_store,
         ui_token,
         bind_is_loopback: addr.ip().is_loopback(),
+        pending_questions: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     // API routes are always present. The built-in web UI is opt-in via `--ui`, so the
@@ -290,6 +331,7 @@ async fn serve(
             .route("/ui/check-backend", post(ui_check_backend))
             .route("/ui/model-info", get(ui_model_info))
             .route("/ui/browse", get(ui_browse))
+            .route("/ui/answer", post(ui_answer))
             .route("/ui/title", post(ui_title))
             .route("/ui/summarize", post(ui_summarize))
             .route_layer(middleware::from_fn_with_state(

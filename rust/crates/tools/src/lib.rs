@@ -1367,9 +1367,84 @@ fn maybe_enforce_permission_check_with_mode(
     }
 }
 
+// ---- Interactive user-prompt provider (AskUserQuestion) -------------------------------
+//
+// AskUserQuestion is synchronous: the agent loop calls the tool and waits for the answer.
+// In a terminal that answer comes from stdin. Under openai-serve there is no stdin, but the
+// built-in web UI can render the question as a widget and POST the user's choice back. To
+// bridge the two WITHOUT this crate depending on the server, serve installs an ambient
+// provider on the tool-running thread (the same thread-local RAII pattern as the runtime's
+// filesystem policy). When a provider is set, `run_ask_user_question` calls it; when absent
+// (OWUI, other clients, CLI piping) the original stdin / "unavailable" behavior is kept.
+
+/// Asks the user `question` (with optional `options`) and returns their answer, or `None`
+/// if no answer could be obtained (timeout, client navigated away) — in which case the tool
+/// reports the usual "unavailable" result so the model proceeds.
+pub type UserPromptProvider = Box<dyn Fn(&str, Option<&[String]>) -> Option<String>>;
+
+thread_local! {
+    static ACTIVE_PROMPT_PROVIDER: std::cell::RefCell<Option<UserPromptProvider>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// RAII guard that restores the previous provider when dropped.
+pub struct UserPromptProviderGuard {
+    previous: Option<UserPromptProvider>,
+}
+
+impl Drop for UserPromptProviderGuard {
+    fn drop(&mut self) {
+        ACTIVE_PROMPT_PROVIDER.with(|cell| {
+            *cell.borrow_mut() = self.previous.take();
+        });
+    }
+}
+
+/// Install an ambient user-prompt provider for the current thread (serve installs one per
+/// streaming request, on the same blocking thread that runs the agent loop and its tools).
+/// Returns a guard that restores the prior provider on drop.
+#[must_use]
+pub fn scoped_user_prompt_provider(
+    provider: Option<UserPromptProvider>,
+) -> UserPromptProviderGuard {
+    let previous =
+        ACTIVE_PROMPT_PROVIDER.with(|cell| std::mem::replace(&mut *cell.borrow_mut(), provider));
+    UserPromptProviderGuard { previous }
+}
+
+/// Invoke the ambient provider if one is installed. `Some(answer_opt)` means a provider ran
+/// (`answer_opt` = the user's answer, or `None` if unanswered); the outer `None` means no
+/// provider is installed and the caller should fall back to the stdin path.
+fn invoke_prompt_provider(question: &str, options: Option<&[String]>) -> Option<Option<String>> {
+    ACTIVE_PROMPT_PROVIDER.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .map(|provider| provider(question, options))
+    })
+}
+
 #[allow(clippy::needless_pass_by_value)]
 fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
     use std::io::{self, BufRead, IsTerminal, Write};
+
+    // Interactive built-in-UI path: if serve installed a provider on this thread, route the
+    // question through it (widget + click) instead of stdin. No provider → fall through to the
+    // original terminal / "unavailable" behavior below, so OWUI and the CLI are unchanged.
+    if let Some(result) = invoke_prompt_provider(&input.question, input.options.as_deref()) {
+        return match result {
+            Some(answer) => to_pretty_json(json!({
+                "question": input.question,
+                "answer": answer,
+                "status": "answered"
+            })),
+            None => to_pretty_json(json!({
+                "question": input.question,
+                "answer": Value::Null,
+                "status": "unavailable",
+                "message": "The user did not answer the question."
+            })),
+        };
+    }
 
     // Without an interactive terminal (openai-serve under systemd: stdin is
     // /dev/null) reading stdin yields instant EOF, which used to be reported as

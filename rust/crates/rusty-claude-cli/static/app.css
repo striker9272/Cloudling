@@ -381,6 +381,18 @@ details.tool[open]>summary.head::after{transform:rotate(180deg);}
 .tool.reason{border-left-color:var(--line2);}
 .tool.reason .tag{color:var(--faint); font-weight:500;}
 .tool.reason .toolout{font-family:inherit; color:var(--muted);}
+/* interactive AskUserQuestion widget */
+.askw{margin:0 0 12px; border:1px solid var(--line2); border-radius:14px; padding:13px 14px; background:var(--s-raise);}
+.askq{font-size:14px; line-height:1.5; color:var(--text); margin-bottom:10px;}
+.askopts{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:9px;}
+.askbtn{border:1px solid var(--line2); background:var(--s-ctrl); color:var(--text); border-radius:10px; padding:8px 13px; font:inherit; font-size:13px; cursor:pointer; transition:background .12s, border-color .12s, filter .12s;}
+.askbtn:hover:not(:disabled){background:var(--s-ctrl-h); border-color:var(--accent);}
+.askbtn:disabled{cursor:default; opacity:.6;}
+.askbtn.on{background:var(--accent); border-color:var(--accent); color:var(--on-accent); opacity:1;}
+.askother{display:flex; gap:8px;}
+.askinp{flex:1; background:var(--input); color:var(--text); border:1px solid var(--line); border-radius:10px; padding:8px 11px; font:inherit; font-size:13px; transition:border-color .15s;}
+.askinp:focus{outline:none; border-color:var(--accent);}
+.askinp:disabled{opacity:.6;}
 .errbox{border:1px solid #4a2626; background:#1f1414; border-radius:12px; padding:12px 14px; margin-top:2px;}
 .errbox .ehead{display:flex; align-items:center; gap:8px; color:#e08a8a; font-weight:500; font-size:13.5px; margin-bottom:5px;}
 .errbox .emsg{color:#c79090; font-size:13px; line-height:1.5; margin-bottom:11px;}

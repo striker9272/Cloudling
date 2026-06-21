@@ -498,15 +498,60 @@
   var TOOL_RE=/<details type="tool_calls"[^>]*\bname="([^"]*)"[^>]*>([\s\S]*?)<\/details>/g;
   /* Generic block matcher: tool-call results AND reasoning blocks. m[1]=kind, m[2]=opening-tag
      attrs (tool name lives here), m[3]=inner. */
-  var BLOCK_RE=/<details type="(tool_calls|reasoning)"([^>]*)>([\s\S]*?)<\/details>/g;
+  var BLOCK_RE=/<details type="(tool_calls|reasoning|ask)"([^>]*)>([\s\S]*?)<\/details>/g;
   function decodeEntities(s){ return String(s).replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,'&'); }
-  function blockEl(kind, attrs, inner){
+  function blockEl(kind, attrs, inner, live){
     if(kind==='reasoning') return buildReasonEl(inner);
+    if(kind==='ask') return buildAskEl(attrs, !!live);
     var name=(attrs.match(/\bname="([^"]*)"/)||[])[1]||'';
     /* TodoWrite is shown in the task bar under the header, not as an inline plate */
     if(name==='TodoWrite') return null;
     var args=(attrs.match(/\barguments="([^"]*)"/)||[])[1]||'';
     return buildToolEl(name, inner, args);
+  }
+  /* Interactive AskUserQuestion widget. The server emits a closed `<details type="ask"
+     id=… question=… options=…>` block when the model calls the tool and then BLOCKS the turn
+     waiting for the answer. `live` (the actively streaming turn) renders clickable options +
+     a free-text field; a click POSTs to /ui/answer, which unblocks the server. Re-renders
+     (finalize / reloaded dialogs) pass live=false → a static, disabled view; `askAnswered`
+     keeps the chosen value across the in-session re-render so the choice stays highlighted. */
+  var askAnswered={}; /* qid -> chosen answer */
+  function attrVal(attrs, key){ var m=attrs.match(new RegExp('\\b'+key+'="([^"]*)"')); return m?decodeEntities(m[1]):''; }
+  function buildAskEl(attrs, live){
+    var qid=attrVal(attrs,'id'), question=attrVal(attrs,'question');
+    var options=[]; try{ options=JSON.parse(attrVal(attrs,'options'))||[]; }catch(e){}
+    var answered=Object.prototype.hasOwnProperty.call(askAnswered, qid);
+    var box=document.createElement('div'); box.className='askw';
+    var q=document.createElement('div'); q.className='askq'; q.textContent=question||'Вопрос'; box.appendChild(q);
+    var opts=document.createElement('div'); opts.className='askopts';
+    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder='Свой ответ…';
+    var sendBtn=document.createElement('button'); sendBtn.type='button'; sendBtn.className='askbtn'; sendBtn.textContent='Ответить';
+    var btns=[];
+    function lock(val){
+      btns.forEach(function(b){ b.disabled=true; b.classList.toggle('on', b.getAttribute('data-v')===val); });
+      inp.disabled=true; sendBtn.disabled=true;
+      if(!options.some(function(o){return o===val;})) inp.value=val;
+    }
+    function choose(val){
+      if(Object.prototype.hasOwnProperty.call(askAnswered, qid)) return;
+      askAnswered[qid]=val;
+      uiFetch('/ui/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:qid,answer:val})}).catch(function(){});
+      lock(val);
+    }
+    options.forEach(function(o){
+      var b=document.createElement('button'); b.type='button'; b.className='askbtn'; b.textContent=o; b.setAttribute('data-v', o);
+      if(live && !answered){ b.addEventListener('click', function(){ choose(o); }); } else { b.disabled=true; }
+      opts.appendChild(b); btns.push(b);
+    });
+    if(options.length) box.appendChild(opts);
+    var row=document.createElement('div'); row.className='askother';
+    function submitOther(){ var v=inp.value.trim(); if(v) choose(v); }
+    sendBtn.addEventListener('click', submitOther);
+    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') submitOther(); });
+    if(!live || answered){ inp.disabled=true; sendBtn.disabled=true; }
+    row.appendChild(inp); row.appendChild(sendBtn); box.appendChild(row);
+    if(answered) lock(askAnswered[qid]);
+    return box;
   }
   /* The tool invocation lives in the block's arguments="…" attr (HTML-escaped JSON). Show it
      above the output so it is clear *what* the agent ran: the command string for shell tools,
@@ -720,7 +765,7 @@
         var pre=acc.slice(committed, m.index);
         if(pre.replace(/\s/g,'')){ var b=document.createElement('div'); b.className='md'; b.innerHTML=md(pre); turn.insertBefore(b, liveBox); }
         if(m[1]==='reasoning') clearReasonLive(); /* live block now closed → commit collapsed, drop the growing one */
-        var cel=blockEl(m[1], m[2], m[3]);
+        var cel=blockEl(m[1], m[2], m[3], true); /* live=true → AskUserQuestion widget is clickable */
         if(cel){ turn.insertBefore(cel, liveBox); } else { todoTouched=true; } /* null = suppressed TodoWrite → feed the bar */
         committed=m.index+m[0].length;
       }
@@ -759,7 +804,7 @@
       maybeAutoCompact(dlgToks[activeId]); /* fold older turns if context crossed the window threshold */
     }
     fetch('/v1/chat/completions', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST', headers:{'Content-Type':'application/json','X-Clab-UI':'1'}, /* marker: enable interactive AskUserQuestion widget */
       body:JSON.stringify({ model:'claw', stream:true, messages:outgoingMessages() }),
       signal:ac.signal
     }).then(function(r){
