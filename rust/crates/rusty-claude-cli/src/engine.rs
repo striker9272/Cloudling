@@ -309,7 +309,7 @@ impl EngineHost for ClawEngineSession {
         emit_output: bool,
     ) -> Result<(crate::BuiltRuntime, crate::HookAbortMonitor), Box<dyn std::error::Error>> {
         let hook_abort_signal = self.abort_signal.clone();
-        let runtime = crate::build_runtime(
+        let mut runtime = crate::build_runtime(
             self.runtime.session().clone(),
             &self.session.id,
             self.model.clone(),
@@ -321,6 +321,11 @@ impl EngineHost for ClawEngineSession {
             None,
         )?
         .with_hook_abort_signal(hook_abort_signal.clone());
+        // Stateless serve: each request is a fresh, re-seeded session, so trigger auto-compaction
+        // on the current context size (latest model call's input), not the cumulative sum across
+        // the agentic loop — otherwise a tool-heavy turn fires compaction while the model window
+        // is far from full (the cumulative sum of many small steps crosses the threshold).
+        runtime.set_auto_compaction_use_latest_turn(true);
         let hook_abort_monitor = crate::HookAbortMonitor::spawn(hook_abort_signal);
 
         Ok((runtime, hook_abort_monitor))

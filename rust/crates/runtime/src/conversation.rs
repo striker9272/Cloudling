@@ -172,6 +172,13 @@ pub struct ConversationRuntime<C, T> {
     usage_tracker: UsageTracker,
     hook_runner: HookRunner,
     auto_compaction_input_tokens_threshold: u32,
+    /// When true, the auto-compaction trigger measures the LATEST model call's input size
+    /// (current context occupancy) instead of the session's cumulative input across the turn.
+    /// The stateless OpenAI-serve path sets this: there each request is a fresh session, so the
+    /// cumulative sum would add up every step of one agentic turn and fire compaction on a
+    /// tool-heavy turn even while the real context window is far from full. The persistent CLI
+    /// keeps the default (cumulative session-budget) semantics.
+    auto_compaction_use_latest_turn: bool,
     hook_abort_signal: HookAbortSignal,
     hook_progress_reporter: Option<Box<dyn HookProgressReporter>>,
     session_tracer: Option<SessionTracer>,
@@ -221,6 +228,7 @@ where
             usage_tracker,
             hook_runner: HookRunner::from_feature_config(feature_config),
             auto_compaction_input_tokens_threshold: auto_compaction_threshold_from_env(),
+            auto_compaction_use_latest_turn: false,
             hook_abort_signal: HookAbortSignal::default(),
             hook_progress_reporter: None,
             session_tracer: None,
@@ -237,6 +245,13 @@ where
     pub fn with_auto_compaction_input_tokens_threshold(mut self, threshold: u32) -> Self {
         self.auto_compaction_input_tokens_threshold = threshold;
         self
+    }
+
+    /// Measure auto-compaction against the latest model call's input size (current context
+    /// occupancy) rather than the session's cumulative input. See the field docs on
+    /// `auto_compaction_use_latest_turn`. Used by the stateless OpenAI-serve path.
+    pub fn set_auto_compaction_use_latest_turn(&mut self, enabled: bool) {
+        self.auto_compaction_use_latest_turn = enabled;
     }
 
     #[must_use]
@@ -664,9 +679,14 @@ where
     }
 
     fn maybe_auto_compact(&mut self) -> Option<AutoCompactionEvent> {
-        if self.usage_tracker.cumulative_usage().input_tokens
-            < self.auto_compaction_input_tokens_threshold
-        {
+        // Stateless serve measures the current context size (latest call's input); the persistent
+        // CLI measures the cumulative session input. See `auto_compaction_use_latest_turn`.
+        let measured_input_tokens = if self.auto_compaction_use_latest_turn {
+            self.usage_tracker.current_turn_usage().input_tokens
+        } else {
+            self.usage_tracker.cumulative_usage().input_tokens
+        };
+        if measured_input_tokens < self.auto_compaction_input_tokens_threshold {
             return None;
         }
 
