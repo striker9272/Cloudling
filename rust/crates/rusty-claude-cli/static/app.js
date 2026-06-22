@@ -775,7 +775,13 @@
       errored=true; liveAcc='';
       setDlgErr(msg); /* persist so the box survives reload (stored outside convo) */
       turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
-      turn.innerHTML=errboxHTML(msg); attachRetry(turn, btn);
+      /* Preserve whatever the turn already rendered (tool calls + partial text): a mid-stream
+         backend error (e.g. 429 between tool steps) must not wipe completed work. Re-render the
+         accumulated content cleanly, then append the error box below it. If nothing was rendered
+         yet (still "thinking"), just show the error box. */
+      if(thinkingShown){ turn.innerHTML=errboxHTML(msg); }
+      else { paintTurn(turn, acc, false); turn.insertAdjacentHTML('beforeend', errboxHTML(msg)); }
+      attachRetry(turn, btn);
       finishGen(btn); maybeScroll();
     }
     /* Incremental render: completed tool blocks + the text before them are committed ONCE
@@ -809,8 +815,12 @@
          saved silently as a complete answer — that was the "тихий пустой ход". Show the
          reasoning (if any) + a recoverable notice, keep the turn out of convo (noconv) so
          history stays clean and a retry regenerates from the user message. */
+      /* A turn that produced tool calls (or an Ask widget) did real work — it is NOT an empty
+         turn even when the model added no trailing prose. Only a turn with no answer text AND
+         no tool work is the "тихий пустой ход" that gets the recoverable notice. */
+      var hasWork=/<details type="(tool_calls|ask)"/.test(acc);
       var ans=acc.replace(/<details[\s\S]*?<\/details>/g,'').trim();
-      if(!ans){
+      if(!ans && !hasWork){
         paintTurn(turn, acc, false); /* renders the reasoning block if present, else empty */
         turn.classList.add('noconv');
         turn.insertAdjacentHTML('beforeend',
@@ -866,9 +876,13 @@
       return pump();
     }).catch(function(err){
       if(err && err.name==='AbortError'){ return; } /* stop button owns the UI */
+      if(errored){ finishGen(btn); maybeScroll(); return; } /* showError already painted the box — don't wipe it */
       liveAcc='';
       turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
-      turn.innerHTML=errboxHTML(); attachRetry(turn, btn);
+      /* Same as showError: keep any rendered tool calls / partial text, append the box below. */
+      if(thinkingShown){ turn.innerHTML=errboxHTML(); }
+      else { paintTurn(turn, acc, false); turn.insertAdjacentHTML('beforeend', errboxHTML()); }
+      attachRetry(turn, btn);
       finishGen(btn); maybeScroll();
     }).then(function(){ if(currentAbort===ac) currentAbort=null; });
   }
