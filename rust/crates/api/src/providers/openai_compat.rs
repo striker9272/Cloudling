@@ -1418,17 +1418,41 @@ pub fn flatten_tool_result_content(content: &[ToolResultContentBlock]) -> String
     result
 }
 
-/// Recursively ensure every object-type node in a JSON Schema has
-/// `"properties"` (at least `{}`) and `"additionalProperties": false`.
-/// The `OpenAI` `/responses` endpoint validates schemas strictly and rejects
-/// objects that omit these fields; `/chat/completions` is lenient but also
-/// accepts them, so we normalise unconditionally.
+/// Recursively rewrite a JSON Schema into the portable OpenAPI subset accepted
+/// by every OpenAI-compatible backend, including the strictest ones.
+///
+/// We always call `/chat/completions` (never `/responses`), so the schema only
+/// has to satisfy that endpoint across providers. Google AI Studio / Gemini is
+/// the strictest: it requires a single `type` per node and rejects
+/// `additionalProperties`. Applied unconditionally so any backend gets a schema
+/// it can parse:
+/// - union `"type": [...]` arrays collapse to a single scalar type (first
+///   non-`"null"` member) — strict providers require exactly one type;
+/// - `additionalProperties` is removed — Gemini rejects it and the lenient
+///   `/chat/completions` endpoint we use does not need it;
+/// - object nodes still get `"properties"` (at least `{}`) — some OpenAI models
+///   (gpt-5.x) reject object schemas that omit it.
 fn normalize_object_schema(schema: &mut Value) {
     if let Some(obj) = schema.as_object_mut() {
+        // Collapse a union `type` array (e.g. ["string","boolean","number"])
+        // into a single scalar type. Prefer the first non-"null" member.
+        let collapsed_type = match obj.get("type") {
+            Some(Value::Array(types)) => types
+                .iter()
+                .find_map(|t| t.as_str().filter(|s| *s != "null"))
+                .or_else(|| types.iter().find_map(Value::as_str))
+                .map(str::to_string),
+            _ => None,
+        };
+        if let Some(t) = collapsed_type {
+            obj.insert("type".to_string(), Value::String(t));
+        }
+        // Strip `additionalProperties`: strict providers (Gemini) reject it and
+        // the lenient `/chat/completions` endpoint we always use does not need it.
+        obj.remove("additionalProperties");
+        // Object nodes must carry `properties` (gpt-5.x rejects objects without).
         if obj.get("type").and_then(Value::as_str) == Some("object") {
             obj.entry("properties").or_insert_with(|| json!({}));
-            obj.entry("additionalProperties")
-                .or_insert(Value::Bool(false));
         }
         // Recurse into properties values
         if let Some(props) = obj.get_mut("properties") {
@@ -2096,19 +2120,22 @@ mod tests {
     }
 
     #[test]
-    fn tool_schema_object_gets_strict_fields_for_responses_endpoint() {
-        // OpenAI /responses endpoint rejects object schemas missing
-        // "properties" and "additionalProperties". Verify normalize_object_schema
-        // fills them in so the request shape is strict-validator-safe.
+    fn tool_schema_normalised_to_portable_subset() {
+        // Schemas must be accepted by every OpenAI-compatible backend, including
+        // strict ones (Google AI Studio / Gemini): single `type` per node, no
+        // `additionalProperties`, and objects always carry `properties`.
         use super::normalize_object_schema;
 
-        // Bare object — no properties at all
+        // Bare object — gets "properties", and no additionalProperties is added.
         let mut schema = json!({"type": "object"});
         normalize_object_schema(&mut schema);
         assert_eq!(schema["properties"], json!({}));
-        assert_eq!(schema["additionalProperties"], json!(false));
+        assert!(
+            schema.get("additionalProperties").is_none(),
+            "additionalProperties must not be injected"
+        );
 
-        // Nested object inside properties
+        // Nested object inside properties — recursion, still no additionalProperties.
         let mut schema2 = json!({
             "type": "object",
             "properties": {
@@ -2116,24 +2143,39 @@ mod tests {
             }
         });
         normalize_object_schema(&mut schema2);
-        assert_eq!(schema2["additionalProperties"], json!(false));
-        assert_eq!(
-            schema2["properties"]["location"]["additionalProperties"],
-            json!(false)
+        assert!(schema2.get("additionalProperties").is_none());
+        assert!(
+            schema2["properties"]["location"]
+                .get("additionalProperties")
+                .is_none()
         );
 
-        // Existing properties/additionalProperties should not be overwritten
+        // Existing additionalProperties is stripped (Gemini rejects it).
         let mut schema3 = json!({
             "type": "object",
             "properties": {"x": {"type": "string"}},
-            "additionalProperties": true
+            "additionalProperties": false
         });
         normalize_object_schema(&mut schema3);
-        assert_eq!(
-            schema3["additionalProperties"],
-            json!(true),
-            "must not overwrite existing"
+        assert!(
+            schema3.get("additionalProperties").is_none(),
+            "existing additionalProperties must be removed"
         );
+
+        // Union `type` array collapses to a single scalar type (first non-null).
+        let mut schema4 = json!({
+            "type": "object",
+            "properties": {
+                "value": {"type": ["string", "boolean", "number"]}
+            }
+        });
+        normalize_object_schema(&mut schema4);
+        assert_eq!(schema4["properties"]["value"]["type"], json!("string"));
+
+        // Nullable-style union prefers the non-null member.
+        let mut schema5 = json!({"type": ["null", "number"]});
+        normalize_object_schema(&mut schema5);
+        assert_eq!(schema5["type"], json!("number"));
     }
 
     #[test]
