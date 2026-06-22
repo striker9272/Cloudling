@@ -794,7 +794,9 @@ struct ChatMessage {
     role: String,
     #[serde(default)]
     content: Option<String>,
-    #[serde(default)]
+    /// Reasoning text. Accept the OpenRouter/OpenAI `reasoning` field name as well as
+    /// `reasoning_content` (GLM/DeepSeek) — same as the streaming `ChunkDelta`.
+    #[serde(default, alias = "reasoning")]
     reasoning_content: Option<String>,
     #[serde(default)]
     tool_calls: Vec<ResponseToolCall>,
@@ -867,8 +869,10 @@ struct ChunkChoice {
 struct ChunkDelta {
     #[serde(default)]
     content: Option<String>,
-    /// Some providers (GLM, DeepSeek) emit reasoning in `reasoning_content`
-    #[serde(default)]
+    /// Reasoning text. Providers disagree on the field name: GLM/DeepSeek stream it in
+    /// `reasoning_content`; OpenRouter (and OpenAI-style aggregators) stream it in `reasoning`.
+    /// Accept both so the reasoning block renders regardless of backend.
+    #[serde(default, alias = "reasoning")]
     reasoning_content: Option<String>,
     #[serde(default)]
     thinking: Option<ThinkingDelta>,
