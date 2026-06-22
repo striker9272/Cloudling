@@ -930,18 +930,40 @@
   }
 
   function stopGen(btn){ if(currentAbort){ currentAbort.abort(); currentAbort=null; } clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
-    var th=thread.querySelector('.thinking'); if(th){ th.closest('.turn').remove(); liveAcc=''; return; }
-    var turn=thread.querySelector('.turn.a:last-child'); if(!turn) return;
-    /* the partial answer stays visible in the thread, so it must enter the history
-       too — otherwise the turn↔convo mapping drifts and later regen/edit misalign */
+    /* Find the in-flight assistant turn whether it already rendered answer text or is still
+       showing only the "thinking" spinner / a reasoning block (slow first token, e.g. a
+       reasoning model over a remote backend — the spinner can linger for a while). */
+    var th=thread.querySelector('.thinking');
+    var turn=th ? th.closest('.turn') : thread.querySelector('.turn.a:last-child');
+    if(!turn){ liveAcc=''; refreshTaskbar(); return; }
+    /* freeze the live caret + any running tool ripple regardless of what was produced */
+    var c=turn.querySelector('.caret'); if(c) c.remove();
+    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head){ var tag=head.querySelector('.tag'); var tname=tag?tag.textContent:'Инструмент'; head.innerHTML='<span class="tag">'+esc(tname)+'</span> · остановлено'; } }
+    /* Answer text = visible .md boxes only (reasoning/tool blocks live in .tool, never .md). */
+    var ans=Array.prototype.map.call(turn.querySelectorAll('.md'), function(b){ return b.textContent; }).join('').trim();
+    if(!ans){
+      /* Stopped before any answer text (bare spinner or reasoning-only): keep the turn OUT of
+         convo (noconv) so the turn↔convo mapping stays 1:1, drop the spinner, and offer a retry —
+         the same recoverable pattern finalize() uses for an empty turn. Previously this branch
+         deleted the whole turn, so the user was left with no way to regenerate. */
+      liveAcc=''; turn.classList.add('noconv');
+      var sp=turn.querySelector('.thinking'); if(sp) sp.remove();
+      var hadReason=!!turn.querySelector('.tool.reason, [type="reasoning"]');
+      if(!turn.querySelector('.errbox')){
+        turn.insertAdjacentHTML('beforeend',
+          '<div class="errbox"><div class="ehead">'+IC.warn+'Остановлено</div>'+
+          '<div class="emsg">Ход остановлен до ответа'+(hadReason?' (было только рассуждение)':'')+'. Попробуйте перегенерировать.</div>'+
+          '<button class="retry" type="button">'+IC.regen+'Перегенерировать</button></div>');
+        attachRetry(turn, btn);
+      }
+      refreshTaskbar(); return;
+    }
+    /* There is answer text: it stays visible, so it must enter history too — otherwise the
+       turn↔convo mapping drifts and later regen/edit misalign. */
     if(liveAcc.replace(/\s/g,'')){ convo.push({role:'assistant', content:liveAcc}); saveActive(); }
     liveAcc='';
-    var c=turn.querySelector('.caret'); if(c) c.remove();
-    /* stopped mid tool-call: freeze the running ripple into a neutral head */
-    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head){ var tag=head.querySelector('.tag'); var tname=tag?tag.textContent:'Инструмент'; head.innerHTML='<span class="tag">'+esc(tname)+'</span> · остановлено'; } }
     if(!turn.querySelector('.stopped')){ var s=document.createElement('div'); s.className='stopped'; s.innerHTML='⏹ Остановлено'; turn.appendChild(s); }
-    var mdbox=turn.querySelector('.md');
-    if(mdbox && mdbox.textContent.trim() && !turn.querySelector('.row-acts')){ turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>'); }
+    if(!turn.querySelector('.row-acts')){ turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>'); }
     refreshTaskbar();
   }
 
