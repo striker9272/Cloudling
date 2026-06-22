@@ -23,6 +23,20 @@ impl ProviderClient {
         anthropic_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
         let resolved_model = providers::resolve_model_alias(model);
+        // An explicitly configured `OPENAI_BASE_URL` pins clab to a specific
+        // OpenAI-compatible endpoint (a gateway like OpenRouter, or a local
+        // server). That explicit choice must win over model-name auto-detection:
+        // otherwise a family prefix (`qwen/*` → DashScope, `grok*` → xAI,
+        // `claude*` → Anthropic) hijacks the request away from the configured
+        // endpoint and demands a different provider's credentials. The endpoint
+        // speaks the OpenAI wire format by construction (that is what serve and
+        // OpenAI-compatible gateways expose), so route every model through the
+        // OpenAI-compat client pointed at it.
+        if openai_base_url_is_explicitly_set() {
+            return Ok(Self::OpenAi(OpenAiCompatClient::from_env(
+                OpenAiCompatConfig::openai(),
+            )?));
+        }
         match providers::detect_provider_kind(&resolved_model) {
             ProviderKind::Anthropic => Ok(Self::Anthropic(match anthropic_auth {
                 Some(auth) => AnthropicClient::from_auth(auth),
@@ -142,6 +156,15 @@ pub fn read_xai_base_url() -> String {
     openai_compat::read_base_url(OpenAiCompatConfig::xai())
 }
 
+/// True when the operator has explicitly set a non-empty `OPENAI_BASE_URL`,
+/// signalling an intentional OpenAI-compatible endpoint that must override
+/// model-name provider auto-detection (see `from_model_with_anthropic_auth`).
+fn openai_base_url_is_explicitly_set() -> bool {
+    std::env::var("OPENAI_BASE_URL")
+        .map(|value| !value.trim().is_empty())
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, OnceLock};
@@ -215,6 +238,8 @@ mod tests {
         let _lock = env_lock();
         let _dashscope = EnvVarGuard::set("DASHSCOPE_API_KEY", Some("test-dashscope-key"));
         let _openai = EnvVarGuard::set("OPENAI_API_KEY", None);
+        // No explicit OpenAI endpoint → model-family auto-detection applies.
+        let _base = EnvVarGuard::set("OPENAI_BASE_URL", None);
 
         let client = ProviderClient::from_model("qwen-plus");
 
@@ -235,6 +260,32 @@ mod tests {
                 );
             }
             other => panic!("Expected ProviderClient::OpenAi for qwen-plus, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn explicit_openai_base_url_overrides_model_family_routing() {
+        // A gateway (e.g. OpenRouter) serving `qwen/*`, `grok*`, or `claude*`
+        // under the OpenAI wire format must be reached via the configured
+        // OPENAI_BASE_URL — not hijacked to DashScope/xAI/Anthropic by the model
+        // name. This is the "connect any OpenAI-compatible backend" guarantee.
+        let _lock = env_lock();
+        let _base = EnvVarGuard::set("OPENAI_BASE_URL", Some("http://127.0.0.1:9099/v1"));
+        let _key = EnvVarGuard::set("OPENAI_API_KEY", Some("test-openai-key"));
+        // DashScope creds present but must be ignored in favour of the explicit base.
+        let _dashscope = EnvVarGuard::set("DASHSCOPE_API_KEY", Some("test-dashscope-key"));
+
+        for model in ["qwen/qwen3-next-80b-a3b-instruct", "grok-3", "claude-sonnet-4-6"] {
+            let client = ProviderClient::from_model(model)
+                .unwrap_or_else(|e| panic!("{model} should build against explicit base, got: {e:?}"));
+            match client {
+                ProviderClient::OpenAi(openai_client) => assert_eq!(
+                    openai_client.base_url(),
+                    "http://127.0.0.1:9099/v1",
+                    "{model} must route to the explicit OPENAI_BASE_URL"
+                ),
+                other => panic!("Expected ProviderClient::OpenAi for {model}, got: {other:?}"),
+            }
         }
     }
 
