@@ -131,6 +131,72 @@ jobs:
           dpkg-deb --contents "dist/${deb}"
           ls -la dist
 
+      # macOS desktop artifact: a .dmg holding a "Claw Lab.app" bundle so it
+      # installs by drag-to-Applications and launches the tray role on a double
+      # click (the .deb's macOS counterpart). The app is a menu-bar agent
+      # (LSUIElement -> no Dock icon). Its executable is a tiny launcher that runs
+      # `clab tray`, because a bundle launches its executable with no arguments and
+      # bare `clab` would start the REPL. Unsigned: Gatekeeper warns on download
+      # until code signing (BACKLOG), and this artifact is NOT attached to the
+      # public release until verified on real hardware (publish: false).
+      - name: Build .app and .dmg (macOS desktop)
+        if: matrix.target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Version: from the tag on a release; otherwise the workspace version.
+          # CFBundleShortVersionString must be numeric, so no -dev suffix here.
+          if [[ "${GITHUB_REF:-}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          fi
+          app="dist/Claw Lab.app"
+          mkdir -p "$app/Contents/MacOS"
+          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$app/Contents/MacOS/clab"
+          # Launcher executable: the bundle runs this with no args, so it execs the
+          # tray role explicitly (bare `clab` would open the REPL).
+          {
+            echo '#!/bin/sh'
+            echo 'exec "$(dirname "$0")/clab" tray'
+          } > "$app/Contents/MacOS/ClawLab"
+          chmod 755 "$app/Contents/MacOS/ClawLab"
+          # Info.plist built line-by-line (avoids heredoc/whitespace pitfalls).
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0">'
+            echo '<dict>'
+            echo '	<key>CFBundleName</key>'
+            echo '	<string>Claw Lab</string>'
+            echo '	<key>CFBundleDisplayName</key>'
+            echo '	<string>Claw Lab</string>'
+            echo '	<key>CFBundleIdentifier</key>'
+            echo '	<string>lab.claw.clab</string>'
+            echo '	<key>CFBundleExecutable</key>'
+            echo '	<string>ClawLab</string>'
+            echo '	<key>CFBundlePackageType</key>'
+            echo '	<string>APPL</string>'
+            echo '	<key>CFBundleVersion</key>'
+            echo "	<string>${version}</string>"
+            echo '	<key>CFBundleShortVersionString</key>'
+            echo "	<string>${version}</string>"
+            echo '	<key>LSUIElement</key>'
+            echo '	<true/>'
+            echo '	<key>LSMinimumSystemVersion</key>'
+            echo '	<string>11.0</string>'
+            echo '</dict>'
+            echo '</plist>'
+          } > "$app/Contents/Info.plist"
+          # Stage the .dmg with the classic drag-to-Applications layout.
+          dmgroot="$(mktemp -d)"
+          cp -R "$app" "$dmgroot/"
+          ln -s /Applications "$dmgroot/Applications"
+          dmg="${{ matrix.artifact_name }}.dmg"
+          hdiutil create -volname "Claw Lab" -srcfolder "$dmgroot" -ov -format UDZO "dist/${dmg}"
+          ( cd dist && shasum -a 256 "${dmg}" > "${dmg}.sha256" )
+          ls -la dist
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v6
         with:
@@ -147,6 +213,15 @@ jobs:
           path: |
             rust/dist/*.deb
             rust/dist/*.deb.sha256
+
+      - name: Upload .dmg workflow artifact
+        if: matrix.target == 'aarch64-apple-darwin'
+        uses: actions/upload-artifact@v6
+        with:
+          name: claw-macos-dmg
+          path: |
+            rust/dist/*.dmg
+            rust/dist/*.dmg.sha256
 
       - name: Upload release asset
         if: matrix.publish && startsWith(github.ref, 'refs/tags/')
