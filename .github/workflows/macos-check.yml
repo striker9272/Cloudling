@@ -1,0 +1,53 @@
+name: macOS check
+
+# Phase 0 of the macOS port: confirm the Rust workspace compiles and the `clab`
+# binary runs on Apple Silicon, before investing in the desktop tray / packaging.
+#
+# Dispatch-only on purpose. It is NOT a merge gate: mirroring the project policy
+# that the build is validated out-of-band (the pinned-toolchain Rust CI gates on
+# docs, not on `cargo build`), this runs only when triggered. `macos-latest`
+# runners are Apple Silicon (M-series), so the host target is aarch64-apple-darwin
+# and no cross toolchain is needed. The desktop crate (`clab-desktop`) has its
+# Windows/Linux tray deps gated by target, so on macOS it builds the stub only.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-check-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: rust
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: macOS build + smoke (aarch64)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      # Compile every crate plus their test/bench/example targets. This is the
+      # real signal we want from Phase 0 — does the whole workspace build on
+      # macOS — without running the suite (some pre-existing tests are red for
+      # environmental reasons unrelated to the port: no namespaces, version pins).
+      - name: Compile workspace (incl. test targets)
+        run: cargo build --workspace --all-targets
+
+      # Mirror what the release pipeline will build for the macOS asset.
+      - name: Build release binary
+        run: cargo build --release -p clab-cli
+
+      # Smoke: the freshly built binary links and runs on macOS.
+      - name: Smoke - binary runs
+        run: ./target/release/clab --version
