@@ -29,9 +29,14 @@ and deploy tooling are Claw Lab's.
   Lives in the `clab-desktop` crate, gated by `cfg`: **Windows** uses win32 FFI (`tray-icon`,
   hidden-console relaunch, `HKCU\...\Run`); **Linux** uses `ksni` — a pure-Rust StatusNotifierItem
   tray over D-Bus (no gtk, no `unsafe`), `~/.config/autostart`, `xdg-open` — so the Linux build
-  stays a static musl binary. The Linux desktop artifact is a `.deb` (double-click install via the
+  stays a static musl binary; **macOS** uses `tray-icon` again (Cocoa via `objc2`, not gtk) driven by a
+  minimal `NSApplication` run loop on the main thread (no `unsafe` — the AppKit methods are safe),
+  `~/Library/LaunchAgents`, `open`. The Linux desktop artifact is a `.deb` (double-click install via the
   graphical App Center, then "Claw Lab" in the apps menu; built in `release.yml`); the in-repo
-  `assets/` holds its `.desktop` entry and `claw-lab.svg` icon. See `docs/windows-install-release.md`.
+  `assets/` holds its `.desktop` entry and `claw-lab.svg` icon. The macOS desktop artifact is a `.dmg`
+  holding a `Claw Lab.app` (a menu-bar agent via `LSUIElement`, drag-to-Applications). macOS is **new and
+  not yet verified on hardware**, so its binary/`.dmg` ship as pre-release artifacts only (see Install &
+  release). See `docs/windows-install-release.md` and `docs/macos.md`.
 
 ## Build, verify, test
 
@@ -75,12 +80,16 @@ existing service, use `rust/scripts/deploy-openai-server.sh`. To remove the serv
 
 Releases: pushing a tag `v*` triggers `.github/workflows/release.yml`, which builds and publishes
 assets named `claw-<os>-<arch>` (+ `.sha256`) — asset names keep the `claw-` prefix though the
-binary is `clab`. The matrix builds **Linux and Windows only** (`claw-linux-x64` + a `.deb` desktop
-package, `claw-windows-x64.exe`); **macOS is deliberately not built** — there is no macOS port yet
-(the `clab-desktop` tray is Windows/Linux only), so building it would ship an untested artifact. macOS
-stays build-from-source / best-effort until it becomes its own stage. `install.sh --prebuilt` consumes
-these assets (and reports "build from source" on macOS). Keep the tag in sync with the workspace
-version in `rust/Cargo.toml`.
+binary is `clab`. The matrix builds **Linux, Windows, and macOS (Apple Silicon)**: `claw-linux-x64`
++ a `.deb` desktop package, `claw-windows-x64.exe`, and `claw-macos-arm64` + a `.dmg`/`.app` desktop
+bundle. macOS is **artifact-only** for now (matrix `publish: false`): the macOS jobs build and upload
+workflow artifacts but the "Upload release asset" step is gated on `matrix.publish`, so macOS is **not
+attached to the public release** until the new port is smoke-tested on real hardware — then flip
+`publish: true` for `macos-arm64`. (Intel macOS / a universal binary remain build-from-source.)
+`install.sh --prebuilt` consumes the published assets (and reports "build from source" on macOS until
+its asset is published). A separate dispatch-only `.github/workflows/macos-check.yml` compiles the
+workspace + runs a `clab --version` smoke on macOS without publishing — the Phase-0 de-risk check.
+Keep the tag in sync with the workspace version in `rust/Cargo.toml`.
 
 ## Deploy
 
@@ -119,7 +128,9 @@ deploy interactively.
 - **Unsafe code:** the workspace sets `unsafe_code = "forbid"` (from upstream) — keep it. The one
   exception is `clab-desktop`, which opts out via its own crate-level `[lints]` so its **Windows**
   FFI (tray/console/registry) may use `unsafe`, each block documented with `// SAFETY:`. The
-  crate's **Linux** path (the `ksni` tray) uses no `unsafe`. Do not introduce `unsafe` anywhere
+  crate's **Linux** path (the `ksni` tray) and **macOS** path (the `objc2`/AppKit tray) use no
+  `unsafe` — the AppKit methods used (`NSApplication::sharedApplication`/`setActivationPolicy`/`run`)
+  are safe in `objc2-app-kit`. Do not introduce `unsafe` anywhere
   else; new unavoidable FFI belongs in `clab-desktop` (or a similarly-quarantined crate).
 - **CI:** GitHub Actions does **not** gate on the build. `.github/workflows/rust-ci.yml`
   (push/PR to `main`) runs only the docs source-of-truth job — two Python checks

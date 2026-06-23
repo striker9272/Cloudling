@@ -160,7 +160,7 @@ scripts/deploy-openai-server.sh \
 
 - **`rust/`** — Rust-воркспейс и бинарник `clab` (CLI + сервер); каноническая реализация
 - **`USAGE.md`** — сборка, авторизация, CLI, сессии, провайдеры
-- **`docs/`** — Windows, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI
+- **`docs/`** — Windows, macOS, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI
 - **`src/` + `tests/`** — вспомогательный референс/аудит-воркспейс; не основная среда выполнения
 
 ### Благодарности
@@ -208,6 +208,7 @@ Claw Lab then serves `/v1/chat/completions` with streaming, which Open WebUI (or
 - **Built-in web UI (optional)** — with the `--ui` flag the same binary serves a chat page on the same port: streaming, collapsible tool calls, markdown, image attachments, and server-side storage of dialogs/presets/settings. Headless by default — the UI never gets in the API's way. See [`docs/web-ui.md`](./docs/web-ui.md).
 - **Native Windows desktop app (optional)** — the same `clab.exe` can run as a system-tray app: double-click → background serve+UI with no console window; tray menu to open it in the browser, toggle start-at-login, or uninstall; no Docker or WSL. In a terminal `clab` stays a normal CLI/REPL. See [`docs/windows-install-release.md`](./docs/windows-install-release.md).
 - **Linux desktop app (optional)** — a `.deb` package: double-click → graphical installer (App Center / gdebi, no terminal) → "Claw Lab" appears in the apps menu → click to launch: background serve+UI and a tray icon (open in browser / start at login / uninstall). The binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching. Uninstall via the App Center or `apt remove`; `clab uninstall` (or the "Uninstall" menu item) removes user data. (The tray icon shows on KDE and on GNOME with the AppIndicator extension that Ubuntu ships by default.)
+- **macOS desktop app (experimental)** — the same `clab` runs as a menu-bar app via a `.dmg`/`.app` bundle (drag to Applications → menu-bar icon: open in browser / start at login / uninstall), with a launchd installer for the headless server. Built on Apple Silicon by CI but **not yet verified on real hardware**, so the macOS binary/`.dmg` are published as pre-release artifacts only. See [`docs/macos.md`](./docs/macos.md).
 
 ### Quick start
 
@@ -313,7 +314,7 @@ To remove the service, use the counterpart command `uninstall.sh` (removes the u
 
 - **`rust/`** — the Rust workspace and the `clab` CLI + server binary (the canonical implementation)
 - **`USAGE.md`** — build, auth, CLI, sessions, providers
-- **`docs/`** — Windows install, local OpenAI-compatible providers, file-context, containers, the built-in web UI
+- **`docs/`** — Windows install, macOS install, local OpenAI-compatible providers, file-context, containers, the built-in web UI
 - **`src/` + `tests/`** — companion reference/audit workspace; not the primary runtime
 
 ### Credits

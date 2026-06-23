@@ -61,7 +61,7 @@ Install:
   --backend-model MODEL       backend/adaptor model id sent to the provider
   --served-model-id MODEL     model id exposed to clients. Default: clab-agent
   --bind ADDR                 listen address. Default: 127.0.0.1:4097
-  --permission-mode MODE      read-only | danger-full-access. Default: read-only
+  --permission-mode MODE      read-only | workspace-write | danger-full-access. Default: read-only
   --api-key VALUE             OPENAI_API_KEY for the backend (optional)
   --websearch-url URL         CLAWD_WEB_SEARCH_BASE_URL (optional)
   --ui                        enable the built-in web UI; configure engine in browser
