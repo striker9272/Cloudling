@@ -24,21 +24,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # macOS is intentionally NOT built: there is no macOS port (the
-          # clab-desktop tray is Windows/Linux only; macOS falls back to the
-          # "not available" stub). Building it every release wastes CI time and
-          # ships an untested artifact implying support we don't provide. Add a
-          # macos-arm64 entry here if/when macOS becomes its own stage.
+          # Linux and Windows are published release assets. macOS (Apple Silicon)
+          # is now built too, but as a workflow *artifact only* (`publish: false`):
+          # the tray/packaging are not yet verified on real hardware, so we do not
+          # attach a macOS asset to the public release until a live smoke test
+          # passes. Flip `publish: true` for macos-arm64 once that smoke is done.
           - name: linux-x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             bin: clab
             artifact_name: claw-linux-x64
+            publish: true
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
             bin: clab.exe
             artifact_name: claw-windows-x64.exe
+            publish: true
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: clab
+            artifact_name: claw-macos-arm64
+            publish: false
     defaults:
       run:
         working-directory: rust
@@ -141,7 +149,7 @@ jobs:
             rust/dist/*.deb.sha256
 
       - name: Upload release asset
-        if: startsWith(github.ref, 'refs/tags/')
+        if: matrix.publish && startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v3
         with:
           files: |
