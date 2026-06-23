@@ -29,6 +29,27 @@ windows-sys = { version = "0.61", features = [
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = { version = "0.3", features = ["blocking"] }
 
+# macOS-only desktop integration deps. On macOS `tray-icon` talks to Cocoa via
+# `objc2` — it does NOT pull gtk (the Linux concern that led us to `ksni`), so we
+# reuse it here and keep the macOS tray close to the Windows one. `tray-icon`
+# itself needs an event loop running on the main thread on macOS, which it does
+# not provide; we add `objc2`/`objc2-app-kit` — the very crates `tray-icon`
+# already depends on for macOS — to bootstrap a minimal `NSApplication` run loop.
+# Reusing `tray-icon`'s own deps means no new major dependency tree; versions are
+# pinned to match `tray-icon` 0.24 so Cargo unifies them. The `NSApplication`
+# feature also brings `NSApplicationActivationPolicy` (used to hide the Dock icon).
+[target.'cfg(target_os = "macos")'.dependencies]
+tray-icon = "0.24"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSApplication",
+    "NSResponder",
+    # `NSApplicationActivationPolicy` (used to hide the Dock icon) is generated
+    # under the NSRunningApplication header, so it needs this feature too.
+    "NSRunningApplication",
+] }
+
 # This crate is the quarantine for the unavoidable Windows FFI `unsafe` (tray,
 # console hiding, registry). The rest of the workspace keeps the upstream
 # `unsafe_code = "forbid"`; we deliberately do NOT inherit the workspace lints

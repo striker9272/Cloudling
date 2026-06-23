@@ -1,4 +1,4 @@
-//! Desktop integration for Claw Lab (Windows + Linux).
+//! Desktop integration for Claw Lab (Windows, Linux, macOS).
 //!
 //! This is the quarantine crate for the small amount of unavoidable Windows FFI
 //! `unsafe` needed by the Windows tray icon, console-window handling, and
@@ -19,13 +19,16 @@
 //! - **Linux** — `ksni` (pure-Rust StatusNotifierItem over D-Bus, no gtk): SNI
 //!   tray, `~/.config/autostart` autostart, `xdg-open` for the browser. Keeps
 //!   the static musl binary dependency-free.
-//! - **Other (macOS, …)** — the public API exists but returns a clear
+//! - **macOS** — `tray-icon` again (Cocoa/objc2, not gtk), driven by a minimal
+//!   `NSApplication` run loop on the main thread; `~/Library/LaunchAgents`
+//!   autostart, `open` for the browser. The bootstrap uses no `unsafe`.
+//! - **Other (FreeBSD, …)** — the public API exists but returns a clear
 //!   "not available on this platform" error, so the workspace still builds.
 
 /// Run the desktop tray: start `serve` in the background and show the tray icon
 /// + menu. `bind` builds the browser URL for the "Open" item. Implemented on
 /// Windows and Linux; a no-op error elsewhere.
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::Error>>
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,
@@ -35,7 +38,7 @@ where
 
 /// Remove the autostart entry and (after confirmation, unless `assume_yes`) each
 /// of the per-user `data_dirs`. Implemented on Windows and Linux.
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn run_uninstall(
     _data_dirs: Vec<std::path::PathBuf>,
     _assume_yes: bool,
@@ -45,7 +48,7 @@ pub fn run_uninstall(
 
 /// Whether the executable was started by a bare double-click (its own fresh
 /// console) rather than from an existing terminal. Always false off Windows.
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn launched_by_double_click() -> bool {
     false
 }
@@ -56,15 +59,22 @@ pub use imp::{launched_by_double_click, run_tray, run_uninstall};
 #[cfg(target_os = "linux")]
 pub use linux_imp::{launched_by_double_click, run_tray, run_uninstall};
 
-/// Procedurally rendered Claw Lab tray icon, shared by the Windows and Linux
-/// trays so the mark is identical and no asset file needs shipping/embedding.
-#[cfg(any(windows, target_os = "linux"))]
+#[cfg(target_os = "macos")]
+pub use macos_imp::{launched_by_double_click, run_tray, run_uninstall};
+
+/// Procedurally rendered Claw Lab tray icon, shared by the Windows, Linux, and
+/// macOS trays so the mark is identical and no asset file needs shipping/embedding.
+/// Windows/Linux use the full coloured tile (`cloud_icon_rgba`); macOS uses a
+/// monochrome silhouette (`cloud_template_rgba`) it renders as an NSImage template
+/// so the menu bar tints it for light/dark themes.
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 mod icon {
     /// A dark rounded tile (the UI background `--bg` #0d0d0f) with the in-app
     /// cloud mark on top (union of four circles on a 40x28 viewBox, color
     /// `--load` #e9ebef), anti-aliased via 4x4 supersampling onto a 32x32 canvas.
     /// The dark tile keeps the light cloud readable on any panel/taskbar theme.
     /// Returns `(width, height, rgba)` with 8-bit RGBA pixels.
+    #[cfg(any(windows, target_os = "linux"))]
     pub(crate) fn cloud_icon_rgba() -> (u32, u32, Vec<u8>) {
         const SIZE: usize = 32;
         const SS: usize = 4; // supersamples per axis
@@ -128,6 +138,7 @@ mod icon {
 
     /// Whether point (x, y) lies inside a `size`x`size` square with rounded
     /// corners of the given `radius` (rounded-rectangle signed-distance test).
+    #[cfg(any(windows, target_os = "linux"))]
     fn in_rounded_square(x: f32, y: f32, size: f32, radius: f32) -> bool {
         if x < 0.0 || x > size || y < 0.0 || y > size {
             return false;
@@ -136,6 +147,56 @@ mod icon {
         let dx = (radius - x).max(x - (size - radius)).max(0.0);
         let dy = (radius - y).max(y - (size - radius)).max(0.0);
         dx * dx + dy * dy <= radius * radius
+    }
+
+    /// The cloud mark as a macOS *template* image: just the cloud silhouette in
+    /// the alpha channel (RGB left black), so AppKit tints it to match the menu
+    /// bar (dark on a light bar, light on a dark bar) when set as a template.
+    /// No dark tile — a template wants a clean mask, not a coloured tile. Same
+    /// circle geometry as `cloud_icon_rgba`, anti-aliased via 4x4 supersampling.
+    #[cfg(target_os = "macos")]
+    pub(crate) fn cloud_template_rgba() -> (u32, u32, Vec<u8>) {
+        const SIZE: usize = 32;
+        const SS: usize = 4; // supersamples per axis
+        const N: u32 = (SS * SS) as u32;
+
+        let circles = [
+            (20.0_f32, 14.0_f32, 6.0_f32),
+            (14.0, 15.0, 5.0),
+            (26.0, 15.0, 5.0),
+            (20.0, 11.0, 5.0),
+        ];
+        let (vb_w, vb_h) = (40.0_f32, 28.0_f32);
+        // Slightly larger than the tiled icon since there is no surrounding tile.
+        let scale = (SIZE as f32 * 0.92) / vb_w;
+        let off_x = (SIZE as f32 - vb_w * scale) / 2.0;
+        let off_y = (SIZE as f32 - vb_h * scale) / 2.0;
+
+        let mut rgba = vec![0u8; SIZE * SIZE * 4];
+        for py in 0..SIZE {
+            for px in 0..SIZE {
+                let mut cloud_hits = 0u32;
+                for sy in 0..SS {
+                    for sx in 0..SS {
+                        let fx = px as f32 + (sx as f32 + 0.5) / SS as f32;
+                        let fy = py as f32 + (sy as f32 + 0.5) / SS as f32;
+                        let vx = (fx - off_x) / scale;
+                        let vy = (fy - off_y) / scale;
+                        if circles.iter().any(|&(cx, cy, r)| {
+                            let dx = vx - cx;
+                            let dy = vy - cy;
+                            dx * dx + dy * dy <= r * r
+                        }) {
+                            cloud_hits += 1;
+                        }
+                    }
+                }
+                // RGB stays black; alpha carries the anti-aliased silhouette.
+                let idx = (py * SIZE + px) * 4;
+                rgba[idx + 3] = (cloud_hits * 255 / N) as u8;
+            }
+        }
+        (SIZE as u32, SIZE as u32, rgba)
     }
 }
 
@@ -835,5 +896,320 @@ mod linux_imp {
             return false;
         }
         line.trim() == "yes"
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod macos_imp {
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use std::thread;
+    use std::time::Duration;
+
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSApplicationActivationPolicy};
+    use tray_icon::{
+        menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
+        Icon, TrayIconBuilder,
+    };
+
+    /// LaunchAgent label / plist filename. Writing
+    /// `~/Library/LaunchAgents/<LABEL>.plist` makes the desktop launch
+    /// `clab tray` at login; removing it disables autostart. Mirrors the Linux
+    /// `claw-lab.desktop` autostart entry. No hardcoded home — derived from `HOME`.
+    const AUTOSTART_LABEL: &str = "claw-lab";
+
+    pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: FnOnce() -> Result<(), String> + Send + 'static,
+    {
+        let url = browser_url(&bind);
+
+        // Single-instance: if a Claw Lab server already answers `/health` on this
+        // port, a copy is running. Just open the browser at it and exit cleanly
+        // instead of failing to bind a second one. Mirrors the Linux tray.
+        if health_ok(&bind) {
+            open_in_browser(&url);
+            return Ok(());
+        }
+
+        // The Cocoa event loop must own the main thread (a hard tray-icon
+        // requirement on macOS), so the HTTP server runs on a background thread.
+        // A server error is logged here (like the Windows path); the tray stays
+        // alive on the main thread regardless.
+        thread::Builder::new()
+            .name("clab-serve".into())
+            .spawn(move || {
+                if let Err(error) = serve() {
+                    eprintln!("clab tray: server stopped with error: {error}");
+                }
+            })?;
+
+        // Open the UI once the server is actually accepting connections rather
+        // than after a fixed delay (more robust on a cold start). If it never
+        // comes up, the poll times out and no browser opens.
+        let open_bind = bind.clone();
+        let open_url = url.clone();
+        thread::Builder::new()
+            .name("clab-open-browser".into())
+            .spawn(move || {
+                if wait_for_health(&open_bind, Duration::from_secs(15)) {
+                    open_in_browser(&open_url);
+                }
+            })?;
+
+        // Bootstrap a minimal NSApplication on the main thread. `Accessory` keeps
+        // the app out of the Dock (menu-bar only), which is what a tray app wants.
+        // `sharedApplication`, `setActivationPolicy`, and `run` are all safe in
+        // objc2-app-kit 0.3, so this branch needs no `unsafe` at all (like Linux).
+        let mtm =
+            MainThreadMarker::new().ok_or("clab tray: must run on the main thread on macOS")?;
+        let app = NSApplication::sharedApplication(mtm);
+        app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
+
+        // Build the tray menu — same items as the Windows/Linux trays.
+        let menu = Menu::new();
+        let open_item = MenuItem::new("Open Claw Lab", true, None);
+        let autostart_item = CheckMenuItem::new("Start at login", true, autostart_enabled(), None);
+        let uninstall_item = MenuItem::new("Uninstall\u{2026}", true, None);
+        let quit_item = MenuItem::new("Quit", true, None);
+        menu.append(&open_item)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&autostart_item)?;
+        menu.append(&PredefinedMenuItem::separator())?;
+        menu.append(&uninstall_item)?;
+        menu.append(&quit_item)?;
+
+        // The status item is added to the menu bar on build. Kept alive for the
+        // process lifetime (the variables below outlive `app.run()`, which never
+        // returns). The icon is set as a template so the menu bar tints it.
+        let _tray = TrayIconBuilder::new()
+            .with_tooltip("Claw Lab")
+            .with_icon(load_icon())
+            .with_icon_as_template(true)
+            .with_menu(Box::new(menu))
+            .build()?;
+
+        // On macOS tray-icon delivers menu clicks through a global handler that
+        // fires on the main thread while the Cocoa loop runs; we can't poll the
+        // event channel here because `app.run()` blocks. So we act inside the
+        // handler. It captures only `Send` data (menu ids + the URL). The
+        // autostart action flips the actual plist state (self-correcting), so the
+        // visible checkmark relies on muda's native auto-toggle — same assumption
+        // as the Windows tray ("CheckMenuItem has already toggled its own state").
+        let open_id = open_item.id().clone();
+        let autostart_id = autostart_item.id().clone();
+        let uninstall_id = uninstall_item.id().clone();
+        let quit_id = quit_item.id().clone();
+        let menu_url = url.clone();
+        MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+            if event.id == open_id {
+                open_in_browser(&menu_url);
+            } else if event.id == autostart_id {
+                set_autostart(!autostart_enabled());
+            } else if event.id == uninstall_id {
+                // Hand off to a detached `clab uninstall --yes` so this process
+                // (holding the dialogs DB) can exit and release its locks first.
+                let _ = spawn_uninstall_detached();
+                std::process::exit(0);
+            } else if event.id == quit_id {
+                std::process::exit(0);
+            }
+        }));
+
+        // Run the Cocoa event loop on the main thread. Does not return until the
+        // process exits (Quit / Uninstall call `process::exit`).
+        app.run();
+        Ok(())
+    }
+
+    pub fn run_uninstall(
+        data_dirs: Vec<PathBuf>,
+        assume_yes: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !assume_yes && !confirm_cli(&data_dirs) {
+            eprintln!("Aborted. Nothing was removed.");
+            return Ok(());
+        }
+        // Always clear the autostart entry so a removed install does not try to
+        // launch a deleted binary at next login.
+        set_autostart(false);
+        for dir in &data_dirs {
+            if dir.exists() {
+                remove_dir_all_retry(dir)?;
+                println!("Removed {}", dir.display());
+            }
+        }
+        Ok(())
+    }
+
+    /// Always false on macOS: the `.app` bundle / LaunchAgent launches `clab tray`
+    /// explicitly, so there is no double-click-vs-terminal console heuristic.
+    pub fn launched_by_double_click() -> bool {
+        false
+    }
+
+    /// Autostart LaunchAgent plist path: `~/Library/LaunchAgents/<LABEL>.plist`.
+    /// Derived from `HOME` so the build stays portable (no hardcoded home).
+    fn autostart_path() -> Option<PathBuf> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .filter(|p| !p.as_os_str().is_empty())?;
+        Some(
+            home.join("Library")
+                .join("LaunchAgents")
+                .join(format!("{AUTOSTART_LABEL}.plist")),
+        )
+    }
+
+    fn autostart_enabled() -> bool {
+        autostart_path().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn set_autostart(enable: bool) {
+        let Some(path) = autostart_path() else {
+            return;
+        };
+        if enable {
+            let exe = std::env::current_exe()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|_| "clab".to_string());
+            // Minimal LaunchAgent: run `clab tray` at login for this GUI session.
+            let plist = format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTD/PropertyList-1.0.dtd\">\n\
+                 <plist version=\"1.0\">\n\
+                 <dict>\n\
+                 \t<key>Label</key>\n\
+                 \t<string>{AUTOSTART_LABEL}</string>\n\
+                 \t<key>ProgramArguments</key>\n\
+                 \t<array>\n\
+                 \t\t<string>{exe}</string>\n\
+                 \t\t<string>tray</string>\n\
+                 \t</array>\n\
+                 \t<key>RunAtLoad</key>\n\
+                 \t<true/>\n\
+                 \t<key>LimitLoadToSessionType</key>\n\
+                 \t<string>Aqua</string>\n\
+                 </dict>\n\
+                 </plist>\n"
+            );
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&path, plist);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+
+    /// Build a `http://host:port/` URL from the bind address, rewriting wildcard
+    /// hosts to localhost so the browser can reach it. Mirrors the other trays.
+    fn browser_url(bind: &str) -> String {
+        let (host, port) = bind.rsplit_once(':').unwrap_or(("127.0.0.1", "4097"));
+        let host = match host {
+            "0.0.0.0" | "::" | "[::]" | "" => "127.0.0.1",
+            other => other,
+        };
+        format!("http://{host}:{port}/")
+    }
+
+    fn open_in_browser(url: &str) {
+        let _ = Command::new("open").arg(url).spawn();
+    }
+
+    /// The shared procedural cloud as a tray-icon `Icon`, rendered as a macOS
+    /// template silhouette (see `crate::icon::cloud_template_rgba`). Paired with
+    /// `with_icon_as_template(true)` so the menu bar tints it for light/dark.
+    fn load_icon() -> Icon {
+        let (w, h, rgba) = crate::icon::cloud_template_rgba();
+        Icon::from_rgba(rgba, w, h).expect("cloud icon dimensions are valid")
+    }
+
+    /// Launch a detached `clab uninstall --yes` that deletes the data directories
+    /// once this process releases its file locks.
+    fn spawn_uninstall_detached() -> std::io::Result<()> {
+        let exe = std::env::current_exe()?;
+        Command::new(exe).arg("uninstall").arg("--yes").spawn()?;
+        Ok(())
+    }
+
+    /// Remove a directory tree, retrying briefly while the just-exiting tray
+    /// process releases the dialogs-DB lock.
+    fn remove_dir_all_retry(dir: &Path) -> std::io::Result<()> {
+        let mut last = Ok(());
+        for _ in 0..20 {
+            match std::fs::remove_dir_all(dir) {
+                Ok(()) => return Ok(()),
+                Err(error) => last = Err(error),
+            }
+            if !dir.exists() {
+                return Ok(());
+            }
+            thread::sleep(Duration::from_millis(150));
+        }
+        last
+    }
+
+    /// Interactive CLI confirmation for `clab uninstall` (no `--yes`).
+    fn confirm_cli(dirs: &[PathBuf]) -> bool {
+        use std::io::Write;
+        eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
+        for dir in dirs {
+            eprintln!("  {}", dir.display());
+        }
+        eprint!("Type 'yes' to confirm: ");
+        if std::io::stderr().flush().is_err() {
+            return false;
+        }
+        let mut line = String::new();
+        if std::io::stdin().read_line(&mut line).is_err() {
+            return false;
+        }
+        line.trim() == "yes"
+    }
+
+    /// Whether a Claw Lab server already answers `GET /health` with `200` on this
+    /// bind's port. Used for single-instance detection and browser-open readiness.
+    /// Dependency-free (raw TCP + a minimal HTTP request) over loopback, so no
+    /// HTTP-client crate and no DNS. Mirrors the Linux tray's helper.
+    fn health_ok(bind: &str) -> bool {
+        use std::io::{Read, Write};
+        use std::net::{SocketAddr, TcpStream};
+
+        let port = bind.rsplit_once(':').map(|(_, p)| p).unwrap_or("4097");
+        let Ok(addr) = format!("127.0.0.1:{port}").parse::<SocketAddr>() else {
+            return false;
+        };
+        let Ok(mut stream) = TcpStream::connect_timeout(&addr, Duration::from_millis(500)) else {
+            return false;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+        let _ = stream.set_write_timeout(Some(Duration::from_millis(500)));
+        let request =
+            format!("GET /health HTTP/1.0\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n");
+        if stream.write_all(request.as_bytes()).is_err() {
+            return false;
+        }
+        let mut buf = [0u8; 64];
+        let Ok(read) = stream.read(&mut buf) else {
+            return false;
+        };
+        let head = String::from_utf8_lossy(&buf[..read]);
+        head.starts_with("HTTP/1.") && head.contains(" 200")
+    }
+
+    /// Poll [`health_ok`] until it succeeds or `timeout` elapses.
+    fn wait_for_health(bind: &str, timeout: Duration) -> bool {
+        let start = std::time::Instant::now();
+        loop {
+            if health_ok(bind) {
+                return true;
+            }
+            if start.elapsed() >= timeout {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(200));
+        }
     }
 }
