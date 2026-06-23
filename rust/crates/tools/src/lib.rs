@@ -3399,11 +3399,32 @@ fn summarize_web_fetch(
         if let Some(json_ld) = extract_json_ld(raw_body) {
             highlights.push(format!("Structured data (JSON-LD): {json_ld}"));
         }
-        let mut out = format!("Fetched {url}\n{detail}");
+        // A page with little or no visible text is likely client-rendered. Many such
+        // pages still embed their real content as JSON in the initial HTML (e.g.
+        // Next.js __NEXT_DATA__); mine it so we recover readable text without a browser
+        // or render service. Gated to thin pages to avoid noise on normal ones.
+        if compact.chars().count() < 200 {
+            let mut embedded = Vec::new();
+            for value in extract_inline_json_blocks(raw_body) {
+                harvest_readable_from_json(&value, 0, &mut embedded);
+            }
+            if !embedded.is_empty() {
+                highlights.push(format!("Embedded page data: {}", embedded.join(" • ")));
+            }
+        }
+
+        let visible_empty = compact.trim().is_empty();
+        let mut out = if visible_empty && !highlights.is_empty() {
+            // No visible text, but we recovered structured data: lead with it instead
+            // of the old "no static text" dead-end.
+            format!("Fetched {url}\nRecovered structured content (the page had no visible text):")
+        } else {
+            format!("Fetched {url}\n{detail}")
+        };
         if highlights.is_empty() {
-            if compact.trim().is_empty() {
+            if visible_empty {
                 out.push_str(
-                    "\n\nNote: this page returned no static text content (likely client-rendered / JavaScript). Try the web search snippets or a data API for this URL.",
+                    "\n\nNote: this page returned no static text content (likely client-rendered / JavaScript). For such pages, configure a web-render MCP server, or use the web search snippets.",
                 );
             }
         } else {
@@ -3526,14 +3547,128 @@ fn extract_meta_description(html: &str) -> Option<String> {
     None
 }
 
-/// Pull the first JSON-LD structured-data block. This is where many "JS" sites
-/// (news, products, recipes) embed the real data server-side.
+/// JSON keys whose string values are likely human-readable page content. Many
+/// "client-rendered" pages (Next.js, Nuxt, news/product/recipe sites) ship their
+/// real data as JSON in the initial HTML; we mine those values instead of running
+/// JavaScript. Matched case-insensitively.
+const READABLE_JSON_KEYS: &[&str] = &[
+    "title",
+    "headline",
+    "name",
+    "description",
+    "summary",
+    "abstract",
+    "articlebody",
+    "body",
+    "content",
+    "text",
+    "caption",
+    "subtitle",
+    "excerpt",
+    "snippet",
+];
+
+/// Walk a parsed JSON value and collect readable string values found under
+/// `READABLE_JSON_KEYS`. Bounded in recursion depth and item count so a large
+/// state blob cannot blow up the output; short strings are skipped to filter out
+/// framework noise (component/icon names etc.), and duplicates are dropped.
+fn harvest_readable_from_json(value: &Value, depth: usize, out: &mut Vec<String>) {
+    if depth > 12 || out.len() >= 40 {
+        return;
+    }
+    match value {
+        Value::Object(map) => {
+            for (key, child) in map {
+                if let Value::String(text) = child {
+                    if READABLE_JSON_KEYS.contains(&key.to_ascii_lowercase().as_str()) {
+                        let cleaned = collapse_whitespace(text);
+                        if cleaned.chars().count() >= 20 {
+                            let item = preview_text(&cleaned, 600);
+                            if !out.contains(&item) {
+                                out.push(item);
+                            }
+                        }
+                    }
+                }
+                harvest_readable_from_json(child, depth + 1, out);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                harvest_readable_from_json(item, depth + 1, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Parse all `<script type="application/json">` blocks. SPA frameworks embed
+/// page data here server-side (e.g. Next.js `__NEXT_DATA__`), so this recovers
+/// real content from pages that otherwise look empty — no browser required.
+/// `application/ld+json` does not match this substring and is handled separately.
+fn extract_inline_json_blocks(html: &str) -> Vec<Value> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while out.len() < 8 {
+        let Some(tag_start) = find_ci(rest, "<script") else {
+            break;
+        };
+        let Some(gt) = rest[tag_start..].find('>') else {
+            break;
+        };
+        let open_end = tag_start + gt + 1;
+        let tag = &rest[tag_start..open_end];
+        let Some(close_rel) = find_ci(&rest[open_end..], "</script") else {
+            break;
+        };
+        let block = &rest[open_end..open_end + close_rel];
+        if find_ci(tag, "application/json").is_some() {
+            if let Ok(value) = serde_json::from_str::<Value>(block.trim()) {
+                out.push(value);
+            }
+        }
+        let after_close = open_end + close_rel;
+        rest = match rest[after_close..].find('>') {
+            Some(gt) => &rest[after_close + gt + 1..],
+            None => break,
+        };
+    }
+    out
+}
+
+/// Pull readable fields from JSON-LD structured-data blocks. This is where many
+/// "JS" sites (news, products, recipes) embed the real data server-side. Handles
+/// multiple blocks; harvests readable fields, falling back to a compact preview
+/// of the raw block when it does not parse as JSON.
 fn extract_json_ld(html: &str) -> Option<String> {
-    let pos = find_ci(html, "application/ld+json")?;
-    let open_end = html[pos..].find('>').map(|end| pos + end + 1)?;
-    let close_rel = find_ci(&html[open_end..], "</script")?;
-    let json = collapse_whitespace(&html[open_end..open_end + close_rel]);
-    (!json.is_empty()).then(|| preview_text(&json, 600))
+    let mut collected: Vec<String> = Vec::new();
+    let mut rest = html;
+    while collected.len() < 20 {
+        let Some(pos) = find_ci(rest, "application/ld+json") else {
+            break;
+        };
+        let Some(open_end) = rest[pos..].find('>').map(|end| pos + end + 1) else {
+            break;
+        };
+        let Some(close_rel) = find_ci(&rest[open_end..], "</script") else {
+            break;
+        };
+        let block = &rest[open_end..open_end + close_rel];
+        match serde_json::from_str::<Value>(block.trim()) {
+            Ok(value) => harvest_readable_from_json(&value, 0, &mut collected),
+            Err(_) => {
+                let raw = collapse_whitespace(block);
+                if !raw.is_empty() {
+                    let item = preview_text(&raw, 600);
+                    if !collected.contains(&item) {
+                        collected.push(item);
+                    }
+                }
+            }
+        }
+        rest = &rest[open_end + close_rel..];
+    }
+    (!collected.is_empty()).then(|| collected.join(" • "))
 }
 
 fn html_to_text(html: &str) -> String {
@@ -7988,6 +8123,70 @@ mod tests {
         assert!(summary.contains("Visible body text"));
         assert!(summary.contains("Real summary here"));
         assert!(!summary.contains("do-not-leak-this-js"));
+    }
+
+    #[test]
+    fn web_fetch_recovers_inline_json_and_json_ld() {
+        let server = TestServer::spawn(Arc::new(|request_line: &str| {
+            if request_line.starts_with("GET /spa ") {
+                // Client-rendered page: no visible body text, real content embedded
+                // as JSON in the initial HTML (Next.js __NEXT_DATA__ pattern).
+                HttpResponse::html(
+                    200,
+                    "OK",
+                    "<html><head>\
+                     <script id=\"__NEXT_DATA__\" type=\"application/json\">\
+                     {\"props\":{\"pageProps\":{\"headline\":\"Breaking news recovered from embedded JSON\",\
+                     \"description\":\"The real article body lives in embedded JSON and is recovered without a browser.\"}}}\
+                     </script></head><body><div id=\"app\"></div></body></html>",
+                )
+            } else {
+                // Server-rendered-ish page carrying JSON-LD structured data.
+                HttpResponse::html(
+                    200,
+                    "OK",
+                    "<html><head><title>News</title>\
+                     <script type=\"application/ld+json\">\
+                     {\"@type\":\"NewsArticle\",\"headline\":\"Local server confirms JSON-LD harvesting works\",\
+                     \"description\":\"A readable description pulled from JSON-LD structured data.\"}\
+                     </script></head><body><p>Short visible intro.</p></body></html>",
+                )
+            }
+        }));
+
+        // Inline JSON recovery on an otherwise-empty client-rendered page.
+        let spa = execute_tool(
+            "WebFetch",
+            &json!({
+                "url": format!("http://{}/spa", server.addr()),
+                "prompt": "Summarize this page"
+            }),
+        )
+        .expect("WebFetch should succeed");
+        let spa_output: serde_json::Value = serde_json::from_str(&spa).expect("valid json");
+        let spa_summary = spa_output["result"].as_str().expect("result string");
+        assert!(spa_summary.contains("Breaking news recovered from embedded JSON"));
+        assert!(spa_summary.contains("recovered without a browser"));
+        assert!(spa_summary.contains("Embedded page data:"));
+        assert!(spa_summary.contains("Recovered structured content"));
+        // Raw JSON structure must not leak as content.
+        assert!(!spa_summary.contains("pageProps"));
+
+        // JSON-LD readable fields are harvested (not dumped as raw JSON).
+        let ld = execute_tool(
+            "WebFetch",
+            &json!({
+                "url": format!("http://{}/ld", server.addr()),
+                "prompt": "Summarize this page"
+            }),
+        )
+        .expect("WebFetch should succeed");
+        let ld_output: serde_json::Value = serde_json::from_str(&ld).expect("valid json");
+        let ld_summary = ld_output["result"].as_str().expect("result string");
+        assert!(ld_summary.contains("Local server confirms JSON-LD harvesting works"));
+        assert!(ld_summary.contains("readable description pulled from JSON-LD"));
+        assert!(ld_summary.contains("Structured data (JSON-LD):"));
+        assert!(!ld_summary.contains("@type"));
     }
 
     #[test]
