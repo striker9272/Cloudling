@@ -41,12 +41,12 @@ jobs:
             bin: clab.exe
             artifact_name: claw-windows-x64.exe
             publish: true
-          - name: macos-arm64
-            os: macos-latest
-            target: aarch64-apple-darwin
-            bin: clab
-            artifact_name: claw-macos-arm64
-            publish: false
+          # - name: macos-arm64
+            # os: macos-latest
+            # target: aarch64-apple-darwin
+            # bin: clab
+            # artifact_name: claw-macos-arm64
+            # publish: false
     defaults:
       run:
         working-directory: rust
