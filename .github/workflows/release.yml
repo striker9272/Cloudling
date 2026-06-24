@@ -41,17 +41,12 @@ jobs:
             bin: clab.exe
             artifact_name: claw-windows-x64.exe
             publish: true
-          # TEMP (v0.10.1): macOS matrix entry disabled for this release. The
-          # macOS runner bills at 10x and this patch changes no macOS code (Linux
-          # tray fix + docs only), and the macOS artifact is publish:false anyway
-          # — so building it here is pure cost. RESTORE this block right after the
-          # release is cut so future macOS-touching releases build the artifact.
-          # - name: macos-arm64
-          #   os: macos-latest
-          #   target: aarch64-apple-darwin
-          #   bin: clab
-          #   artifact_name: claw-macos-arm64
-          #   publish: false
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: clab
+            artifact_name: claw-macos-arm64
+            publish: false
     defaults:
       run:
         working-directory: rust
