@@ -27,23 +27,23 @@
 
 /// Run the desktop tray: start `serve` in the background and show the tray icon
 /// + menu. `bind` builds the browser URL for the "Open" item. Implemented on
-/// Windows and Linux; a no-op error elsewhere.
+/// Windows, Linux, and macOS; a no-op error elsewhere.
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::Error>>
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,
 {
-    Err("`clab tray` is only available on Windows and Linux".into())
+    Err("`clab tray` is only available on Windows, Linux, and macOS".into())
 }
 
 /// Remove the autostart entry and (after confirmation, unless `assume_yes`) each
-/// of the per-user `data_dirs`. Implemented on Windows and Linux.
+/// of the per-user `data_dirs`. Implemented on Windows, Linux, and macOS.
 #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 pub fn run_uninstall(
     _data_dirs: Vec<std::path::PathBuf>,
     _assume_yes: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    Err("`clab uninstall` is only available on Windows and Linux".into())
+    Err("`clab uninstall` is only available on Windows, Linux, and macOS".into())
 }
 
 /// Whether the executable was started by a bare double-click (its own fresh

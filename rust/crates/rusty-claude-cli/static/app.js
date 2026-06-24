@@ -984,7 +984,7 @@
   function readAsText(f){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){res(r.result);}; r.onerror=rej; r.readAsText(f); }); }
   /* chip inner HTML shared by composer (removable) and bubble (static) */
   function attChipInner(att){
-    if(att.kind==='image' && att.url) return '<img src="'+esc(att.url)+'" alt="'+esc(att.name||'')+'" />';
+    if(att.kind==='image' && att.url) return '<img src="'+escAttr(att.url)+'" alt="'+escAttr(att.name||'')+'" />';
     return '<span class="ic">'+IC.doc+'</span><span class="nm">'+esc(att.name||'файл')+'</span>'+(att.size!=null?'<span class="sz">'+humanSize(att.size)+'</span>':'');
   }
   function attChipHTML(att){ return '<div class="att-chip'+((att.kind==='image'&&att.url)?' img':'')+'">'+attChipInner(att)+'</div>'; }

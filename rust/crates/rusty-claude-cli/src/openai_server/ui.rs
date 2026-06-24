@@ -101,6 +101,22 @@ enum UiAuthDecision {
     Disabled,
 }
 
+/// Compare two byte slices in constant time w.r.t. their contents, so token
+/// verification does not leak how many leading bytes matched via a timing
+/// side-channel. Length still short-circuits (token length is not secret); the
+/// content comparison folds every byte without an early exit. No extra crate is
+/// pulled in for this (keeps the dependency tree / lockfile untouched).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 fn ui_auth_decision(
     configured_token: Option<&str>,
     bind_is_loopback: bool,
@@ -111,7 +127,10 @@ fn ui_auth_decision(
             let presented = authorization
                 .and_then(|header| header.strip_prefix("Bearer "))
                 .map(str::trim);
-            if presented == Some(expected) {
+            let matches = presented
+                .map(|token| constant_time_eq(token.as_bytes(), expected.as_bytes()))
+                .unwrap_or(false);
+            if matches {
                 UiAuthDecision::Allow
             } else {
                 UiAuthDecision::Unauthorized

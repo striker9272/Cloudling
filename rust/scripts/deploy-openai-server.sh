@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Strict-ish mode: catch unset variables and broken pipes. We deliberately omit
+# `-e` because the script does its own per-step error handling (run_logged /
+# fail_now / explicit rc checks) and `errexit` would short-circuit that flow.
+set -uo pipefail
 
 SCRIPT_NAME="deploy-openai-server.sh"
 RUNTIME_BIN=""
