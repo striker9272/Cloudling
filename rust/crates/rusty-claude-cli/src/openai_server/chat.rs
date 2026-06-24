@@ -318,8 +318,14 @@ fn stream_chat_completions(
             let abort_signal = session.abort_signal();
             let last_ctx_sink = last_ctx.clone();
             let last_stop_reason_sink = last_stop_reason.clone();
-            let reasoning_open_sink = reasoning_open.clone();
-            let reasoning_streamed_sink = reasoning_streamed.clone();
+            let reasoning_ctx = ReasoningCtx {
+                id: id.clone(),
+                created,
+                model: response_model.clone(),
+                forward_reasoning,
+                open: reasoning_open.clone(),
+                streamed: reasoning_streamed.clone(),
+            };
             let mut tool_inputs = HashMap::<String, String>::new();
             // Client-disconnect detection: once the SSE receiver is dropped (tab closed / Stop
             // pressed), `send` fails. Trip the turn-level abort so the agent loop halts between
@@ -340,70 +346,12 @@ fn stream_chat_completions(
                 if let AssistantEvent::StopReason(reason) = event {
                     last_stop_reason_sink.replace(reason.clone());
                 }
-                // Stream the model's reasoning live as a progressive OpenWebUI-style
-                // `<details type="reasoning">` block: open on the first delta, append each
-                // chunk, close it before any answer/tool content (or end of turn). Gated by the
-                // `show_reasoning` toggle. The trailing full `Thinking` event is only a fallback
-                // for backends that never streamed deltas.
-                if forward_reasoning {
-                    match event {
-                        AssistantEvent::ThinkingDelta(delta) if !delta.is_empty() => {
-                            if !reasoning_open_sink.get() {
-                                reasoning_open_sink.set(true);
-                                reasoning_streamed_sink.set(true);
-                                send(openai_sse_chunk(
-                                    &id,
-                                    created,
-                                    &response_model,
-                                    Some(reasoning_open_chunk()),
-                                    None,
-                                ));
-                            }
-                            send(openai_sse_chunk(
-                                &id,
-                                created,
-                                &response_model,
-                                Some(escape_html_text(delta)),
-                                None,
-                            ));
-                            return;
-                        }
-                        AssistantEvent::Thinking { thinking, .. } if !thinking.is_empty() => {
-                            // Already streamed via deltas → closed by the answer/stop branch
-                            // below; don't resend the whole block.
-                            if reasoning_streamed_sink.get() {
-                                return;
-                            }
-                            send(openai_sse_chunk(
-                                &id,
-                                created,
-                                &response_model,
-                                Some(openwebui_reasoning_details(thinking)),
-                                None,
-                            ));
-                            return;
-                        }
-                        _ => {}
-                    }
-                }
-                // Close an open reasoning block before the answer text, a tool block, or the end.
-                if reasoning_open_sink.get()
-                    && matches!(
-                        event,
-                        AssistantEvent::TextDelta(_)
-                            | AssistantEvent::ToolUse { .. }
-                            | AssistantEvent::ToolResult { .. }
-                            | AssistantEvent::MessageStop
-                    )
-                {
-                    reasoning_open_sink.set(false);
-                    send(openai_sse_chunk(
-                        &id,
-                        created,
-                        &response_model,
-                        Some(reasoning_close_chunk()),
-                        None,
-                    ));
+                // Stream the model's reasoning as a progressive `<details type="reasoning">`
+                // block (open on the first delta, append each chunk, close before answer/tool
+                // content). Returns true when the event was a reasoning delta fully handled
+                // there, so it is not also emitted as answer content.
+                if relay_reasoning_event(event, &reasoning_ctx, &send) {
+                    return;
                 }
                 if let Some(chunk) = assistant_event_to_openai_sse_chunk(
                     &id,
@@ -509,6 +457,96 @@ fn stream_chat_completions(
     Sse::new(stream)
         .keep_alive(KeepAlive::default())
         .into_response()
+}
+
+/// Per-turn context for streaming the model's reasoning as a progressive
+/// `<details type="reasoning">` block (see [`relay_reasoning_event`]). `open`/`streamed`
+/// are shared with the turn so state survives across event-sink calls.
+struct ReasoningCtx {
+    id: String,
+    created: u64,
+    model: String,
+    /// Mirrors the `show_reasoning` UI toggle; when false, reasoning is not forwarded.
+    forward_reasoning: bool,
+    /// Whether a `<details type="reasoning">` block is currently open.
+    open: std::rc::Rc<std::cell::Cell<bool>>,
+    /// Whether any reasoning was streamed as deltas (so the trailing full `Thinking`
+    /// event is not also sent as a second block).
+    streamed: std::rc::Rc<std::cell::Cell<bool>>,
+}
+
+/// Relay one assistant event's reasoning, OpenWebUI-style: open the block on the first
+/// `ThinkingDelta`, append each delta, and close it before the answer text / a tool block /
+/// the end of the turn. The trailing full `Thinking` event is only a fallback for backends
+/// that never streamed deltas. Returns `true` when the event was a reasoning delta fully
+/// handled here (the caller must then skip emitting it as answer content); `false` otherwise
+/// (it may still have emitted a closing chunk before falling through).
+fn relay_reasoning_event(
+    event: &AssistantEvent,
+    ctx: &ReasoningCtx,
+    send: &impl Fn(Result<Event, Infallible>),
+) -> bool {
+    if ctx.forward_reasoning {
+        match event {
+            AssistantEvent::ThinkingDelta(delta) if !delta.is_empty() => {
+                if !ctx.open.get() {
+                    ctx.open.set(true);
+                    ctx.streamed.set(true);
+                    send(openai_sse_chunk(
+                        &ctx.id,
+                        ctx.created,
+                        &ctx.model,
+                        Some(reasoning_open_chunk()),
+                        None,
+                    ));
+                }
+                send(openai_sse_chunk(
+                    &ctx.id,
+                    ctx.created,
+                    &ctx.model,
+                    Some(escape_html_text(delta)),
+                    None,
+                ));
+                return true;
+            }
+            AssistantEvent::Thinking { thinking, .. } if !thinking.is_empty() => {
+                // Already streamed via deltas → closed by the transition branch below;
+                // don't resend the whole block.
+                if ctx.streamed.get() {
+                    return true;
+                }
+                send(openai_sse_chunk(
+                    &ctx.id,
+                    ctx.created,
+                    &ctx.model,
+                    Some(openwebui_reasoning_details(thinking)),
+                    None,
+                ));
+                return true;
+            }
+            _ => {}
+        }
+    }
+    // Close an open reasoning block before the answer text, a tool block, or the end.
+    if ctx.open.get()
+        && matches!(
+            event,
+            AssistantEvent::TextDelta(_)
+                | AssistantEvent::ToolUse { .. }
+                | AssistantEvent::ToolResult { .. }
+                | AssistantEvent::MessageStop
+        )
+    {
+        ctx.open.set(false);
+        send(openai_sse_chunk(
+            &ctx.id,
+            ctx.created,
+            &ctx.model,
+            Some(reasoning_close_chunk()),
+            None,
+        ));
+    }
+    false
 }
 
 /// Drive one interactive `AskUserQuestion` round-trip for the built-in UI: emit a question

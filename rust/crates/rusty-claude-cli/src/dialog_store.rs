@@ -281,3 +281,106 @@ impl DialogStore {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    impl DialogStore {
+        /// Test-only store backed by an in-memory database, so tests touch neither
+        /// the filesystem nor `CLAW_UI_DATA_DIR` (and run independently in parallel).
+        fn open_in_memory() -> Self {
+            let conn = Connection::open_in_memory().expect("open in-memory sqlite");
+            conn.execute_batch(SCHEMA).expect("apply schema");
+            Self {
+                conn: Mutex::new(conn),
+            }
+        }
+    }
+
+    #[test]
+    fn dialog_round_trips_and_lists() {
+        let store = DialogStore::open_in_memory();
+        let msgs = json!([{ "role": "user", "content": "hi" }]);
+        store.upsert("d1", "First", &msgs).expect("upsert");
+
+        let got = store.get("d1").expect("get").expect("present");
+        assert_eq!(got.id, "d1");
+        assert_eq!(got.title, "First");
+        assert_eq!(got.messages, msgs);
+
+        let list = store.list().expect("list");
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].id, "d1");
+    }
+
+    #[test]
+    fn get_missing_dialog_is_none() {
+        let store = DialogStore::open_in_memory();
+        assert!(store.get("nope").expect("get").is_none());
+    }
+
+    #[test]
+    fn upsert_preserves_created_ms_and_replaces_content() {
+        let store = DialogStore::open_in_memory();
+        store.upsert("d1", "First", &json!([])).expect("insert");
+        let first = store.get("d1").expect("get").expect("present");
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let new_msgs = json!([{ "role": "user", "content": "again" }]);
+        store.upsert("d1", "Second", &new_msgs).expect("update");
+        let second = store.get("d1").expect("get").expect("present");
+
+        // created_ms is kept across the conflict-update; title/messages are replaced.
+        assert_eq!(second.created_ms, first.created_ms);
+        assert_eq!(second.title, "Second");
+        assert_eq!(second.messages, new_msgs);
+        // updated_ms never regresses and stays >= created_ms.
+        assert!(second.updated_ms >= first.updated_ms);
+        assert!(second.updated_ms >= second.created_ms);
+        // a conflict-update keeps it a single row.
+        assert_eq!(store.list().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn delete_removes_dialog() {
+        let store = DialogStore::open_in_memory();
+        store.upsert("d1", "First", &json!([])).expect("upsert");
+        store.delete("d1").expect("delete");
+        assert!(store.get("d1").expect("get").is_none());
+    }
+
+    #[test]
+    fn kv_round_trips_and_overwrites() {
+        let store = DialogStore::open_in_memory();
+        assert!(store.get_kv("active_preset").expect("get").is_none());
+        store.set_kv("active_preset", "p1").expect("set");
+        assert_eq!(
+            store.get_kv("active_preset").expect("get").as_deref(),
+            Some("p1")
+        );
+        store.set_kv("active_preset", "p2").expect("overwrite");
+        assert_eq!(
+            store.get_kv("active_preset").expect("get").as_deref(),
+            Some("p2")
+        );
+    }
+
+    #[test]
+    fn preset_upsert_preserves_created_ms() {
+        let store = DialogStore::open_in_memory();
+        store.upsert_preset("p1", "Name", "prompt").expect("insert");
+        let created = store.list_presets().expect("list")[0].created_ms;
+
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let updated = store.upsert_preset("p1", "New", "prompt2").expect("update");
+        assert_eq!(updated.created_ms, created);
+        assert_eq!(updated.name, "New");
+        assert_eq!(updated.prompt, "prompt2");
+        assert_eq!(store.list_presets().expect("list").len(), 1);
+
+        store.delete_preset("p1").expect("delete");
+        assert!(store.list_presets().expect("list").is_empty());
+    }
+}
