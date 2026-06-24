@@ -718,16 +718,26 @@ mod linux_imp {
         }
 
         // Show the tray icon. `spawn` runs the SNI service on its own background
-        // thread and returns a handle we keep alive for the process lifetime. A
-        // desktop with no StatusNotifier host (no panel/extension) returns an
-        // error — log it and carry on so the server still runs and the browser
-        // still opens.
+        // thread and returns a handle we keep alive for the process lifetime.
+        //
+        // `assume_sni_available(true)` is what makes autostart-at-login work: at
+        // login the desktop launches `clab tray` very early, often before the
+        // StatusNotifierWatcher (e.g. GNOME's AppIndicator extension) is on the
+        // session bus. Without this flag `spawn` hard-errors when no watcher is
+        // present yet, we fall into the "running without an icon" branch below,
+        // and the icon never appears (the server runs, so the process is alive
+        // but trayless — exactly the post-reboot symptom). With the flag, ksni
+        // sets the item up anyway and registers it once the watcher comes online,
+        // so the icon shows up after the panel finishes loading. (ksni >= 0.3.3.)
+        //
+        // A genuinely tray-less desktop (no StatusNotifier host at all) still just
+        // logs and carries on, so the server runs and the browser still opens.
         let tray = ClawTray {
             url: url.clone(),
             autostart: autostart_enabled(),
             error: None,
         };
-        let tray_handle = match tray.spawn() {
+        let tray_handle = match tray.assume_sni_available(true).spawn() {
             Ok(handle) => Some(handle),
             Err(error) => {
                 eprintln!("clab tray: system tray unavailable ({error}); running without an icon");

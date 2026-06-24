@@ -8,7 +8,24 @@
 > Linux remains the primary server platform; for the server/Linux path see the root
 > [`README.md`](../README.md) and [`USAGE.md`](../USAGE.md). Treat this page as experimental.
 
-macOS is Apple-Silicon-first (`aarch64-apple-darwin`). Intel (`x86_64`) is build-from-source only for now.
+## Requirements
+
+The prebuilt macOS binary and `.dmg`/`.app` target **Apple Silicon (`aarch64-apple-darwin`) running
+macOS 11.0 Big Sur or later** (the bundle declares `LSMinimumSystemVersion 11.0`). This is not an
+arbitrary floor: every Apple Silicon Mac ships with macOS 11.0 or newer, so it covers the whole
+Apple-Silicon fleet.
+
+What this means in practice:
+
+- **Intel Macs** cannot run the prebuilt binary at all — it is an arm64 build. Intel (`x86_64-apple-darwin`)
+  is **build-from-source only** for now (see below). Note Apple itself is winding Intel down: macOS Tahoe
+  (26) is the last release to support Intel Macs, and macOS 27 is Apple-Silicon-only.
+- **macOS older than 11.0** (Big Sur) is not supported. Opening the `.app` on, say, macOS 10.x (High Sierra,
+  Mojave, Catalina) raises *"the application requires macOS 11.0 or later"* — that is the OS-version gate
+  doing its job, not a bug. Such machines are also Intel, so the arm64 build would not run regardless.
+
+Lowering the floor to old/Intel macOS is intentionally out of scope: it cannot be smoke-tested on CI
+(GitHub runners are modern macOS) and targets an OS Apple no longer maintains.
 
 ## Desktop app (menu-bar tray) — experimental
 
@@ -159,6 +176,9 @@ export ANTHROPIC_API_KEY="sk-ant-REPLACE_ME"
 - `cargo` not found: install Rust from <https://rustup.rs/> and reopen the terminal.
 - Gatekeeper blocks the app/binary: right-click → **Open**, or allow it under
   **System Settings → Privacy & Security** (the build is unsigned).
+- *"The application requires macOS 11.0 or later"*: your Mac is on macOS older than 11.0 (Big Sur) — and
+  therefore an Intel Mac. The prebuilt arm64 build does not target that machine; see **Requirements** above.
+  This is expected, not a bug.
 - Wrong provider selected: add an explicit model prefix (`openai/gpt-4.1-mini`, `qwen-plus`, `grok`) or set
   `OPENAI_BASE_URL` to pin the backend.
 - Menu-bar icon missing after "Start at login": the tray detects an already-running instance on
