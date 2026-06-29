@@ -13,6 +13,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use regex::Regex;
 use runtime::{AssistantEvent, ContentBlock, ConversationMessage};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -767,6 +768,92 @@ fn escape_html_text(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
+/// Reverse of `escape_html_text`. `&amp;` is undone last so that text which
+/// originally contained an entity-like sequence round-trips correctly.
+fn unescape_html_text(value: &str) -> String {
+    value
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+}
+
+/// Reverse of `escape_html_attr`.
+fn unescape_html_attr(value: &str) -> String {
+    let value = value.replace("&quot;", "\"").replace("&#39;", "'");
+    unescape_html_text(&value)
+}
+
+/// Matches one rendered tool-call `<details>` block (the format produced by the
+/// tool-call detail renderer above). Capture groups: 1=id, 2=name,
+/// 3=arguments (attr-escaped), 4=summary, 5=output (text-escaped JSON string).
+fn tool_call_block_regex() -> Regex {
+    Regex::new(
+        r#"(?s)<details type="tool_calls" done="true" id="([^"]*)" name="([^"]*)" arguments="([^"]*)">\n<summary>([^<]*)</summary>\n(.*?)\n</details>"#,
+    )
+    .expect("static tool-call block regex compiles")
+}
+
+/// Rebuild a prior assistant turn from the built-in UI's re-sent transcript.
+///
+/// The UI stores each executed tool call as a rendered `<details type="tool_calls">`
+/// block (markup + the tool's output) and re-sends it verbatim as assistant *content*.
+/// Feeding that markup back to the model teaches weaker models to emit tool calls as
+/// text instead of via the structured `tool_calls` channel — which clab then cannot
+/// execute, so the markup leaks into the visible answer. Here we parse those blocks
+/// back into proper `ContentBlock::ToolUse` + `ConversationMessage::tool_result`
+/// messages, so the outgoing request carries standard `tool_calls` / `role:"tool"`
+/// entries and the model never sees our UI markup. Non-markup assistant text is kept
+/// as-is; a turn that is empty after parsing contributes nothing (prior behavior).
+fn assistant_history_from_markup(text: &str, re: &Regex) -> Vec<ConversationMessage> {
+    let mut tool_uses: Vec<ContentBlock> = Vec::new();
+    let mut tool_results: Vec<ConversationMessage> = Vec::new();
+    let mut cleaned = String::new();
+    let mut last = 0usize;
+    for caps in re.captures_iter(text) {
+        let whole = caps.get(0).expect("capture group 0 is always present");
+        cleaned.push_str(&text[last..whole.start()]);
+        last = whole.end();
+        let id = unescape_html_attr(&caps[1]);
+        let name = unescape_html_attr(&caps[2]);
+        let input = unescape_html_attr(&caps[3]);
+        let is_error = caps[4].trim().eq_ignore_ascii_case("Tool Failed");
+        // Rendered output is `serde_json::to_string(output)` then HTML-escaped; recover the
+        // raw tool output, falling back to the unescaped text if it is not a JSON string.
+        let output_json = unescape_html_text(&caps[5]);
+        let output = serde_json::from_str::<String>(&output_json).unwrap_or(output_json);
+        tool_uses.push(ContentBlock::ToolUse {
+            id: id.clone(),
+            name: name.clone(),
+            input,
+        });
+        tool_results.push(ConversationMessage::tool_result(id, name, output, is_error));
+    }
+    cleaned.push_str(&text[last..]);
+
+    if tool_uses.is_empty() {
+        // No tool markup → preserve prior behavior (skip empty, else one text block).
+        if cleaned.trim().is_empty() {
+            return Vec::new();
+        }
+        return vec![ConversationMessage::assistant(vec![ContentBlock::Text {
+            text: cleaned,
+        }])];
+    }
+
+    let mut blocks = Vec::new();
+    let trimmed = cleaned.trim();
+    if !trimmed.is_empty() {
+        blocks.push(ContentBlock::Text {
+            text: trimmed.to_string(),
+        });
+    }
+    blocks.extend(tool_uses);
+    let mut messages = Vec::with_capacity(1 + tool_results.len());
+    messages.push(ConversationMessage::assistant(blocks));
+    messages.extend(tool_results);
+    messages
+}
+
 fn openai_sse_role_chunk(id: &str, created: u64, model: &str) -> Result<Event, Infallible> {
     openai_sse_chunk_with_delta(
         id,
@@ -923,6 +1010,7 @@ fn stateless_conversation_from_messages(
     let mut system_additions = Vec::new();
     let mut input = String::new();
     let mut input_images = Vec::new();
+    let tool_block_re = tool_call_block_regex();
 
     for (index, message) in messages.iter().enumerate() {
         let role = message.role.trim();
@@ -957,8 +1045,14 @@ fn stateless_conversation_from_messages(
                 }
                 history.push(ConversationMessage::user(blocks));
             }
+        } else if role.eq_ignore_ascii_case("assistant") {
+            // Rebuild structured tool calls from the built-in UI's re-sent markup so the
+            // backend gets standard `tool_calls` / `role:"tool"` entries instead of our
+            // UI `<details>` blocks (which weak models imitate as text — see
+            // `assistant_history_from_markup`).
+            history.extend(assistant_history_from_markup(&text, &tool_block_re));
         } else if !text.trim().is_empty() {
-            // assistant, tool, or any other role → plain assistant context text.
+            // tool or any other role → plain assistant context text.
             history.push(ConversationMessage::assistant(vec![ContentBlock::Text { text }]));
         }
     }

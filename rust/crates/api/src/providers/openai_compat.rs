@@ -480,6 +480,9 @@ impl OpenAiSseParser {
 #[derive(Debug)]
 struct StreamState {
     model: String,
+    /// Full text content streamed so far, retained only to recover a native tool
+    /// call that a backend leaked as plain text (see `recover_text_tool_calls`).
+    text_acc: String,
     message_started: bool,
     text_started: bool,
     text_finished: bool,
@@ -495,6 +498,7 @@ impl StreamState {
     fn new(model: String) -> Self {
         Self {
             model,
+            text_acc: String::new(),
             message_started: false,
             text_started: false,
             text_finished: false,
@@ -567,6 +571,7 @@ impl StreamState {
             }
 
             if let Some(content) = choice.delta.content.filter(|value| !value.is_empty()) {
+                self.text_acc.push_str(&content);
                 self.close_thinking(&mut events);
                 if !self.text_started {
                     self.text_started = true;
@@ -658,6 +663,36 @@ impl StreamState {
                 events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent {
                     index: state.block_index(tool_index_offset),
                 }));
+            }
+        }
+
+        // Fallback: a backend whose own tool-call parser failed may leak a native tool
+        // call as plain text (e.g. Hermes/Qwen `<tool_call>{json}</tool_call>`) instead
+        // of the structured `tool_calls` field. When no structured call was produced,
+        // recover any such call from the streamed text and emit it so the agent loop
+        // executes it for real (any output the model fabricated inline is ignored — the
+        // tool is actually run). Only consulted when the structured channel is empty.
+        if self.tool_calls.is_empty() {
+            for (i, (name, arguments)) in
+                recover_text_tool_calls(&self.text_acc).into_iter().enumerate()
+            {
+                let index = tool_index_offset + i as u32;
+                events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
+                    index,
+                    content_block: OutputContentBlock::ToolUse {
+                        id: format!("clab-text-tool-{i}"),
+                        name,
+                        input: json!({}),
+                    },
+                }));
+                events.push(StreamEvent::ContentBlockDelta(ContentBlockDeltaEvent {
+                    index,
+                    delta: ContentBlockDelta::InputJsonDelta {
+                        partial_json: arguments,
+                    },
+                }));
+                events.push(StreamEvent::ContentBlockStop(ContentBlockStopEvent { index }));
+                self.stop_reason = Some("tool_use".to_string());
             }
         }
 
@@ -1533,15 +1568,45 @@ fn normalize_response(
         });
     }
 
+    // Fallback (non-streaming twin of the streaming recovery in `StreamState::finish`):
+    // if the backend produced no structured tool call, recover a native one leaked as
+    // plain text so the agent loop still executes it. See `recover_text_tool_calls`.
+    let has_tool_use = content
+        .iter()
+        .any(|block| matches!(block, OutputContentBlock::ToolUse { .. }));
+    let mut recovered_tool_use = false;
+    if !has_tool_use {
+        let leaked = content.iter().find_map(|block| match block {
+            OutputContentBlock::Text { text } => Some(text.clone()),
+            _ => None,
+        });
+        if let Some(text) = leaked {
+            for (i, (name, arguments)) in recover_text_tool_calls(&text).into_iter().enumerate() {
+                content.push(OutputContentBlock::ToolUse {
+                    id: format!("clab-text-tool-{i}"),
+                    name,
+                    input: parse_tool_arguments(&arguments),
+                });
+                recovered_tool_use = true;
+            }
+        }
+    }
+
     Ok(MessageResponse {
         id: response.id,
         kind: "message".to_string(),
         role: choice.message.role,
         content,
         model: response.model.if_empty_then(model.to_string()),
-        stop_reason: choice
-            .finish_reason
-            .map(|value| normalize_finish_reason(&value)),
+        // A recovered text tool call must report `tool_use` so the agent loop runs it,
+        // matching the streaming path — otherwise a leftover `stop` re-drives the turn.
+        stop_reason: if recovered_tool_use {
+            Some("tool_use".to_string())
+        } else {
+            choice
+                .finish_reason
+                .map(|value| normalize_finish_reason(&value))
+        },
         stop_sequence: None,
         usage: response
             .usage
@@ -1553,6 +1618,38 @@ fn normalize_response(
 
 fn parse_tool_arguments(arguments: &str) -> Value {
     serde_json::from_str(arguments).unwrap_or_else(|_| json!({ "raw": arguments }))
+}
+
+/// Recover a native tool call that a backend leaked as plain text instead of the
+/// structured `tool_calls` field — the Hermes/Qwen convention
+/// `<tool_call>{"name": "...", "arguments": {...}}</tool_call>` (some templates use
+/// `parameters` for the arguments). Returns `(name, arguments_json_string)` per call;
+/// malformed or non-JSON blocks are skipped. Only consulted when the structured
+/// channel produced nothing, so it never overrides a real tool call.
+fn recover_text_tool_calls(text: &str) -> Vec<(String, String)> {
+    const OPEN: &str = "<tool_call>";
+    const CLOSE: &str = "</tool_call>";
+    let mut calls = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find(OPEN) {
+        let after = &rest[start + OPEN.len()..];
+        let Some(end) = after.find(CLOSE) else { break };
+        let inner = after[..end].trim();
+        rest = &after[end + CLOSE.len()..];
+        let Ok(value) = serde_json::from_str::<Value>(inner) else {
+            continue;
+        };
+        let Some(name) = value.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let arguments = match value.get("arguments").or_else(|| value.get("parameters")) {
+            Some(Value::String(raw)) => raw.clone(),
+            Some(other) => other.to_string(),
+            None => "{}".to_string(),
+        };
+        calls.push((name.to_string(), arguments));
+    }
+    calls
 }
 
 fn next_sse_frame(buffer: &mut Vec<u8>) -> Option<String> {

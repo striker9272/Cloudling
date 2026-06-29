@@ -12,11 +12,16 @@ path = "src/main.rs"
 [dependencies]
 api = { path = "../api" }
 axum = "0.8"
+# Runtime-local date for the serve/REPL system prompt. `default-features = false`
+# + `clock` keeps it lean (pure Rust, no C deps) so the static musl build is
+# unaffected; `Local::now()` reads the host timezone (/etc/localtime or $TZ).
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 commands = { path = "../commands" }
 compat-harness = { path = "../compat-harness" }
 crossterm = "0.28"
 pulldown-cmark = "0.13"
 rustyline = "15"
+regex = "1"
 runtime = { path = "../runtime" }
 plugins = { path = "../plugins" }
 rusqlite = { version = "0.32", features = ["bundled"] }

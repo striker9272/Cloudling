@@ -171,6 +171,17 @@ const DEFAULT_DATE: &str = match option_env!("BUILD_DATE") {
     Some(d) => d,
     None => "unknown",
 };
+
+/// Today's date as `YYYY-MM-DD` in the host's local timezone, computed at runtime.
+///
+/// `DEFAULT_DATE` above is baked at build time; it is correct only on the day the
+/// binary was built. A long-running `openai-serve` process would otherwise report
+/// its build date as "today" forever (observed: serve stuck on the build date).
+/// The serve/REPL system prompt uses this helper instead so the model always sees
+/// the real current date, in the operator's local timezone (as on the device).
+fn runtime_local_date() -> String {
+    chrono::Local::now().format("%Y-%m-%d").to_string()
+}
 const DEFAULT_OAUTH_CALLBACK_PORT: u16 = 4545;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_TARGET: Option<&str> = option_env!("TARGET");
@@ -9578,7 +9589,9 @@ fn build_system_prompt(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let mut prompt = load_system_prompt(
         env::current_dir()?,
-        DEFAULT_DATE,
+        // Runtime local date, not the build-time `DEFAULT_DATE`: serve is long-running,
+        // so a baked date would freeze "today" on the build date.
+        runtime_local_date(),
         env::consts::OS,
         "unknown",
         model_family_identity_for(model),
