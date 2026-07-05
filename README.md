@@ -1,7 +1,7 @@
 # Cloudling
 
 <p align="center">
-  <a href="https://github.com/striker9272/claw-lab">striker9272/claw-lab</a>
+  <a href="https://github.com/striker9272/cloudling">striker9272/cloudling</a>
   ·
   <a href="https://github.com/ultraworkers/claw-code">Claw Code (original)</a>
   ·
@@ -79,8 +79,8 @@ chmod +x cloudling-linux-x64
 **Сборка из исходников.** Установщик `install.sh` сам определит ОС, проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config), а если каких-то системных пакетов не хватает — покажет команду и предложит доустановить (`y/n`):
 
 ```bash
-git clone https://github.com/striker9272/claw-lab
-cd claw-lab
+git clone https://github.com/striker9272/cloudling
+cd cloudling
 ./install.sh --release
 ```
 
@@ -233,8 +233,8 @@ The binary is statically linked (musl) — it runs on any distribution, with no 
 **Build from source.** The `install.sh` installer detects your OS, checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config), and — if system packages are missing — shows the command and offers to install them (`y/n`):
 
 ```bash
-git clone https://github.com/striker9272/claw-lab
-cd claw-lab
+git clone https://github.com/striker9272/cloudling
+cd cloudling
 ./install.sh --release
 ```
 

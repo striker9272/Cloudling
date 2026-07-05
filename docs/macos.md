@@ -57,8 +57,8 @@ macOS has everything `cloudling` needs (Apple Clang from the Xcode Command Line 
 `ring` and `rusqlite`). Install Rust from <https://rustup.rs/> if you do not have it, then:
 
 ```bash
-git clone https://github.com/striker9272/claw-lab
-cd claw-lab/rust
+git clone https://github.com/striker9272/cloudling
+cd cloudling/rust
 cargo build --workspace
 ./target/debug/cloudling --help
 ./target/debug/cloudling doctor
@@ -67,7 +67,7 @@ cargo build --workspace
 For an optimized binary:
 
 ```bash
-cd claw-lab/rust
+cd cloudling/rust
 cargo build --release -p cloudling-cli
 ./target/release/cloudling --help
 ```
@@ -77,7 +77,7 @@ via Homebrew). `install.sh --prebuilt` reports "build from source" on macOS unti
 published.
 
 ```bash
-cd claw-lab
+cd cloudling
 ./install.sh
 ```
 
@@ -124,7 +124,7 @@ anything. The agent's stdout/stderr go to `~/Library/Application Support/cloudli
 ## First-run health checks
 
 ```bash
-cd claw-lab/rust
+cd cloudling/rust
 ./target/debug/cloudling --help
 ./target/debug/cloudling doctor
 ./target/debug/cloudling status --output-format json

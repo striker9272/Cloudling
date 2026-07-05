@@ -518,9 +518,9 @@ repository ships a skill prompt that should be available through `/skills`.
 For example, install TweetClaw as an X/Twitter automation skill:
 
 ```bash
-# From a parent directory that contains claw-lab
+# From a parent directory that contains cloudling
 git clone https://github.com/Xquik-dev/tweetclaw
-cd claw-lab/rust
+cd cloudling/rust
 ./target/debug/cloudling skills install ../../tweetclaw/skills/tweetclaw
 ./target/debug/cloudling skills show tweetclaw
 ```

@@ -41,8 +41,8 @@ on Windows from the command line. It is intentionally copyable without embedding
 Use this when you are developing Cloudling or testing a local checkout.
 
 ```powershell
-git clone https://github.com/striker9272/claw-lab
-Set-Location .\claw-lab\rust
+git clone https://github.com/striker9272/cloudling
+Set-Location .\cloudling\rust
 cargo build --workspace
 .\target\debug\cloudling.exe --help
 .\target\debug\cloudling.exe doctor
@@ -51,7 +51,7 @@ cargo build --workspace
 For an optimized local binary:
 
 ```powershell
-Set-Location .\claw-lab\rust
+Set-Location .\cloudling\rust
 cargo build --workspace --release
 .\target\release\cloudling.exe --help
 ```
@@ -100,8 +100,8 @@ wsl
 Then inside WSL:
 
 ```bash
-git clone https://github.com/striker9272/claw-lab
-cd claw-lab
+git clone https://github.com/striker9272/cloudling
+cd cloudling
 ./install.sh
 ```
 
@@ -110,7 +110,7 @@ cd claw-lab
 Run these before using live prompts:
 
 ```powershell
-Set-Location .\claw-lab\rust
+Set-Location .\cloudling\rust
 .\target\debug\cloudling.exe --help
 .\target\debug\cloudling.exe doctor
 .\target\debug\cloudling.exe status --output-format json
@@ -201,7 +201,7 @@ Notification support is exposed through the `notifications` slash command in the
 Native PowerShell smoke path:
 
 ```powershell
-Set-Location .\claw-lab\rust
+Set-Location .\cloudling\rust
 .\target\debug\cloudling.exe
 # inside the REPL:
 /notifications
@@ -210,7 +210,7 @@ Set-Location .\claw-lab\rust
 WSL smoke path:
 
 ```bash
-cd claw-lab/rust
+cd cloudling/rust
 ./target/debug/cloudling
 # inside the REPL:
 /notifications
