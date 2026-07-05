@@ -137,11 +137,11 @@
     toastTimer=setTimeout(function(){ el.classList.remove('show'); }, 3200);
   }
 
-  /* ---------- UI auth: /ui/* endpoints are token-gated (CLAW_UI_TOKEN) ----------
+  /* ---------- UI auth: /ui/* endpoints are token-gated (CLOUDLING_UI_TOKEN) ----------
      The stored token is attached as Authorization: Bearer to every /ui/* call.
      401 → ask for the token (saved to localStorage, then reload); 403 → the server
      has no token configured on a non-loopback bind: endpoints are off, explain why. */
-  var uiToken=null; try{ uiToken=localStorage.getItem('clab_ui_token')||null; }catch(e){}
+  var uiToken=null; try{ uiToken=localStorage.getItem('cloudling_ui_token')||null; }catch(e){}
   var tokenGateShown=false;
   function showTokenGate(forbidden){
     if(tokenGateShown) return; tokenGateShown=true;
@@ -150,7 +150,7 @@
         title=document.getElementById('tokenTitle');
     if(forbidden){
       title.textContent='Служебные функции отключены';
-      text.textContent='На сервере не задан CLAW_UI_TOKEN, а адрес доступен не только с localhost — диалоги и настройки отключены. Задай CLAW_UI_TOKEN в файле настроек сервиса и перезапусти его.';
+      text.textContent='На сервере не задан CLOUDLING_UI_TOKEN, а адрес доступен не только с localhost — диалоги и настройки отключены. Задай CLOUDLING_UI_TOKEN в файле настроек сервиса и перезапусти его.';
       input.hidden=true; ok.hidden=true;
     }
     scrim.hidden=false;
@@ -162,10 +162,10 @@
       var submit=function(){ var v=(input.value||'').trim(); if(!v) return;
         ok.disabled=true; err.hidden=true;
         fetch('/ui/dialogs',{headers:{'Authorization':'Bearer '+v}}).then(function(r){
-          if(r.status===401){ fail('Токен не подошёл. Нужно значение CLAW_UI_TOKEN из настроек сервера.'); return; }
+          if(r.status===401){ fail('Токен не подошёл. Нужно значение CLOUDLING_UI_TOKEN из настроек сервера.'); return; }
           if(!r.ok){ fail('Сервер ответил '+r.status+'.'); return; }
           var saved=false;
-          try{ localStorage.setItem('clab_ui_token', v); saved=(localStorage.getItem('clab_ui_token')===v); }catch(e){}
+          try{ localStorage.setItem('cloudling_ui_token', v); saved=(localStorage.getItem('cloudling_ui_token')===v); }catch(e){}
           if(saved){ location.reload(); return; }
           /* localStorage blocked (private mode / site-data settings): work with the
              token in memory for this page; it will be asked again after a reload */
@@ -286,7 +286,7 @@
      token is entered; version/git_sha come from the binary (CARGO_PKG_VERSION/GIT_SHA), not hardcoded */
   function loadVersion(){ fetch('/health',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){
     var el=document.getElementById('homeVer'); if(!el||!d||!d.version) return;
-    el.textContent='v'+d.version; el.title=d.git_sha?('clab v'+d.version+' · '+d.git_sha):('clab v'+d.version);
+    el.textContent='v'+d.version; el.title=d.git_sha?('cloudling v'+d.version+' · '+d.git_sha):('cloudling v'+d.version);
   }).catch(function(){}); }
   function setCtxToks(n){
     var el=document.getElementById('ctxToks'); if(!el) return;
@@ -465,7 +465,7 @@
 
   /* ---------- real chat ----------
      The page is the client: it holds the dialog history and re-sends it every turn
-     (clab is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
+     (cloudling is stateless). `convo` is that history; one thread `.turn` maps 1:1 to one
      convo entry, so we can rewind both together on regenerate / edit. */
   var convo = [], currentAbort = null, liveAcc = '', pendingLiveCancel = null;
   /* Invariant: every convo entry maps 1:1, in DOM order, onto a `.turn` OR a `.compact-mark`
@@ -490,7 +490,7 @@
   }
 
   /* ---- tool-call blocks in the stream (task #8) ----
-     clab streams tool results inline in the content as one chunk shaped like:
+     cloudling streams tool results inline in the content as one chunk shaped like:
        <details type="tool_calls" ... name="X">…<summary>Tool Executed|Tool Failed</summary>OUTPUT</details>
      We peel those out and render each as its own collapsible block, markdown-rendering the
      surrounding text. (ToolUse has no separate stream event, so there is no "running" state —
@@ -723,7 +723,7 @@
     clearDlgErr();
     thread.querySelectorAll('.turn').forEach(function(t){ if(t.querySelector('.errbox')) t.remove(); });
     var turn=document.createElement('div'); turn.className='turn a';
-    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>clab думает…</span></div>';
+    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>cloudling думает…</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null, reasonLiveEl=null;
@@ -769,7 +769,7 @@
       liveRaf=(window.requestAnimationFrame||function(f){return setTimeout(f,16);})(renderLiveTail);
     }
     pendingLiveCancel=function(){ if(liveRaf){ (window.cancelAnimationFrame||clearTimeout)(liveRaf); liveRaf=0; } };
-    /* Backend error mid-stream (engine down / token limit): clab sends a chunk with an
+    /* Backend error mid-stream (engine down / token limit): cloudling sends a chunk with an
        `error` field. Show the error box with the reason instead of a blank turn. */
     function showError(msg){
       errored=true; liveAcc='';
@@ -845,7 +845,7 @@
       maybeAutoCompact(dlgToks[activeId]); /* fold older turns if context crossed the window threshold */
     }
     fetch('/v1/chat/completions', {
-      method:'POST', headers:{'Content-Type':'application/json','X-Clab-UI':'1'}, /* marker: enable interactive AskUserQuestion widget */
+      method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, /* marker: enable interactive AskUserQuestion widget */
       body:JSON.stringify({ model:'claw', stream:true, messages:outgoingMessages() }),
       signal:ac.signal
     }).then(function(r){

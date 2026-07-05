@@ -1,9 +1,9 @@
-//! `claw-analog config validate` — parse TOML and profile without calling the API.
+//! `cloudling-analog config validate` — parse TOML and profile without calling the API.
 
 use std::path::PathBuf;
 
 use clap::Parser;
-use clab_analog::{
+use cloudling_analog::{
     load_analog_toml, load_profile_hint, resolve_analog_options, resolve_analog_profile_path,
     AnalogDoctorOverrides, AnalogFileConfig, AnalogLanguage, OutputFormat,
 };

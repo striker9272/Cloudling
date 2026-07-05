@@ -14,7 +14,7 @@ fn temp_dir(name: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("time")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("clab-ws-iso-{unique}-{name}"));
+    let path = std::env::temp_dir().join(format!("cloudling-ws-iso-{unique}-{name}"));
     fs::create_dir_all(&path).expect("create temp workspace");
     path
 }

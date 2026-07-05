@@ -37,8 +37,8 @@ html,body{height:100%;}
 .hero{display:flex; align-items:center; gap:20px; flex-wrap:wrap;}
 .hero .brand{display:inline-flex; align-items:center; gap:12px;}
 .hero .brand .cloud circle{fill:var(--load);}
-.hero .brand .cloud{transform-origin:center; animation:clab-breathe 3.0s ease-in-out infinite;}
-@keyframes clab-breathe{0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-6px) scale(1.072)}}
+.hero .brand .cloud{transform-origin:center; animation:cloudling-breathe 3.0s ease-in-out infinite;}
+@keyframes cloudling-breathe{0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-6px) scale(1.072)}}
 .hero .title{font-family:var(--display); font-size:50px; font-weight:800; letter-spacing:-0.035em; line-height:1;}
 /* home: center the hero+composer group vertically, biased slightly above center.
    :not([hidden]) so the id specificity doesn't override .view[hidden]{display:none}

@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn program_on_path_rejects_missing_program() {
         assert!(!super::program_on_path(
-            "clab-definitely-not-a-real-program-xyz"
+            "cloudling-definitely-not-a-real-program-xyz"
         ));
     }
 

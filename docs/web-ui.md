@@ -1,7 +1,7 @@
 # Built-in web UI (`--ui`)
 
-Claw Lab is headless by default: it serves an OpenAI-compatible API and nothing
-else. The `clab` binary can *also* serve a small chat page on the same port, so
+Cloudling is headless by default: it serves an OpenAI-compatible API and nothing
+else. The `cloudling` binary can *also* serve a small chat page on the same port, so
 you can talk to the agent from a browser without running a separate frontend.
 This is opt-in — the API surface is byte-for-byte unchanged unless you ask for
 the UI.
@@ -11,7 +11,7 @@ the UI.
 Add the `--ui` flag to the `openai-serve` command:
 
 ```bash
-clab --permission-mode read-only openai-serve --bind 127.0.0.1:4097 --ui
+cloudling --permission-mode read-only openai-serve --bind 127.0.0.1:4097 --ui
 ```
 
 With `--ui` the server adds:
@@ -34,13 +34,13 @@ built-in web UI. In that mode the wizard:
 - skips all backend questions — you set the model and URL in the browser later;
 - asks only the bind address (use `0.0.0.0:<port>` or a LAN address to reach it
   from another machine; `127.0.0.1` is local-only);
-- generates a `CLAW_UI_TOKEN` and sets `CLAW_OPENAI_UI=1`, `CLAW_UI_DATA_DIR`,
-  and `CLAW_OPENAI_ENV_FILE`, makes the env file writable by the service user,
+- generates a `CLOUDLING_UI_TOKEN` and sets `CLOUDLING_OPENAI_UI=1`, `CLOUDLING_UI_DATA_DIR`,
+  and `CLOUDLING_OPENAI_ENV_FILE`, makes the env file writable by the service user,
   and sets `Restart=always` (needed for save-restart);
 - prints the UI address and token at the end.
 
 Open the printed address, enter the token, and the first-run setup screen guides
-you to point clab at your engine — saving there restarts the service with your
+you to point cloudling at your engine — saving there restarts the service with your
 model. Non-interactively, pass `--ui` (plus `--bind`, and optionally
 `--ui-token` / `--ui-data-dir`) to `install-openai-service.sh`, or forward them
 through the top-level installer after `--`:
@@ -54,11 +54,11 @@ re-entering your backend.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `CLAW_UI_TOKEN` | *(unset)* | Bearer token guarding the `/ui/*` data endpoints. When set, every `/ui/*` request must send `Authorization: Bearer <token>`; the browser prompts for it once and remembers it. When unset, `/ui/*` are open on a loopback bind only and disabled (403) on any other bind — see [Auth model](#auth-model). |
-| `CLAW_UI_DATA_DIR` | `CLAW_CONFIG_HOME/ui`, else `$HOME/.claw/ui` | Directory for the SQLite store that holds dialogs, presets, and UI preferences. Created on first use. |
-| `CLAW_OPENAI_ENV_FILE` | *(unset)* | Path to the service env file. Lets the UI's **General** settings save engine/model/key changes and self-restart the core. When unset, the settings form loads as read-only (`_can_save: false`) and the save button is disabled. |
-| `CLAB_UI_DIR` | *(unset)* | Dev override: serve `index.html` / `app.css` / `app.js` from this directory at runtime instead of the embedded copies, so UI edits don't need a rebuild. Leave unset in production to serve the embedded assets. |
-| `CLAW_OPENAI_UI` | *(unset)* | Set to `1` by the installer's UI mode. The generated service wrapper turns it into the `--ui` flag and relaxes the backend requirement so the service can start unconfigured. Read by the wrapper, not by `clab` itself. |
+| `CLOUDLING_UI_TOKEN` | *(unset)* | Bearer token guarding the `/ui/*` data endpoints. When set, every `/ui/*` request must send `Authorization: Bearer <token>`; the browser prompts for it once and remembers it. When unset, `/ui/*` are open on a loopback bind only and disabled (403) on any other bind — see [Auth model](#auth-model). |
+| `CLOUDLING_UI_DATA_DIR` | `CLAW_CONFIG_HOME/ui`, else `$HOME/.claw/ui` | Directory for the SQLite store that holds dialogs, presets, and UI preferences. Created on first use. |
+| `CLOUDLING_OPENAI_ENV_FILE` | *(unset)* | Path to the service env file. Lets the UI's **General** settings save engine/model/key changes and self-restart the core. When unset, the settings form loads as read-only (`_can_save: false`) and the save button is disabled. |
+| `CLOUDLING_UI_DIR` | *(unset)* | Dev override: serve `index.html` / `app.css` / `app.js` from this directory at runtime instead of the embedded copies, so UI edits don't need a rebuild. Leave unset in production to serve the embedded assets. |
+| `CLOUDLING_OPENAI_UI` | *(unset)* | Set to `1` by the installer's UI mode. The generated service wrapper turns it into the `--ui` flag and relaxes the backend requirement so the service can start unconfigured. Read by the wrapper, not by `cloudling` itself. |
 
 The UI also reads and writes the access/permission config in `settings.json`
 (`filesystemMode`, `workspaceFolder`, `trustedRoots`, `permissions`, `mcpServers`;
@@ -74,15 +74,15 @@ where the user enters the token. Only the `/ui/*` data endpoints are protected,
 because they can read the API key, rewrite the env file, browse the host
 filesystem, and change the access/permission config. The decision is:
 
-- **Token configured** (`CLAW_UI_TOKEN` set) → `/ui/*` require a matching
+- **Token configured** (`CLOUDLING_UI_TOKEN` set) → `/ui/*` require a matching
   `Authorization: Bearer <token>`; a wrong/missing token returns 401.
 - **No token, loopback bind** (e.g. `127.0.0.1`) → `/ui/*` are open (dev
   convenience: only local processes can reach the port).
 - **No token, non-loopback bind** (LAN, Docker bridge, `0.0.0.0`) → `/ui/*` are
-  disabled with 403 (fail closed). Set `CLAW_UI_TOKEN` to use them there.
+  disabled with 403 (fail closed). Set `CLOUDLING_UI_TOKEN` to use them there.
 
 So if you bind beyond loopback (the usual case for a home-lab service reachable
-from another machine), set `CLAW_UI_TOKEN` to any string you choose and enter it
+from another machine), set `CLOUDLING_UI_TOKEN` to any string you choose and enter it
 in the browser prompt.
 
 ## Persistence
@@ -99,7 +99,7 @@ past dialogs:
 - **Preferences** — small key/value state (active preset, token counters, error
   flags, reasoning visibility).
 
-All of this lives in `dialogs.sqlite` under `CLAW_UI_DATA_DIR`. Deleting that
+All of this lives in `dialogs.sqlite` under `CLOUDLING_UI_DATA_DIR`. Deleting that
 directory resets the UI to a clean slate without affecting the agent;
 `uninstall.sh` removes it as well unless you pass `--keep-data`.
 
@@ -108,7 +108,7 @@ directory resets the UI to a clean slate without affecting the agent;
 The right-hand drawer groups settings into:
 
 - **General** — engine URL, API key, backend model, served model id, web-search
-  URL. Saving applies live and persists to the env file (`CLAW_OPENAI_ENV_FILE`).
+  URL. Saving applies live and persists to the env file (`CLOUDLING_OPENAI_ENV_FILE`).
 - **System prompt** — manage presets.
 - **Chat** — toggle whether the model's reasoning block is shown.
 - **Tools** — configure MCP servers (`mcpServers` in `settings.json`); applied on
@@ -129,7 +129,7 @@ The right-hand drawer groups settings into:
 
 ## MCP servers
 
-An MCP server is an external program that gives the model extra tools. Claw Lab
+An MCP server is an external program that gives the model extra tools. Cloudling
 launches the configured servers over the **stdio** transport, discovers their
 tools, and exposes them to the model as `mcp__<server>__<tool>`. Configuration is
 a runtime concern, not an install-time one — set it per deployment in the UI or
@@ -160,7 +160,7 @@ applies on the next send — no restart.
 ### Wire framing
 
 The MCP specification frames stdio messages as newline-delimited JSON, which is
-the default. A server written against clab's older transport (LSP-style
+the default. A server written against cloudling's older transport (LSP-style
 `Content-Length` headers) can be selected with `"framing": "content-length"` on
 its entry. Reads auto-detect both formats; the setting only controls what the
 client writes.
@@ -168,7 +168,7 @@ client writes.
 ### Server lifetime (pooling)
 
 Launching a server and discovering its tools costs about a second, and the agent
-rebuilds its runtime several times per message, so Claw Lab keeps a single live
+rebuilds its runtime several times per message, so Cloudling keeps a single live
 set of servers warm and reuses it across messages instead of respawning each
 time. The pool is rebuilt only when the `mcpServers` config changes or a pooled
 server is found dead; removing the last server stops the pooled processes.

@@ -1,24 +1,24 @@
 # RAG и веб‑UI: архитектура и фазы
 
-> **Не путать с чат-UI.** Этот документ — про **RAG-сервис** (`claw-rag-service`):
+> **Не путать с чат-UI.** Этот документ — про **RAG-сервис** (`cloudling-rag-service`):
 > его собственная страница `GET /` показывает статистику индекса и форму поиска
 > (`/v1/query`). Встроенный **чат**-интерфейс агента — это другое: он живёт в
-> бинарнике `clab` и включается флагом `clab openai-serve --ui` (см.
+> бинарнике `cloudling` и включается флагом `cloudling openai-serve --ui` (см.
 > [`web-ui.md`](web-ui.md)).
 
-Цель: **не** раздувать `clab-analog` и основной `clab` — вынести индексацию и (позже) UI в отдельные процессы с явными HTTP/MCP контрактами.
+Цель: **не** раздувать `cloudling-analog` и основной `cloudling` — вынести индексацию и (позже) UI в отдельные процессы с явными HTTP/MCP контрактами.
 
 ## Принципы
 
-1. **RAG как сервис** — отдельный бинарь (сейчас `claw-rag-service`), свой жизненный цикл, свои секреты (embedding API), своё хранилище.
-2. **Агент только вызывает retrieval** — в **`clab-analog`** инструмент **`retrieve_context`** → HTTP `POST {RAG_BASE_URL}/v1/query` (база без суффикса `/v1`); лимиты **`rag_timeout_secs`**, **`rag_top_k_max`** в `.claw-analog.toml`; ответ для модели — фрагменты с `path` + `snippet` + `score`.
-3. **Веб‑UI** — минимальная страница **`GET /`** в `claw-rag-service` (stats + форма `POST /v1/query`); чат с моделью и «переиндексировать» из браузера — при необходимости позже.
+1. **RAG как сервис** — отдельный бинарь (сейчас `cloudling-rag-service`), свой жизненный цикл, свои секреты (embedding API), своё хранилище.
+2. **Агент только вызывает retrieval** — в **`cloudling-analog`** инструмент **`retrieve_context`** → HTTP `POST {RAG_BASE_URL}/v1/query` (база без суффикса `/v1`); лимиты **`rag_timeout_secs`**, **`rag_top_k_max`** в `.claw-analog.toml`; ответ для модели — фрагменты с `path` + `snippet` + `score`.
+3. **Веб‑UI** — минимальная страница **`GET /`** в `cloudling-rag-service` (stats + форма `POST /v1/query`); чат с моделью и «переиндексировать» из браузера — при необходимости позже.
 
 ## Компоненты (целевая картина)
 
 ```text
 ┌─────────────────┐     POST /v1/query      ┌──────────────────────┐
-│  clab-analog    │ ──────────────────────►│  claw-rag-service    │
+│  cloudling-analog    │ ──────────────────────►│  cloudling-rag-service    │
 │  (+ tool)       │◄──────────────────────│  (embed + vector DB) │
 └─────────────────┘     JSON hits          └──────────┬───────────┘
                                                       │
@@ -33,7 +33,7 @@
 
 ## Текущая реализация
 
-Крейт **`rust/crates/claw-rag-service`** (из каталога `rust/`):
+Крейт **`rust/crates/cloudling-rag-service`** (из каталога `rust/`):
 
 ### HTTP
 
@@ -49,8 +49,8 @@
 ```powershell
 cd D:\path\to\claw-code-main\rust
 $env:OPENAI_API_KEY = "sk-..."
-cargo run -p claw-rag-service -- ingest -w D:\path\to\repo --db D:\path\to\index.sqlite
-cargo run -p clab-analog -- ...   # при RAG_BASE_URL или rag_base_url в TOML — инструмент retrieve_context
+cargo run -p cloudling-rag-service -- ingest -w D:\path\to\repo --db D:\path\to\index.sqlite
+cargo run -p cloudling-analog -- ...   # при RAG_BASE_URL или rag_base_url в TOML — инструмент retrieve_context
 ```
 
 Переменные окружения:
@@ -62,7 +62,7 @@ cargo run -p clab-analog -- ...   # при RAG_BASE_URL или rag_base_url в T
 - **`CLAW_RAG_PORT`** — порт HTTP (по умолчанию `8787`).
 - **`CLAW_RAG_MOCK_PROVIDERS=1`** — детерминированные вектора без сети (для тестов CI).
 
-Запуск сервера: `cargo run -p claw-rag-service` или `cargo run -p claw-rag-service -- serve --db path\to\index.sqlite`.
+Запуск сервера: `cargo run -p cloudling-rag-service` или `cargo run -p cloudling-rag-service -- serve --db path\to\index.sqlite`.
 
 ### Дальше по фазам
 
@@ -75,7 +75,7 @@ cargo run -p clab-analog -- ...   # при RAG_BASE_URL или rag_base_url в T
 ## Риски и ограничения
 
 - Секреты и PII в индексе; размер индекса и стоимость эмбеддингов.
-- Согласованность с symlink/jail как в `clab-analog` — retrieval не должен «утекать» за пределы workspace.
+- Согласованность с symlink/jail как в `cloudling-analog` — retrieval не должен «утекать» за пределы workspace.
 - Локаль на UI: i18n отдельно от `AnalogLanguage` в CLI.
 
 ## Связанные документы

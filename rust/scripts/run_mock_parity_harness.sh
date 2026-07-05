@@ -3,4 +3,4 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-cargo test -p clab-cli --test mock_parity_harness -- --nocapture
+cargo test -p cloudling-cli --test mock_parity_harness -- --nocapture

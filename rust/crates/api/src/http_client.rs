@@ -9,12 +9,12 @@ const NO_PROXY_KEYS: [&str; 2] = ["NO_PROXY", "no_proxy"];
 /// Env var bounding how long we wait to *establish* a connection to the model
 /// backend. Guards against an unreachable host hanging the request forever.
 /// A value of `0` disables it; unset falls back to [`DEFAULT_CONNECT_TIMEOUT`].
-const CONNECT_TIMEOUT_ENV: &str = "CLAW_BACKEND_CONNECT_TIMEOUT_SECS";
+const CONNECT_TIMEOUT_ENV: &str = "CLOUDLING_BACKEND_CONNECT_TIMEOUT_SECS";
 /// Env var bounding the maximum *idle* time between received bytes of a
 /// response (not the total response time). Disabled by default so long or
 /// slow streaming generations — and the multi-call tool/agent loop — are never
 /// cut off; set a positive value to opt into stall detection. `0` also disables.
-const READ_TIMEOUT_ENV: &str = "CLAW_BACKEND_READ_TIMEOUT_SECS";
+const READ_TIMEOUT_ENV: &str = "CLOUDLING_BACKEND_READ_TIMEOUT_SECS";
 /// Default connect timeout when [`CONNECT_TIMEOUT_ENV`] is unset.
 const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -85,18 +85,18 @@ fn parse_timeout_secs(raw: Option<&str>, default: Option<Duration>) -> Option<Du
 
 /// Env var: maximum number of retries for a retryable backend failure
 /// (connection refused, timeout, 429/5xx). Unset → [`DEFAULT_MAX_RETRIES`].
-const MAX_RETRIES_ENV: &str = "CLAW_BACKEND_MAX_RETRIES";
+const MAX_RETRIES_ENV: &str = "CLOUDLING_BACKEND_MAX_RETRIES";
 /// Env var: initial backoff in whole seconds (doubled each attempt up to the
 /// cap). Unset → [`DEFAULT_INITIAL_BACKOFF`].
-const INITIAL_BACKOFF_ENV: &str = "CLAW_BACKEND_INITIAL_BACKOFF_SECS";
+const INITIAL_BACKOFF_ENV: &str = "CLOUDLING_BACKEND_INITIAL_BACKOFF_SECS";
 /// Env var: maximum backoff cap in whole seconds. Unset → [`DEFAULT_MAX_BACKOFF`].
-const MAX_BACKOFF_ENV: &str = "CLAW_BACKEND_MAX_BACKOFF_SECS";
+const MAX_BACKOFF_ENV: &str = "CLOUDLING_BACKEND_MAX_BACKOFF_SECS";
 
 /// Retry budget defaults tuned so a *down* backend surfaces an error to the
 /// user in seconds, not minutes: 3 retries with a 1s→8s capped backoff means a
 /// connection-refused failure is reported in roughly 7–15s (vs the previous
 /// 8 retries / 128s cap that took 4–8 minutes). Transient 429/5xx are still
-/// retried. All three are overridable via the `CLAW_BACKEND_*` env vars.
+/// retried. All three are overridable via the `CLOUDLING_BACKEND_*` env vars.
 const DEFAULT_MAX_RETRIES: u32 = 3;
 const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(8);
@@ -326,8 +326,8 @@ mod tests {
     fn timeout_config_reads_env_overrides() {
         // given
         let lookup = lookup_from(&[
-            ("CLAW_BACKEND_CONNECT_TIMEOUT_SECS", "3"),
-            ("CLAW_BACKEND_READ_TIMEOUT_SECS", "120"),
+            ("CLOUDLING_BACKEND_CONNECT_TIMEOUT_SECS", "3"),
+            ("CLOUDLING_BACKEND_READ_TIMEOUT_SECS", "120"),
         ]);
 
         // when
@@ -342,15 +342,15 @@ mod tests {
     fn timeout_config_zero_disables_and_garbage_falls_back() {
         // zero explicitly disables the connect timeout
         let zero = TimeoutConfig::from_lookup(lookup_from(&[(
-            "CLAW_BACKEND_CONNECT_TIMEOUT_SECS",
+            "CLOUDLING_BACKEND_CONNECT_TIMEOUT_SECS",
             "0",
         )]));
         assert_eq!(zero.connect_timeout, None);
 
         // garbage falls back to the default rather than silently removing the guard
         let garbage = TimeoutConfig::from_lookup(lookup_from(&[
-            ("CLAW_BACKEND_CONNECT_TIMEOUT_SECS", "abc"),
-            ("CLAW_BACKEND_READ_TIMEOUT_SECS", "  "),
+            ("CLOUDLING_BACKEND_CONNECT_TIMEOUT_SECS", "abc"),
+            ("CLOUDLING_BACKEND_READ_TIMEOUT_SECS", "  "),
         ]));
         assert_eq!(garbage.connect_timeout, Some(Duration::from_secs(10)));
         assert_eq!(garbage.read_timeout, None);
@@ -372,9 +372,9 @@ mod tests {
     fn retry_policy_reads_env_overrides() {
         // given
         let lookup = lookup_from(&[
-            ("CLAW_BACKEND_MAX_RETRIES", "5"),
-            ("CLAW_BACKEND_INITIAL_BACKOFF_SECS", "2"),
-            ("CLAW_BACKEND_MAX_BACKOFF_SECS", "30"),
+            ("CLOUDLING_BACKEND_MAX_RETRIES", "5"),
+            ("CLOUDLING_BACKEND_INITIAL_BACKOFF_SECS", "2"),
+            ("CLOUDLING_BACKEND_MAX_BACKOFF_SECS", "30"),
         ]);
 
         // when
@@ -390,8 +390,8 @@ mod tests {
     fn retry_policy_garbage_falls_back_to_defaults() {
         // given
         let lookup = lookup_from(&[
-            ("CLAW_BACKEND_MAX_RETRIES", "not-a-number"),
-            ("CLAW_BACKEND_MAX_BACKOFF_SECS", ""),
+            ("CLOUDLING_BACKEND_MAX_RETRIES", "not-a-number"),
+            ("CLOUDLING_BACKEND_MAX_BACKOFF_SECS", ""),
         ]);
 
         // when

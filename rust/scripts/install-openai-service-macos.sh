@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # install-openai-service-macos.sh — macOS counterpart of install-openai-service.sh.
 #
-# Installs the Claw Lab OpenAI-compatible server as a per-user launchd LaunchAgent
-# (no root): an env file (single source of truth, the same CLAW_*/OPENAI_* keys as
-# the Linux install), a wrapper that sources it and execs `clab openai-serve`, and a
+# Installs the Cloudling OpenAI-compatible server as a per-user launchd LaunchAgent
+# (no root): an env file (single source of truth, the same CLOUDLING_*/OPENAI_* keys as
+# the Linux install), a wrapper that sources it and execs `cloudling openai-serve`, and a
 # LaunchAgent plist that runs the wrapper at login and keeps it alive. The env file
 # is what the built-in UI's "save & restart" rewrites, exactly like on Linux.
 #
@@ -20,20 +20,20 @@
 # This has not yet been exercised on real macOS hardware — see the project notes.
 set -euo pipefail
 
-# --- defaults (claw-lab-* canon; per-user macOS paths; all overridable) ---
-LABEL="lab.claw.openai"
-SUPPORT_DIR="${HOME}/Library/Application Support/claw-lab"
+# --- defaults (cloudling-* canon; per-user macOS paths; all overridable) ---
+LABEL="cloudling.openai"
+SUPPORT_DIR="${HOME}/Library/Application Support/cloudling"
 PLIST="${HOME}/Library/LaunchAgents/${LABEL}.plist"
 ENV_FILE="${SUPPORT_DIR}/openai.env"
-WRAPPER_PATH="${SUPPORT_DIR}/claw-lab-openai-serve"
-RUNTIME_BIN="/usr/local/bin/clab"
-RUNTIME_BIN_SRC="${CLAB_RUNTIME_BIN_SRC:-}"
+WRAPPER_PATH="${SUPPORT_DIR}/cloudling-serve"
+RUNTIME_BIN="/usr/local/bin/cloudling"
+RUNTIME_BIN_SRC="${CLOUDLING_RUNTIME_BIN_SRC:-}"
 WORKDIR="${SUPPORT_DIR}/work"
 UI_DATA_DIR="${SUPPORT_DIR}/ui"
 LOG_FILE="${SUPPORT_DIR}/openai.log"
 
 DEFAULT_BIND="127.0.0.1:4097"
-DEFAULT_SERVED_MODEL_ID="clab-agent"
+DEFAULT_SERVED_MODEL_ID="cloudling"
 DEFAULT_PERMISSION_MODE="read-only"
 BIND=""
 OPENAI_BASE_URL=""
@@ -59,14 +59,14 @@ Usage:
 Install:
   --base-url URL              OpenAI-compatible backend base URL
   --backend-model MODEL       backend/adaptor model id sent to the provider
-  --served-model-id MODEL     model id exposed to clients. Default: clab-agent
+  --served-model-id MODEL     model id exposed to clients. Default: cloudling
   --bind ADDR                 listen address. Default: 127.0.0.1:4097
   --permission-mode MODE      read-only | workspace-write | danger-full-access. Default: read-only
   --api-key VALUE             OPENAI_API_KEY for the backend (optional)
   --websearch-url URL         CLAWD_WEB_SEARCH_BASE_URL (optional)
   --ui                        enable the built-in web UI; configure engine in browser
-  --ui-token VALUE            CLAW_UI_TOKEN guarding /ui/* (auto-generated if omitted)
-  --runtime-bin PATH          installed clab binary. Default: /usr/local/bin/clab
+  --ui-token VALUE            CLOUDLING_UI_TOKEN guarding /ui/* (auto-generated if omitted)
+  --runtime-bin PATH          installed cloudling binary. Default: /usr/local/bin/cloudling
   --runtime-bin-src PATH      install this binary to --runtime-bin before setup
   --env-file PATH             environment file (source of truth)
   --plist PATH                LaunchAgent plist path
@@ -140,7 +140,7 @@ confirm() {
 }
 
 if [ "$UNINSTALL" = "1" ]; then
-  echo "Will remove the Claw Lab launchd agent:"
+  echo "Will remove the Cloudling launchd agent:"
   echo "  label:    $LABEL"
   echo "  plist:    $PLIST"
   echo "  wrapper:  $WRAPPER_PATH"
@@ -188,16 +188,16 @@ write_env() {
   if [ -n "$API_KEY" ]; then printf 'OPENAI_API_KEY=%s\n' "$API_KEY"; fi
   if [ -n "$OPENAI_BASE_URL" ]; then printf 'OPENAI_BASE_URL=%s\n' "$OPENAI_BASE_URL"; fi
   if [ -n "$BACKEND_MODEL" ]; then printf 'OPENAI_MODEL=%s\n' "$BACKEND_MODEL"; fi
-  printf 'CLAW_SERVED_MODEL_ID=%s\n' "$SERVED_MODEL_ID"
-  printf 'CLAW_OPENAI_BIND=%s\n' "$BIND"
+  printf 'CLOUDLING_SERVED_MODEL_ID=%s\n' "$SERVED_MODEL_ID"
+  printf 'CLOUDLING_OPENAI_BIND=%s\n' "$BIND"
   printf 'CLAW_PERMISSION_MODE=%s\n' "$PERMISSION_MODE"
-  printf 'CLAW_WORKING_DIRECTORY=%s\n' "$WORKDIR"
+  printf 'CLOUDLING_WORKING_DIRECTORY=%s\n' "$WORKDIR"
   if [ -n "$WEBSEARCH_URL" ]; then printf 'CLAWD_WEB_SEARCH_BASE_URL=%s\n' "$WEBSEARCH_URL"; fi
   if [ "$UI_MODE" = "1" ]; then
-    printf 'CLAW_OPENAI_UI=1\n'
-    printf 'CLAW_UI_DATA_DIR=%s\n' "$UI_DATA_DIR"
-    printf 'CLAW_OPENAI_ENV_FILE=%s\n' "$ENV_FILE"
-    if [ -n "$UI_TOKEN" ]; then printf 'CLAW_UI_TOKEN=%s\n' "$UI_TOKEN"; fi
+    printf 'CLOUDLING_OPENAI_UI=1\n'
+    printf 'CLOUDLING_UI_DATA_DIR=%s\n' "$UI_DATA_DIR"
+    printf 'CLOUDLING_OPENAI_ENV_FILE=%s\n' "$ENV_FILE"
+    if [ -n "$UI_TOKEN" ]; then printf 'CLOUDLING_UI_TOKEN=%s\n' "$UI_TOKEN"; fi
   fi
 }
 if [ "$DRY_RUN" = "1" ]; then
@@ -208,7 +208,7 @@ else
 fi
 
 # Wrapper: launchd has no EnvironmentFile, so the wrapper sources the env file
-# itself, then execs clab — mirroring the Linux wrapper's start logic.
+# itself, then execs cloudling — mirroring the Linux wrapper's start logic.
 write_wrapper() {
   cat <<EOF
 #!/bin/sh
@@ -219,12 +219,12 @@ if [ -f "\$ENV_FILE" ]; then
   . "\$ENV_FILE"
   set +a
 fi
-BIND="\${CLAW_OPENAI_BIND:-$DEFAULT_BIND}"
+BIND="\${CLOUDLING_OPENAI_BIND:-$DEFAULT_BIND}"
 PERMISSION_MODE="\${CLAW_PERMISSION_MODE:-$DEFAULT_PERMISSION_MODE}"
-WORKDIR="\${CLAW_WORKING_DIRECTORY:-$WORKDIR}"
+WORKDIR="\${CLOUDLING_WORKING_DIRECTORY:-$WORKDIR}"
 mkdir -p "\$WORKDIR"
 cd "\$WORKDIR"
-if [ "\${CLAW_OPENAI_UI:-0}" = "1" ]; then
+if [ "\${CLOUDLING_OPENAI_UI:-0}" = "1" ]; then
   # UI mode: the engine can be set in the browser, so no backend is required.
   exec "$RUNTIME_BIN" --permission-mode "\$PERMISSION_MODE" openai-serve --bind "\$BIND" --ui
 fi
@@ -279,7 +279,7 @@ else
   write_plist > "$PLIST"
 fi
 
-echo "Installed Claw Lab launchd agent:"
+echo "Installed Cloudling launchd agent:"
 echo "  label:        $LABEL"
 echo "  plist:        $PLIST"
 echo "  wrapper:      $WRAPPER_PATH"

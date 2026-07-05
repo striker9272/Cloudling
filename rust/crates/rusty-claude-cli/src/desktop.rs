@@ -1,8 +1,8 @@
-//! Thin adapter between the CLI and the `clab-desktop` crate.
+//! Thin adapter between the CLI and the `cloudling-desktop` crate.
 //!
-//! All Windows FFI `unsafe` lives in `clab-desktop` (the quarantine crate) so
+//! All Windows FFI `unsafe` lives in `cloudling-desktop` (the quarantine crate) so
 //! this crate keeps the upstream `unsafe_code = "forbid"`. Here we only wire the
-//! CLI's types into `clab-desktop`'s decoupled API: build the `serve` closure
+//! CLI's types into `cloudling-desktop`'s decoupled API: build the `serve` closure
 //! (which starts the OpenAI server + built-in UI) and collect the per-user data
 //! directories to remove on uninstall.
 
@@ -21,7 +21,7 @@ pub(crate) fn run_tray(
     permission_mode: Option<PermissionMode>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let serve_bind = bind.clone();
-    clab_desktop::run_tray(bind, move || {
+    cloudling_desktop::run_tray(bind, move || {
         // The tray always serves the built-in UI; an unconfigured engine is
         // fine (configured in the browser), exactly like `openai-serve --ui`.
         // Return the outcome as a string so the tray can surface a startup
@@ -32,16 +32,16 @@ pub(crate) fn run_tray(
 }
 
 pub(crate) fn run_uninstall(assume_yes: bool) -> Result<(), Box<dyn std::error::Error>> {
-    clab_desktop::run_uninstall(uninstall_data_dirs(), assume_yes)
+    cloudling_desktop::run_uninstall(uninstall_data_dirs(), assume_yes)
 }
 
 pub(crate) fn launched_by_double_click() -> bool {
-    clab_desktop::launched_by_double_click()
+    cloudling_desktop::launched_by_double_click()
 }
 
 /// The per-user directories an uninstall should remove: the config home
 /// (settings, keys, env) and the UI data dir (conversations DB). They share a
-/// root by default but can diverge via `CLAW_CONFIG_HOME` / `CLAW_UI_DATA_DIR`,
+/// root by default but can diverge via `CLAW_CONFIG_HOME` / `CLOUDLING_UI_DATA_DIR`,
 /// so collect both and de-duplicate.
 fn uninstall_data_dirs() -> Vec<PathBuf> {
     let mut seen = BTreeSet::new();

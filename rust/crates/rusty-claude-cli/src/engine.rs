@@ -224,7 +224,7 @@ impl ClawEngineSession {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut system_prompt = crate::build_system_prompt(&model, permission_mode)?;
         system_prompt.extend(extra_system_prompt);
-        let workspace_tempdir = tempfile::Builder::new().prefix("clab-ws-").tempdir()?;
+        let workspace_tempdir = tempfile::Builder::new().prefix("cloudling-ws-").tempdir()?;
         let working_dir = workspace_tempdir.path().to_path_buf();
         let mut session_state = crate::new_cli_session()?;
         // Seed prior turns directly on the in-memory session. The ephemeral

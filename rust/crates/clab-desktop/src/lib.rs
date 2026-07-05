@@ -1,4 +1,4 @@
-//! Desktop integration for Claw Lab (Windows, Linux, macOS).
+//! Desktop integration for Cloudling (Windows, Linux, macOS).
 //!
 //! This is the quarantine crate for the small amount of unavoidable Windows FFI
 //! `unsafe` needed by the Windows tray icon, console-window handling, and
@@ -11,7 +11,7 @@
 //! `uninstall` role removes the optional autostart entry and, after
 //! confirmation, the per-user data directories.
 //!
-//! The crate is decoupled from the rest of Claw Lab: the caller passes a `serve`
+//! The crate is decoupled from the rest of Cloudling: the caller passes a `serve`
 //! closure (which starts the HTTP server) and the list of `data_dirs` to remove
 //! on uninstall. Platform glue is gated by `cfg`:
 //! - **Windows** — `tray-icon`/`windows-sys`: hidden-console relaunch, win32
@@ -33,7 +33,7 @@ pub fn run_tray<F>(_bind: String, _serve: F) -> Result<(), Box<dyn std::error::E
 where
     F: FnOnce() -> Result<(), String> + Send + 'static,
 {
-    Err("`clab tray` is only available on Windows, Linux, and macOS".into())
+    Err("`cloudling tray` is only available on Windows, Linux, and macOS".into())
 }
 
 /// Remove the autostart entry and (after confirmation, unless `assume_yes`) each
@@ -43,7 +43,7 @@ pub fn run_uninstall(
     _data_dirs: Vec<std::path::PathBuf>,
     _assume_yes: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    Err("`clab uninstall` is only available on Windows, Linux, and macOS".into())
+    Err("`cloudling uninstall` is only available on Windows, Linux, and macOS".into())
 }
 
 /// Whether the executable was started by a bare double-click (its own fresh
@@ -62,7 +62,7 @@ pub use linux_imp::{launched_by_double_click, run_tray, run_uninstall};
 #[cfg(target_os = "macos")]
 pub use macos_imp::{launched_by_double_click, run_tray, run_uninstall};
 
-/// Procedurally rendered Claw Lab tray icon, shared by the Windows, Linux, and
+/// Procedurally rendered Cloudling tray icon, shared by the Windows, Linux, and
 /// macOS trays so the mark is identical and no asset file needs shipping/embedding.
 /// Windows/Linux use the full coloured tile (`cloud_icon_rgba`); macOS uses a
 /// monochrome silhouette (`cloud_template_rgba`) it renders as an NSImage template
@@ -228,19 +228,19 @@ mod imp {
 
     /// Set in the environment of the relaunched, window-less tray process so it
     /// runs the tray directly instead of relaunching itself again.
-    const DETACHED_ENV: &str = "CLAB_TRAY_DETACHED";
+    const DETACHED_ENV: &str = "CLOUDLING_TRAY_DETACHED";
 
     /// Per-user autostart registry key and value name. `HKCU\...\Run` runs at
     /// logon without admin rights; removing the value disables autostart.
     const RUN_KEY: &str = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
-    const RUN_VALUE: &str = "ClawLab";
+    const RUN_VALUE: &str = "Cloudling";
 
     pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
     where
         F: FnOnce() -> Result<(), String> + Send + 'static,
     {
         // A console-subsystem binary gets a console window when double-clicked,
-        // launched from autostart, or run as `clab tray` in a terminal. On
+        // launched from autostart, or run as `cloudling tray` in a terminal. On
         // Windows 11 that console is hosted by Windows Terminal (a separate
         // process), so ShowWindow(SW_HIDE) only minimizes a window we don't own.
         // The robust fix: relaunch ourselves with CREATE_NO_WINDOW — a console
@@ -265,16 +265,16 @@ mod imp {
         // of tray-icon on Windows. The message loop keeps the tray alive
         // independently of the server, so a server error just gets logged here.
         thread::Builder::new()
-            .name("clab-serve".into())
+            .name("cloudling-serve".into())
             .spawn(move || {
                 if let Err(error) = serve() {
-                    eprintln!("clab tray: server stopped with error: {error}");
+                    eprintln!("cloudling tray: server stopped with error: {error}");
                 }
             })?;
 
         // Build the tray menu. Item ids are compared against menu events below.
         let menu = Menu::new();
-        let open_item = MenuItem::new("Open Claw Lab", true, None);
+        let open_item = MenuItem::new("Open Cloudling", true, None);
         let autostart_item = CheckMenuItem::new("Start at login", true, autostart_enabled(), None);
         let uninstall_item = MenuItem::new("Uninstall\u{2026}", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
@@ -286,7 +286,7 @@ mod imp {
         menu.append(&quit_item)?;
 
         let _tray = TrayIconBuilder::new()
-            .with_tooltip("Claw Lab")
+            .with_tooltip("Cloudling")
             .with_icon(load_icon())
             .with_menu(Box::new(menu))
             .build()?;
@@ -386,7 +386,7 @@ mod imp {
         last
     }
 
-    /// Relaunch this executable as a window-less `clab tray` process whose
+    /// Relaunch this executable as a window-less `cloudling tray` process whose
     /// console (and thus its child processes' console) has no window.
     ///
     /// The relaunched process runs from the user's home directory rather than
@@ -410,7 +410,7 @@ mod imp {
         Ok(())
     }
 
-    /// Launch a window-less `clab uninstall --yes` process that deletes the data
+    /// Launch a window-less `cloudling uninstall --yes` process that deletes the data
     /// directories once this process has released its file locks.
     fn spawn_uninstall_detached() -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
@@ -422,7 +422,7 @@ mod imp {
         Ok(())
     }
 
-    /// True when `clab` owns its console alone — i.e. a fresh console created for
+    /// True when `cloudling` owns its console alone — i.e. a fresh console created for
     /// a double-clicked executable. When launched from a shell, that shell is
     /// also attached to the console, so the count is >= 2 and we keep the REPL.
     pub fn launched_by_double_click() -> bool {
@@ -433,10 +433,10 @@ mod imp {
         count == 1
     }
 
-    /// Interactive CLI confirmation for `clab uninstall` (no `--yes`). The tray
+    /// Interactive CLI confirmation for `cloudling uninstall` (no `--yes`). The tray
     /// path uses [`confirm_gui`] instead.
     fn confirm_cli(dirs: &[PathBuf]) -> bool {
-        eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
+        eprintln!("This permanently deletes Cloudling data: conversations, keys, settings.");
         for dir in dirs {
             eprintln!("  {}", dir.display());
         }
@@ -455,9 +455,9 @@ mod imp {
     /// if the user explicitly clicks Yes.
     fn confirm_gui() -> bool {
         let text = wide(
-            "This permanently deletes Claw Lab data:\nconversations, keys, and settings.\n\nThis cannot be undone. Continue?",
+            "This permanently deletes Cloudling data:\nconversations, keys, and settings.\n\nThis cannot be undone. Continue?",
         );
-        let caption = wide("Claw Lab \u{2014} Uninstall");
+        let caption = wide("Cloudling \u{2014} Uninstall");
         // SAFETY: both pointers reference null-terminated UTF-16 buffers that
         // outlive the call; a null owner handle yields a standalone dialog.
         let result = unsafe {
@@ -552,16 +552,16 @@ mod linux_imp {
     use ksni::blocking::TrayMethods;
     use ksni::{Icon, Tray};
 
-    /// Autostart desktop-entry path: `$XDG_CONFIG_HOME/autostart/claw-lab.desktop`
+    /// Autostart desktop-entry path: `$XDG_CONFIG_HOME/autostart/cloudling.desktop`
     /// (falls back to `~/.config/autostart/...`). Writing it makes the desktop
-    /// launch `clab tray` at login; removing it disables autostart. No hardcoded
+    /// launch `cloudling tray` at login; removing it disables autostart. No hardcoded
     /// home path — derived from the environment so the build stays portable.
     fn autostart_path() -> Option<PathBuf> {
         let config_home = std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
             .filter(|p| !p.as_os_str().is_empty())
             .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-        Some(config_home.join("autostart").join("claw-lab.desktop"))
+        Some(config_home.join("autostart").join("cloudling.desktop"))
     }
 
     fn autostart_enabled() -> bool {
@@ -575,9 +575,9 @@ mod linux_imp {
         if enable {
             let exe = std::env::current_exe()
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "clab".to_string());
+                .unwrap_or_else(|_| "cloudling".to_string());
             let entry = format!(
-                "[Desktop Entry]\nType=Application\nName=Claw Lab\nExec={exe} tray\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
+                "[Desktop Entry]\nType=Application\nName=Cloudling\nExec={exe} tray\nTerminal=false\nX-GNOME-Autostart-enabled=true\n"
             );
             if let Some(dir) = path.parent() {
                 let _ = std::fs::create_dir_all(dir);
@@ -628,10 +628,10 @@ mod linux_imp {
 
     impl Tray for ClawTray {
         fn id(&self) -> String {
-            "claw-lab".into()
+            "cloudling".into()
         }
         fn title(&self) -> String {
-            "Claw Lab".into()
+            "Cloudling".into()
         }
         fn icon_pixmap(&self) -> Vec<Icon> {
             vec![tray_icon()]
@@ -662,7 +662,7 @@ mod linux_imp {
             }
             items.extend([
                 StandardItem {
-                    label: "Open Claw Lab".into(),
+                    label: "Open Cloudling".into(),
                     activate: Box::new(|this: &mut Self| open_in_browser(&this.url)),
                     ..Default::default()
                 }
@@ -682,7 +682,7 @@ mod linux_imp {
                 StandardItem {
                     label: "Uninstall\u{2026}".into(),
                     activate: Box::new(|_this: &mut Self| {
-                        // Hand off to a detached `clab uninstall --yes` so this
+                        // Hand off to a detached `cloudling uninstall --yes` so this
                         // process (holding the dialogs DB) can exit and release
                         // its locks first, then quit.
                         let _ = spawn_uninstall_detached();
@@ -708,7 +708,7 @@ mod linux_imp {
     {
         let url = browser_url(&bind);
 
-        // Single-instance: if a Claw Lab server already answers `/health` on this
+        // Single-instance: if a Cloudling server already answers `/health` on this
         // port, a copy is already running. Starting a second one would fail to
         // bind (EADDRINUSE) and used to make the new icon vanish; instead just
         // open the browser at the running instance and exit cleanly.
@@ -721,7 +721,7 @@ mod linux_imp {
         // thread and returns a handle we keep alive for the process lifetime.
         //
         // `assume_sni_available(true)` is what makes autostart-at-login work: at
-        // login the desktop launches `clab tray` very early, often before the
+        // login the desktop launches `cloudling tray` very early, often before the
         // StatusNotifierWatcher (e.g. GNOME's AppIndicator extension) is on the
         // session bus. Without this flag `spawn` hard-errors when no watcher is
         // present yet, we fall into the "running without an icon" branch below,
@@ -740,7 +740,7 @@ mod linux_imp {
         let tray_handle = match tray.assume_sni_available(true).spawn() {
             Ok(handle) => Some(handle),
             Err(error) => {
-                eprintln!("clab tray: system tray unavailable ({error}); running without an icon");
+                eprintln!("cloudling tray: system tray unavailable ({error}); running without an icon");
                 None
             }
         };
@@ -751,7 +751,7 @@ mod linux_imp {
         // server's outcome comes back over a channel.
         let (tx, rx) = std::sync::mpsc::channel();
         thread::Builder::new()
-            .name("clab-serve".into())
+            .name("cloudling-serve".into())
             .spawn(move || {
                 let _ = tx.send(serve());
             })?;
@@ -762,7 +762,7 @@ mod linux_imp {
         let open_bind = bind.clone();
         let open_url = url.clone();
         thread::Builder::new()
-            .name("clab-open-browser".into())
+            .name("cloudling-open-browser".into())
             .spawn(move || {
                 if wait_for_health(&open_bind, Duration::from_secs(15)) {
                     open_in_browser(&open_url);
@@ -776,7 +776,7 @@ mod linux_imp {
         match rx.recv() {
             Ok(Ok(())) => {}
             Ok(Err(error)) => {
-                eprintln!("clab tray: server stopped with error: {error}");
+                eprintln!("cloudling tray: server stopped with error: {error}");
                 if let Some(handle) = &tray_handle {
                     let _ = handle.update(move |tray: &mut ClawTray| {
                         tray.error = Some(error);
@@ -793,7 +793,7 @@ mod linux_imp {
         Ok(())
     }
 
-    /// Whether a Claw Lab server already answers `GET /health` with `200` on this
+    /// Whether a Cloudling server already answers `GET /health` with `200` on this
     /// bind's port. Used for single-instance detection and browser-open
     /// readiness. Dependency-free (raw TCP + a minimal HTTP request) so the
     /// static musl binary needs no HTTP-client crate; the loopback address means
@@ -859,13 +859,13 @@ mod linux_imp {
         Ok(())
     }
 
-    /// Always false on Linux: the AppImage / autostart entry launches `clab tray`
+    /// Always false on Linux: the AppImage / autostart entry launches `cloudling tray`
     /// explicitly, so there is no double-click-vs-terminal console heuristic.
     pub fn launched_by_double_click() -> bool {
         false
     }
 
-    /// Launch a detached `clab uninstall --yes` that deletes the data directories
+    /// Launch a detached `cloudling uninstall --yes` that deletes the data directories
     /// once this process releases its file locks.
     fn spawn_uninstall_detached() -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
@@ -890,10 +890,10 @@ mod linux_imp {
         last
     }
 
-    /// Interactive CLI confirmation for `clab uninstall` (no `--yes`).
+    /// Interactive CLI confirmation for `cloudling uninstall` (no `--yes`).
     fn confirm_cli(dirs: &[PathBuf]) -> bool {
         use std::io::Write;
-        eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
+        eprintln!("This permanently deletes Cloudling data: conversations, keys, settings.");
         for dir in dirs {
             eprintln!("  {}", dir.display());
         }
@@ -925,9 +925,9 @@ mod macos_imp {
 
     /// LaunchAgent label / plist filename. Writing
     /// `~/Library/LaunchAgents/<LABEL>.plist` makes the desktop launch
-    /// `clab tray` at login; removing it disables autostart. Mirrors the Linux
-    /// `claw-lab.desktop` autostart entry. No hardcoded home — derived from `HOME`.
-    const AUTOSTART_LABEL: &str = "claw-lab";
+    /// `cloudling tray` at login; removing it disables autostart. Mirrors the Linux
+    /// `cloudling.desktop` autostart entry. No hardcoded home — derived from `HOME`.
+    const AUTOSTART_LABEL: &str = "cloudling";
 
     pub fn run_tray<F>(bind: String, serve: F) -> Result<(), Box<dyn std::error::Error>>
     where
@@ -935,7 +935,7 @@ mod macos_imp {
     {
         let url = browser_url(&bind);
 
-        // Single-instance: if a Claw Lab server already answers `/health` on this
+        // Single-instance: if a Cloudling server already answers `/health` on this
         // port, a copy is running. Just open the browser at it and exit cleanly
         // instead of failing to bind a second one. Mirrors the Linux tray.
         if health_ok(&bind) {
@@ -948,10 +948,10 @@ mod macos_imp {
         // A server error is logged here (like the Windows path); the tray stays
         // alive on the main thread regardless.
         thread::Builder::new()
-            .name("clab-serve".into())
+            .name("cloudling-serve".into())
             .spawn(move || {
                 if let Err(error) = serve() {
-                    eprintln!("clab tray: server stopped with error: {error}");
+                    eprintln!("cloudling tray: server stopped with error: {error}");
                 }
             })?;
 
@@ -961,7 +961,7 @@ mod macos_imp {
         let open_bind = bind.clone();
         let open_url = url.clone();
         thread::Builder::new()
-            .name("clab-open-browser".into())
+            .name("cloudling-open-browser".into())
             .spawn(move || {
                 if wait_for_health(&open_bind, Duration::from_secs(15)) {
                     open_in_browser(&open_url);
@@ -973,13 +973,13 @@ mod macos_imp {
         // `sharedApplication`, `setActivationPolicy`, and `run` are all safe in
         // objc2-app-kit 0.3, so this branch needs no `unsafe` at all (like Linux).
         let mtm =
-            MainThreadMarker::new().ok_or("clab tray: must run on the main thread on macOS")?;
+            MainThreadMarker::new().ok_or("cloudling tray: must run on the main thread on macOS")?;
         let app = NSApplication::sharedApplication(mtm);
         app.setActivationPolicy(NSApplicationActivationPolicy::Accessory);
 
         // Build the tray menu — same items as the Windows/Linux trays.
         let menu = Menu::new();
-        let open_item = MenuItem::new("Open Claw Lab", true, None);
+        let open_item = MenuItem::new("Open Cloudling", true, None);
         let autostart_item = CheckMenuItem::new("Start at login", true, autostart_enabled(), None);
         let uninstall_item = MenuItem::new("Uninstall\u{2026}", true, None);
         let quit_item = MenuItem::new("Quit", true, None);
@@ -994,7 +994,7 @@ mod macos_imp {
         // process lifetime (the variables below outlive `app.run()`, which never
         // returns). The icon is set as a template so the menu bar tints it.
         let _tray = TrayIconBuilder::new()
-            .with_tooltip("Claw Lab")
+            .with_tooltip("Cloudling")
             .with_icon(load_icon())
             .with_icon_as_template(true)
             .with_menu(Box::new(menu))
@@ -1018,7 +1018,7 @@ mod macos_imp {
             } else if event.id == autostart_id {
                 set_autostart(!autostart_enabled());
             } else if event.id == uninstall_id {
-                // Hand off to a detached `clab uninstall --yes` so this process
+                // Hand off to a detached `cloudling uninstall --yes` so this process
                 // (holding the dialogs DB) can exit and release its locks first.
                 let _ = spawn_uninstall_detached();
                 std::process::exit(0);
@@ -1053,7 +1053,7 @@ mod macos_imp {
         Ok(())
     }
 
-    /// Always false on macOS: the `.app` bundle / LaunchAgent launches `clab tray`
+    /// Always false on macOS: the `.app` bundle / LaunchAgent launches `cloudling tray`
     /// explicitly, so there is no double-click-vs-terminal console heuristic.
     pub fn launched_by_double_click() -> bool {
         false
@@ -1083,8 +1083,8 @@ mod macos_imp {
         if enable {
             let exe = std::env::current_exe()
                 .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| "clab".to_string());
-            // Minimal LaunchAgent: run `clab tray` at login for this GUI session.
+                .unwrap_or_else(|_| "cloudling".to_string());
+            // Minimal LaunchAgent: run `cloudling tray` at login for this GUI session.
             let plist = format!(
                 "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
                  <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTD/PropertyList-1.0.dtd\">\n\
@@ -1136,7 +1136,7 @@ mod macos_imp {
         Icon::from_rgba(rgba, w, h).expect("cloud icon dimensions are valid")
     }
 
-    /// Launch a detached `clab uninstall --yes` that deletes the data directories
+    /// Launch a detached `cloudling uninstall --yes` that deletes the data directories
     /// once this process releases its file locks.
     fn spawn_uninstall_detached() -> std::io::Result<()> {
         let exe = std::env::current_exe()?;
@@ -1161,10 +1161,10 @@ mod macos_imp {
         last
     }
 
-    /// Interactive CLI confirmation for `clab uninstall` (no `--yes`).
+    /// Interactive CLI confirmation for `cloudling uninstall` (no `--yes`).
     fn confirm_cli(dirs: &[PathBuf]) -> bool {
         use std::io::Write;
-        eprintln!("This permanently deletes Claw Lab data: conversations, keys, settings.");
+        eprintln!("This permanently deletes Cloudling data: conversations, keys, settings.");
         for dir in dirs {
             eprintln!("  {}", dir.display());
         }
@@ -1179,7 +1179,7 @@ mod macos_imp {
         line.trim() == "yes"
     }
 
-    /// Whether a Claw Lab server already answers `GET /health` with `200` on this
+    /// Whether a Cloudling server already answers `GET /health` with `200` on this
     /// bind's port. Used for single-instance detection and browser-open readiness.
     /// Dependency-free (raw TCP + a minimal HTTP request) over loopback, so no
     /// HTTP-client crate and no DNS. Mirrors the Linux tray's helper.

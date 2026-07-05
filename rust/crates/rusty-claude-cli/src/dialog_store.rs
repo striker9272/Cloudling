@@ -3,7 +3,7 @@
 //! Used only when `openai-serve --ui` is active. The chat endpoint itself stays
 //! stateless (the client sends the full history every turn); this is a separate
 //! persistence layer so the UI can list and reopen past dialogs. The location is
-//! `CLAW_UI_DATA_DIR` with a portable default under the config home — never hardcoded.
+//! `CLOUDLING_UI_DATA_DIR` with a portable default under the config home — never hardcoded.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -33,10 +33,10 @@ CREATE TABLE IF NOT EXISTS ui_kv (
 );
 ";
 
-/// Resolve the UI data directory. `CLAW_UI_DATA_DIR` wins; otherwise a portable
+/// Resolve the UI data directory. `CLOUDLING_UI_DATA_DIR` wins; otherwise a portable
 /// default under the config home (`CLAW_CONFIG_HOME`/ui, else `$HOME`/.claw/ui).
 pub fn resolve_data_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("CLAW_UI_DATA_DIR") {
+    if let Ok(dir) = std::env::var("CLOUDLING_UI_DATA_DIR") {
         let dir = dir.trim();
         if !dir.is_empty() {
             return PathBuf::from(dir);
@@ -289,7 +289,7 @@ mod tests {
 
     impl DialogStore {
         /// Test-only store backed by an in-memory database, so tests touch neither
-        /// the filesystem nor `CLAW_UI_DATA_DIR` (and run independently in parallel).
+        /// the filesystem nor `CLOUDLING_UI_DATA_DIR` (and run independently in parallel).
         fn open_in_memory() -> Self {
             let conn = Connection::open_in_memory().expect("open in-memory sqlite");
             conn.execute_batch(SCHEMA).expect("apply schema");

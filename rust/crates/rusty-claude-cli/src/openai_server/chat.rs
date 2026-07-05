@@ -116,10 +116,10 @@ pub(super) async fn chat_completions(
     headers: HeaderMap,
     Json(request): Json<ChatCompletionRequest>,
 ) -> Response {
-    // The built-in UI tags its requests with `X-Clab-UI` so AskUserQuestion can render an
+    // The built-in UI tags its requests with `X-Cloudling-UI` so AskUserQuestion can render an
     // interactive widget; other clients (OWUI, raw API) omit it and keep the stdin/
     // "unavailable" fallback. Header lookups are case-insensitive.
-    let interactive_ui = headers.contains_key("x-clab-ui");
+    let interactive_ui = headers.contains_key("x-cloudling-ui");
     if request.stream {
         return stream_chat_completions(state, request, interactive_ui);
     }
@@ -179,11 +179,11 @@ pub(super) async fn chat_completions(
     let (engine_response, last_ctx) = match result {
         Ok(Ok(pair)) => pair,
         Ok(Err(error)) => {
-            eprintln!("claw openai-serve: engine error: {error}");
+            eprintln!("cloudling openai-serve: engine error: {error}");
             return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error, "engine_error");
         }
         Err(error) => {
-            eprintln!("claw openai-serve: task error: {error}");
+            eprintln!("cloudling openai-serve: task error: {error}");
             return error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 &error.to_string(),
@@ -209,7 +209,7 @@ pub(super) async fn chat_completions(
     let mut content = engine_response.message;
     if let Some(compaction) = &engine_response.auto_compaction {
         eprintln!(
-            "claw openai-serve: auto-compaction fired (removed {} messages)",
+            "cloudling openai-serve: auto-compaction fired (removed {} messages)",
             compaction.removed_messages
         );
         content.push_str(&format!("\n\n> {}", compaction.notice));
@@ -304,7 +304,7 @@ fn stream_chat_completions(
             ) {
                 Ok(session) => session,
                 Err(error) => {
-                    eprintln!("claw openai-serve: stream session error: {error}");
+                    eprintln!("cloudling openai-serve: stream session error: {error}");
                     let _ = sender.send(openai_sse_error_chunk(
                         &id,
                         created,
@@ -405,7 +405,7 @@ fn stream_chat_completions(
                 // invisible event shows up in both the chat and the service logs.
                 if let Some(compaction) = &response.auto_compaction {
                     eprintln!(
-                        "claw openai-serve: auto-compaction fired (removed {} messages)",
+                        "cloudling openai-serve: auto-compaction fired (removed {} messages)",
                         compaction.removed_messages
                     );
                     let _ = sender.send(openai_sse_chunk(
@@ -442,7 +442,7 @@ fn stream_chat_completions(
                 ));
             }
             Err(error) => {
-                eprintln!("claw openai-serve: stream engine error: {error}");
+                eprintln!("cloudling openai-serve: stream engine error: {error}");
                 let _ = sender.send(openai_sse_error_chunk(
                     &id,
                     created,
@@ -798,7 +798,7 @@ fn tool_call_block_regex() -> Regex {
 /// The UI stores each executed tool call as a rendered `<details type="tool_calls">`
 /// block (markup + the tool's output) and re-sends it verbatim as assistant *content*.
 /// Feeding that markup back to the model teaches weaker models to emit tool calls as
-/// text instead of via the structured `tool_calls` channel — which clab then cannot
+/// text instead of via the structured `tool_calls` channel — which cloudling then cannot
 /// execute, so the markup leaks into the visible answer. Here we parse those blocks
 /// back into proper `ContentBlock::ToolUse` + `ConversationMessage::tool_result`
 /// messages, so the outgoing request carries standard `tool_calls` / `role:"tool"`
@@ -1091,7 +1091,7 @@ fn content_to_text(content: &Value) -> Result<String, String> {
                         }
                     }
                     "image_url" => {
-                        parts.push("[image omitted: text-only claw openai-serve]".to_string());
+                        parts.push("[image omitted: text-only cloudling openai-serve]".to_string());
                     }
                     _ => {}
                 }

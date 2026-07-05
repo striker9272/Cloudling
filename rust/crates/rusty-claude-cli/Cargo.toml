@@ -1,12 +1,12 @@
 [package]
-name = "clab-cli"
+name = "cloudling-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "clab"
+name = "cloudling"
 path = "src/main.rs"
 
 [dependencies]
@@ -37,7 +37,7 @@ log = "0.4"
 # Quarantines the unavoidable Win32 FFI `unsafe` so this crate keeps the
 # upstream `unsafe_code = "forbid"`. No-op stubs off Windows; pulls no extra
 # deps on Linux/macOS.
-clab-desktop = { path = "../clab-desktop" }
+cloudling-desktop = { path = "../cloudling-desktop" }
 
 
 [lints]

@@ -1,7 +1,7 @@
 # macOS install quickstart
 
 > **Status:** the macOS port is **new and not yet verified on real hardware.** The workspace builds and
-> the `clab` binary runs on Apple Silicon (verified in CI), and the release pipeline produces a macOS
+> the `cloudling` binary runs on Apple Silicon (verified in CI), and the release pipeline produces a macOS
 > binary and a `.dmg` desktop bundle — but those are currently published as **pre-release / build
 > artifacts only** (not attached to public GitHub releases) until a live smoke test on a Mac passes. The
 > menu-bar tray, `.app` bundle, and launchd service below are implemented but **unverified end-to-end**.
@@ -31,21 +31,21 @@ Lowering the floor to old/Intel macOS is intentionally out of scope: it cannot b
 
 The intended "no terminal" path, mirroring the Windows tray and the Linux `.deb`. Not yet verified on a Mac.
 
-1. Get the `claw-macos-arm64.dmg` artifact (from a release once published, or build it — see below) and open it.
-2. Drag **Claw Lab** to **Applications**, then launch it from Launchpad/Applications.
+1. Get the `cloudling-macos-arm64.dmg` artifact (from a release once published, or build it — see below) and open it.
+2. Drag **Cloudling** to **Applications**, then launch it from Launchpad/Applications.
 3. It starts the agent server with the built-in web UI in the background and adds a cloud icon to the
    **menu bar** (top-right). The app is a menu-bar agent — it has no Dock icon.
 4. Click the menu-bar icon for the menu:
-   - **Open Claw Lab** — opens the chat UI in your browser (`http://127.0.0.1:4097/`). On first run, point it
+   - **Open Cloudling** — opens the chat UI in your browser (`http://127.0.0.1:4097/`). On first run, point it
      at your model backend and save.
    - **Start at login** — optional autostart (off by default; a per-user
-     `~/Library/LaunchAgents/claw-lab.plist`).
+     `~/Library/LaunchAgents/cloudling.plist`).
    - **Uninstall…** — after a confirmation, removes the per-user data (conversations, keys, settings) and the
      autostart entry.
    - **Quit** — stops the background server and exits.
 
-Per-user data (settings + conversations) lives under `~/.claw`. The same `clab` binary run from a terminal
-stays a normal CLI/REPL. Under the hood the tray is `clab tray` and the menu's uninstall is `clab uninstall`.
+Per-user data (settings + conversations) lives under `~/.claw`. The same `cloudling` binary run from a terminal
+stays a normal CLI/REPL. Under the hood the tray is `cloudling tray` and the menu's uninstall is `cloudling uninstall`.
 
 > The `.dmg`/`.app` are **unsigned**, so Gatekeeper will block the first launch: right-click the app →
 > **Open** → **Open**, or allow it under **System Settings → Privacy & Security**. Code signing /
@@ -53,23 +53,23 @@ stays a normal CLI/REPL. Under the hood the tray is `clab tray` and the menu's u
 
 ## Build from source
 
-macOS has everything `clab` needs (Apple Clang from the Xcode Command Line Tools covers the C dependencies
+macOS has everything `cloudling` needs (Apple Clang from the Xcode Command Line Tools covers the C dependencies
 `ring` and `rusqlite`). Install Rust from <https://rustup.rs/> if you do not have it, then:
 
 ```bash
 git clone https://github.com/striker9272/claw-lab
 cd claw-lab/rust
 cargo build --workspace
-./target/debug/clab --help
-./target/debug/clab doctor
+./target/debug/cloudling --help
+./target/debug/cloudling doctor
 ```
 
 For an optimized binary:
 
 ```bash
 cd claw-lab/rust
-cargo build --release -p clab-cli
-./target/release/clab --help
+cargo build --release -p cloudling-cli
+./target/release/cloudling --help
 ```
 
 The repository `install.sh` also supports macOS (build-from-source; it offers to install missing build deps
@@ -83,52 +83,52 @@ cd claw-lab
 
 ## Prebuilt binary
 
-Once a release publishes the macOS asset, the headless binary is `claw-macos-arm64` (plus
-`claw-macos-arm64.sha256`):
+Once a release publishes the macOS asset, the headless binary is `cloudling-macos-arm64` (plus
+`cloudling-macos-arm64.sha256`):
 
 ```bash
-asset="claw-macos-arm64"
+asset="cloudling-macos-arm64"
 # Download "$asset" and "$asset.sha256" from the release page, then verify:
 shasum -a 256 -c "$asset.sha256"
 chmod +x "$asset"
-sudo mv "$asset" /usr/local/bin/clab
-clab --help
-clab doctor
+sudo mv "$asset" /usr/local/bin/cloudling
+cloudling --help
+cloudling doctor
 ```
 
 ## Headless server as a launchd service — experimental
 
 To run the OpenAI-compatible server as a background **LaunchAgent** (the macOS counterpart of the Linux
 systemd installer), use `rust/scripts/install-openai-service-macos.sh`. It writes a per-user env file
-(single source of truth), a wrapper, and `~/Library/LaunchAgents/lab.claw.openai.plist`. Not yet verified
+(single source of truth), a wrapper, and `~/Library/LaunchAgents/cloudling.openai.plist`. Not yet verified
 on a Mac.
 
 ```bash
 # built-in web UI mode (configure the engine in the browser):
 rust/scripts/install-openai-service-macos.sh \
   --ui \
-  --runtime-bin /usr/local/bin/clab \
+  --runtime-bin /usr/local/bin/cloudling \
   --load
 
 # or a fixed backend, no UI:
 rust/scripts/install-openai-service-macos.sh \
   --base-url http://127.0.0.1:11434/v1 \
   --backend-model llama3.2 \
-  --runtime-bin /usr/local/bin/clab \
+  --runtime-bin /usr/local/bin/cloudling \
   --load
 ```
 
 Remove it with `--uninstall`. Pass `--dry-run` to preview every file it would write without touching
-anything. The agent's stdout/stderr go to `~/Library/Application Support/claw-lab/openai.log`.
+anything. The agent's stdout/stderr go to `~/Library/Application Support/cloudling/openai.log`.
 
 ## First-run health checks
 
 ```bash
 cd claw-lab/rust
-./target/debug/clab --help
-./target/debug/clab doctor
-./target/debug/clab status --output-format json
-./target/debug/clab config --output-format json
+./target/debug/cloudling --help
+./target/debug/cloudling doctor
+./target/debug/cloudling status --output-format json
+./target/debug/cloudling config --output-format json
 ```
 
 `doctor`, `status`, `config`, and `version` support `--output-format json`; do not use a separate `--json`
@@ -137,7 +137,7 @@ suffix.
 ## Safe provider switching examples
 
 Provider routing is model-prefix first; when multiple credentials exist, choose an explicit model prefix or
-set `OPENAI_BASE_URL` so `clab` does not infer the wrong backend. Set keys only in your local environment —
+set `OPENAI_BASE_URL` so `cloudling` does not infer the wrong backend. Set keys only in your local environment —
 do not paste real keys into shared shell history or docs.
 
 ### OpenAI-compatible gateway or OpenRouter
@@ -147,7 +147,7 @@ unset ANTHROPIC_API_KEY
 export OPENAI_BASE_URL="https://openrouter.ai/api/v1"
 export OPENAI_API_KEY="sk-or-v1-REPLACE_ME"
 
-./target/debug/clab --model "openai/gpt-4.1-mini" prompt "reply with ready"
+./target/debug/cloudling --model "openai/gpt-4.1-mini" prompt "reply with ready"
 ```
 
 ### Local OpenAI-compatible server
@@ -157,7 +157,7 @@ unset ANTHROPIC_API_KEY
 export OPENAI_BASE_URL="http://127.0.0.1:11434/v1"
 export OPENAI_API_KEY="local-dev-token"   # or `unset OPENAI_API_KEY` if authless
 
-./target/debug/clab --model "llama3.2" prompt "reply with ready"
+./target/debug/cloudling --model "llama3.2" prompt "reply with ready"
 ```
 
 ### Anthropic direct
@@ -166,12 +166,12 @@ export OPENAI_API_KEY="local-dev-token"   # or `unset OPENAI_API_KEY` if authles
 unset OPENAI_BASE_URL OPENAI_API_KEY
 export ANTHROPIC_API_KEY="sk-ant-REPLACE_ME"
 
-./target/debug/clab --model "sonnet" prompt "reply with ready"
+./target/debug/cloudling --model "sonnet" prompt "reply with ready"
 ```
 
 ## Troubleshooting checklist
 
-- `clab` not found: run it by full path (`./target/debug/clab`) or move the prebuilt binary onto your `PATH`
+- `cloudling` not found: run it by full path (`./target/debug/cloudling`) or move the prebuilt binary onto your `PATH`
   (e.g. `/usr/local/bin`).
 - `cargo` not found: install Rust from <https://rustup.rs/> and reopen the terminal.
 - Gatekeeper blocks the app/binary: right-click → **Open**, or allow it under

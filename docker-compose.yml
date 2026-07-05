@@ -12,7 +12,7 @@ services:
   rag-serve:
     build:
       context: ./rust
-      dockerfile: crates/claw-rag-service/Dockerfile
+      dockerfile: crates/cloudling-rag-service/Dockerfile
     command: ["serve", "--db", "/data/index.sqlite"]
     environment:
       # Use mock embeddings by default for local dev; override in your shell for real providers.
@@ -31,7 +31,7 @@ services:
   rag-ingest:
     build:
       context: ./rust
-      dockerfile: crates/claw-rag-service/Dockerfile
+      dockerfile: crates/cloudling-rag-service/Dockerfile
     command: ["ingest", "--db", "/data/index.sqlite"]
     environment:
       CLAW_RAG_MOCK_PROVIDERS: "1"

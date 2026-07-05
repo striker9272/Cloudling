@@ -95,7 +95,7 @@ pub struct RuntimeFeatureConfig {
     sandbox: SandboxConfig,
     provider_fallbacks: ProviderFallbackConfig,
     trusted_roots: Vec<String>,
-    /// Single user-chosen working folder (Claw Lab serve UI). Surfaced to the model as
+    /// Single user-chosen working folder (Cloudling serve UI). Surfaced to the model as
     /// the folder "we work in" and merged into the allow-list roots so the file tools can
     /// reach it. Distinct from `trusted_roots`, which stays the advanced extra-folders list.
     workspace_folder: Option<String>,
@@ -178,7 +178,7 @@ pub struct McpStdioServerConfig {
 
 /// Wire framing for stdio MCP servers. The MCP specification uses newline-delimited
 /// JSON messages (the default); `content-length` keeps the LSP-style header framing
-/// for legacy servers written against clab's previous transport. Reads auto-detect
+/// for legacy servers written against cloudling's previous transport. Reads auto-detect
 /// both formats; this setting only controls what the client writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum McpStdioFraming {

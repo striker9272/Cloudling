@@ -1,22 +1,22 @@
-# Container-first claw-code workflows
+# Container-first cloudling workflows
 
 This repo already had **container detection** in the Rust runtime before this document was added:
 
 - `rust/crates/runtime/src/sandbox.rs` detects Docker/Podman/container markers such as `/.dockerenv`, `/run/.containerenv`, matching env vars, and `/proc/1/cgroup` hints.
-- `rust/crates/rusty-claude-cli/src/main.rs` exposes that state through the `clab sandbox` / `cargo run -p rusty-claude-cli -- sandbox` report.
+- `rust/crates/cloudling-cli/src/main.rs` exposes that state through the `cloudling sandbox` / `cargo run -p cloudling-cli -- sandbox` report.
 - `.github/workflows/rust-ci.yml` runs on `ubuntu-latest`, but it does **not** define a Docker or Podman container job.
 - Before this change, the repo did **not** have a checked-in `Dockerfile`, `Containerfile`, or `.devcontainer/` config.
 
 The repo ships **two** container setups for two different jobs:
 
 - **Production server image** — [`../docker/Dockerfile`](../docker/Dockerfile): a ready-to-run image of the
-  `clab` server (built-in web UI + OpenAI-compatible endpoint). Use this to *run* Claw Lab in a container.
+  `cloudling` server (built-in web UI + OpenAI-compatible endpoint). Use this to *run* Cloudling in a container.
 - **Dev build/test shell** — [`../Containerfile`](../Containerfile): a reusable Rust toolchain shell you
   bind-mount your checkout into to build and test. Use this to *develop*. Covered further below.
 
 ## Production server image (`docker/`)
 
-`docker/Dockerfile` is a multi-stage build: a Rust toolchain layer compiles `clab` from source, then only
+`docker/Dockerfile` is a multi-stage build: a Rust toolchain layer compiles `cloudling` from source, then only
 the binary ships on a slim `debian:bookworm-slim` runtime. The web UI assets are embedded in the binary at
 compile time, so no static files are copied. Builder and runtime share the same Debian release so the
 binary's glibc requirement always matches the runtime.
@@ -28,25 +28,25 @@ The quickest path is the bundled compose file, which exposes the container on ho
 
 ```bash
 # Required: a token guarding the /ui/* endpoints on a non-loopback bind.
-export CLAW_UI_TOKEN="$(openssl rand -hex 16)"
+export CLOUDLING_UI_TOKEN="$(openssl rand -hex 16)"
 # Optional: point at a backend now, or leave unset and configure the engine in the browser.
 export OPENAI_BASE_URL="http://your-backend:8080/v1" OPENAI_MODEL="your-model"
 export CLAW_PERMISSION_MODE="danger-full-access"   # default in the image is read-only
 
 docker compose -f docker/compose.yaml up --build -d
-# open http://<host>:4098/ and enter CLAW_UI_TOKEN when prompted
+# open http://<host>:4098/ and enter CLOUDLING_UI_TOKEN when prompted
 ```
 
 Plain `docker build` + `docker run` works too:
 
 ```bash
-docker build -f docker/Dockerfile -t claw-lab:dev .
+docker build -f docker/Dockerfile -t cloudling:dev .
 docker run -d -p 4098:4097 \
-  -e CLAW_UI_TOKEN="$(openssl rand -hex 16)" \
+  -e CLOUDLING_UI_TOKEN="$(openssl rand -hex 16)" \
   -e OPENAI_BASE_URL="http://your-backend:8080/v1" -e OPENAI_MODEL="your-model" \
   -e CLAW_PERMISSION_MODE="danger-full-access" \
-  -v clab-ui-data:/data/ui -v clab-workspace:/workspace \
-  claw-lab:dev
+  -v cloudling-ui-data:/data/ui -v cloudling-workspace:/workspace \
+  cloudling:dev
 ```
 
 ### Configuration (env)
@@ -56,20 +56,20 @@ addresses are hardcoded.
 
 | Variable | Default (image) | Purpose |
 | --- | --- | --- |
-| `CLAW_OPENAI_BIND` | `0.0.0.0:4097` | Bind address inside the container (mapped to a host port). |
-| `CLAW_UI_TOKEN` | *(unset)* | Bearer token for `/ui/*`. **Required** for a non-loopback bind, else `/ui/*` return 403. |
+| `CLOUDLING_OPENAI_BIND` | `0.0.0.0:4097` | Bind address inside the container (mapped to a host port). |
+| `CLOUDLING_UI_TOKEN` | *(unset)* | Bearer token for `/ui/*`. **Required** for a non-loopback bind, else `/ui/*` return 403. |
 | `CLAW_PERMISSION_MODE` | `read-only` | Tool permission mode (`read-only` / `workspace-write` / `danger-full-access`). |
-| `CLAW_WORKING_DIRECTORY` | `/workspace` | Agent working directory (mount a volume to persist). |
-| `CLAW_UI_DATA_DIR` | `/data/ui` | SQLite store for dialogs/presets/settings (mount a volume to persist). |
+| `CLOUDLING_WORKING_DIRECTORY` | `/workspace` | Agent working directory (mount a volume to persist). |
+| `CLOUDLING_UI_DATA_DIR` | `/data/ui` | SQLite store for dialogs/presets/settings (mount a volume to persist). |
 | `OPENAI_BASE_URL` / `OPENAI_MODEL` / `OPENAI_API_KEY` | *(unset)* | Backend engine. Leave unset to configure it in the browser on first run. |
 | `CLAWD_WEB_SEARCH_BASE_URL` | *(unset)* | SearXNG-style web search endpoint, reachable from inside the container. |
 
 ### Sandbox: namespace off by design
 
-The image bakes `sandbox.namespaceRestrictions = false` (via a settings file at `CLAW_CONFIG_HOME=/etc/clab`).
+The image bakes `sandbox.namespaceRestrictions = false` (via a settings file at `CLAW_CONFIG_HOME=/etc/cloudling`).
 Inside a container the container itself is the isolation boundary, and unprivileged `unshare` user namespaces
 are typically blocked anyway (Docker seccomp; on hosts like Ubuntu 24.04 also AppArmor). Turning namespace
-isolation off makes `clab sandbox` report an honest **Active** state with filesystem `workspace-only`
+isolation off makes `cloudling sandbox` report an honest **Active** state with filesystem `workspace-only`
 isolation still on, instead of a noisy fallback warning. The agent's tools run directly inside the container.
 
 ### Published image (GHCR)
@@ -85,7 +85,7 @@ Once an image is published you can run it instead of building locally:
 
 ```bash
 docker run -d -p 4098:4097 \
-  -e CLAW_UI_TOKEN="$(openssl rand -hex 16)" \
+  -e CLOUDLING_UI_TOKEN="$(openssl rand -hex 16)" \
   -e OPENAI_BASE_URL="http://your-backend:8080/v1" -e OPENAI_MODEL="your-model" \
   ghcr.io/<owner>/<repo>:latest
 ```
@@ -106,13 +106,13 @@ From the repository root:
 ### Docker
 
 ```bash
-docker build -t claw-code-dev -f Containerfile .
+docker build -t cloudling-dev -f Containerfile .
 ```
 
 ### Podman
 
 ```bash
-podman build -t claw-code-dev -f Containerfile .
+podman build -t cloudling-dev -f Containerfile .
 ```
 
 ## Run `cargo test --workspace` in the container
@@ -124,9 +124,9 @@ These commands mount the repo, keep Cargo build artifacts out of the working tre
 ```bash
 docker run --rm -it \
   -v "$PWD":/workspace \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev \
+  cloudling-dev \
   cargo test --workspace
 ```
 
@@ -135,9 +135,9 @@ docker run --rm -it \
 ```bash
 podman run --rm -it \
   -v "$PWD":/workspace:Z \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev \
+  cloudling-dev \
   cargo test --workspace
 ```
 
@@ -150,9 +150,9 @@ If you want a fully clean rebuild, add `cargo clean &&` before `cargo test --wor
 ```bash
 docker run --rm -it \
   -v "$PWD":/workspace \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev
+  cloudling-dev
 ```
 
 ### Podman
@@ -160,9 +160,9 @@ docker run --rm -it \
 ```bash
 podman run --rm -it \
   -v "$PWD":/workspace:Z \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev
+  cloudling-dev
 ```
 
 Inside the shell:
@@ -170,15 +170,15 @@ Inside the shell:
 ```bash
 cargo build --workspace
 cargo test --workspace
-cargo run -p rusty-claude-cli -- --help
-cargo run -p rusty-claude-cli -- sandbox
+cargo run -p cloudling-cli -- --help
+cargo run -p cloudling-cli -- sandbox
 ```
 
 The `sandbox` command is a useful sanity check: inside Docker or Podman it should report `In container true` and list the markers the runtime detected.
 
 ## Bind-mount this repo and another repo at the same time
 
-If you want to run `clab` against a second checkout while keeping `claw-code` itself mounted read-write:
+If you want to run `cloudling` against a second checkout while keeping `cloudling` itself mounted read-write:
 
 ### Docker
 
@@ -186,9 +186,9 @@ If you want to run `clab` against a second checkout while keeping `claw-code` it
 docker run --rm -it \
   -v "$PWD":/workspace \
   -v "$HOME/src/other-repo":/repo \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev
+  cloudling-dev
 ```
 
 ### Podman
@@ -197,20 +197,20 @@ docker run --rm -it \
 podman run --rm -it \
   -v "$PWD":/workspace:Z \
   -v "$HOME/src/other-repo":/repo:Z \
-  -e CARGO_TARGET_DIR=/tmp/claw-target \
+  -e CARGO_TARGET_DIR=/tmp/cloudling-target \
   -w /workspace/rust \
-  claw-code-dev
+  cloudling-dev
 ```
 
 Then, for example:
 
 ```bash
-cargo run -p rusty-claude-cli -- prompt "summarize /repo"
+cargo run -p cloudling-cli -- prompt "summarize /repo"
 ```
 
 ## Notes
 
 - Docker and Podman use the same checked-in `Containerfile`.
 - The `:Z` suffix in the Podman examples is for SELinux relabeling; keep it on Fedora/RHEL-class hosts.
-- Running with `CARGO_TARGET_DIR=/tmp/claw-target` avoids leaving container-owned `target/` artifacts in your bind-mounted checkout.
+- Running with `CARGO_TARGET_DIR=/tmp/cloudling-target` avoids leaving container-owned `target/` artifacts in your bind-mounted checkout.
 - For non-container local development, keep using [`../USAGE.md`](../USAGE.md) and [`../rust/README.md`](../rust/README.md).

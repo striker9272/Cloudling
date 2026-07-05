@@ -1,4 +1,4 @@
-//! `claw-analog doctor` — environment and Cargo sanity checks.
+//! `cloudling-analog doctor` — environment and Cargo sanity checks.
 
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::Duration;
 
 use clap::ValueEnum;
-use clab_analog::{
+use cloudling_analog::{
     load_analog_toml, load_profile_hint, resolve_analog_options, AnalogDoctorOverrides,
     AnalogFileConfig, OutputFormat, PermissionMode, Preset, StreamOverride, NDJSON_FORMAT_VERSION,
     NDJSON_SCHEMA,
@@ -81,7 +81,7 @@ impl From<DoctorPresetCli> for Preset {
 
 #[derive(Debug, clap::Args)]
 pub struct DoctorCli {
-    /// Workspace root (same as `claw-analog -w`; config defaults to `<workspace>/.claw-analog.toml`).
+    /// Workspace root (same as `cloudling-analog -w`; config defaults to `<workspace>/.claw-analog.toml`).
     #[arg(short = 'w', long, default_value = ".", value_name = "DIR")]
     pub workspace: PathBuf,
     /// Config path (default: `<workspace>/.claw-analog.toml`).
@@ -128,7 +128,7 @@ pub struct DoctorCli {
     /// Skip compile check (`cargo check` / `build --release`).
     #[arg(long)]
     pub no_build: bool,
-    /// Run `cargo build --release -p claw-analog` (writes `target/release/…`, safe while `cargo run` holds `target/debug/…` on Windows).
+    /// Run `cargo build --release -p cloudling-analog` (writes `target/release/…`, safe while `cargo run` holds `target/debug/…` on Windows).
     #[arg(long, conflicts_with = "no_build")]
     pub release_build: bool,
     /// Directory containing the repo workspace `Cargo.toml` (default: search upward from cwd).
@@ -137,7 +137,7 @@ pub struct DoctorCli {
 }
 
 pub fn run_doctor(args: DoctorCli) -> i32 {
-    println!("claw-analog doctor — environment and build checks\n");
+    println!("cloudling-analog doctor — environment and build checks\n");
 
     let workspace = args.workspace.clone();
     let canon_ws = std::fs::canonicalize(&workspace).unwrap_or_else(|_| workspace.clone());
@@ -150,7 +150,7 @@ pub fn run_doctor(args: DoctorCli) -> i32 {
             Ok(c) => (c, "loaded"),
             Err(e) => {
                 eprintln!(
-                    "[claw-analog] doctor: failed to parse {}: {e} (using empty TOML defaults)",
+                    "[cloudling-analog] doctor: failed to parse {}: {e} (using empty TOML defaults)",
                     cfg_path.display()
                 );
                 (AnalogFileConfig::default(), "parse error (defaults)")
@@ -383,15 +383,15 @@ fn workspace_root_or_eprint(manifest_dir: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
-/// `cargo check` does not replace `target/debug/claw-analog.exe`, so `cargo run … doctor` works on Windows.
+/// `cargo check` does not replace `target/debug/cloudling-analog.exe`, so `cargo run … doctor` works on Windows.
 fn run_cargo_check(manifest_dir: Option<&Path>) -> bool {
     let Some(root) = workspace_root_or_eprint(manifest_dir) else {
         return false;
     };
-    println!("cargo check -p claw-analog (workspace {})", root.display());
+    println!("cargo check -p cloudling-analog (workspace {})", root.display());
     println!("  (compile-only; avoids “access denied” replacing the running debug exe on Windows)");
     let status = Command::new("cargo")
-        .args(["check", "-p", "claw-analog"])
+        .args(["check", "-p", "cloudling-analog"])
         .current_dir(&root)
         .status();
     match status {
@@ -415,12 +415,12 @@ fn run_cargo_release_build(manifest_dir: Option<&Path>) -> bool {
         return false;
     };
     println!(
-        "cargo build --release -p claw-analog (workspace {})",
+        "cargo build --release -p cloudling-analog (workspace {})",
         root.display()
     );
     println!("  (output in target/release/; does not overwrite a running target/debug/ binary)");
     let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "claw-analog"])
+        .args(["build", "--release", "-p", "cloudling-analog"])
         .current_dir(&root)
         .status();
     match status {

@@ -5,7 +5,7 @@ This milestone adds a deterministic Anthropic-compatible mock service plus a rep
 ## Artifacts
 
 - `crates/mock-anthropic-service/` — mock `/v1/messages` service
-- `crates/rusty-claude-cli/tests/mock_parity_harness.rs` — end-to-end clean-environment harness
+- `crates/cloudling-cli/tests/mock_parity_harness.rs` — end-to-end clean-environment harness
 - `scripts/run_mock_parity_harness.sh` — convenience wrapper
 
 ## Scenarios
@@ -39,7 +39,7 @@ cd rust/
 python3 scripts/run_mock_parity_diff.py
 ```
 
-Scenario-to-PARITY mappings live in `mock_parity_scenarios.json`; keep this manifest aligned with `rust/crates/rusty-claude-cli/tests/mock_parity_harness.rs` and `PARITY.md` via `python3 scripts/run_mock_parity_diff.py --no-run`.
+Scenario-to-PARITY mappings live in `mock_parity_scenarios.json`; keep this manifest aligned with `rust/crates/cloudling-cli/tests/mock_parity_harness.rs` and `PARITY.md` via `python3 scripts/run_mock_parity_diff.py --no-run`.
 
 ## Manual mock server
 

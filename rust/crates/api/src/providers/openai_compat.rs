@@ -680,7 +680,7 @@ impl StreamState {
                 events.push(StreamEvent::ContentBlockStart(ContentBlockStartEvent {
                     index,
                     content_block: OutputContentBlock::ToolUse {
-                        id: format!("clab-text-tool-{i}"),
+                        id: format!("cloudling-text-tool-{i}"),
                         name,
                         input: json!({}),
                     },
@@ -1583,7 +1583,7 @@ fn normalize_response(
         if let Some(text) = leaked {
             for (i, (name, arguments)) in recover_text_tool_calls(&text).into_iter().enumerate() {
                 content.push(OutputContentBlock::ToolUse {
-                    id: format!("clab-text-tool-{i}"),
+                    id: format!("cloudling-text-tool-{i}"),
                     name,
                     input: parse_tool_arguments(&arguments),
                 });

@@ -20,12 +20,12 @@ use super::{create_engine_session, OpenAiServerState};
 //
 // Layout "B": each UI source file lives separately under `static/` and is embedded
 // individually, so HTML / CSS / JS stay editable in isolation rather than as one blob.
-// For a fast edit loop, `CLAB_UI_DIR` overrides the embedded copy by reading the file
+// For a fast edit loop, `CLOUDLING_UI_DIR` overrides the embedded copy by reading the file
 // from disk at runtime (dev only); when unset, the compile-time embedded asset is served,
 // keeping the shipped binary fully self-contained and portable. Growing to a whole-folder
 // embed later only means swapping the per-file constants for a directory walk.
 struct UiAsset {
-    /// File name under `static/` and under `CLAB_UI_DIR`.
+    /// File name under `static/` and under `CLOUDLING_UI_DIR`.
     file: &'static str,
     /// Value for the `Content-Type` header.
     content_type: &'static str,
@@ -50,8 +50,8 @@ static UI_JS: UiAsset = UiAsset {
 };
 
 fn ui_asset_body(asset: &UiAsset) -> String {
-    // Dev override: read from CLAB_UI_DIR at runtime so UI edits don't need a rebuild.
-    if let Ok(dir) = std::env::var("CLAB_UI_DIR") {
+    // Dev override: read from CLOUDLING_UI_DIR at runtime so UI edits don't need a rebuild.
+    if let Ok(dir) = std::env::var("CLOUDLING_UI_DIR") {
         let dir = dir.trim();
         if !dir.is_empty() {
             let path = std::path::Path::new(dir).join(asset.file);
@@ -87,7 +87,7 @@ pub(super) async fn ui_js() -> Response {
 // neighbour process can reach the port. The `/ui/*` endpoints expose the API key
 // (`/ui/settings`), the sandbox/permission config (`/ui/config/save`), and a
 // rewrite-env-and-exit path (`/ui/settings/save-restart`) — so they are gated behind a
-// shared secret (`CLAW_UI_TOKEN`, any operator-chosen string in the service env file).
+// shared secret (`CLOUDLING_UI_TOKEN`, any operator-chosen string in the service env file).
 // The browser UI stores the entered token and sends `Authorization: Bearer <token>`.
 // No token configured → open on loopback binds only; anywhere else the endpoints are
 // disabled with 403 (fail closed). The chat API (`/v1/*`) is intentionally not gated.
@@ -159,12 +159,12 @@ pub(super) async fn ui_auth_middleware(
         UiAuthDecision::Allow => next.run(request).await,
         UiAuthDecision::Unauthorized => (
             StatusCode::UNAUTHORIZED,
-            "missing or invalid UI token (send Authorization: Bearer <CLAW_UI_TOKEN>)",
+            "missing or invalid UI token (send Authorization: Bearer <CLOUDLING_UI_TOKEN>)",
         )
             .into_response(),
         UiAuthDecision::Disabled => (
             StatusCode::FORBIDDEN,
-            "UI endpoints are disabled: set CLAW_UI_TOKEN to use them on a non-loopback bind",
+            "UI endpoints are disabled: set CLOUDLING_UI_TOKEN to use them on a non-loopback bind",
         )
             .into_response(),
     }
@@ -364,7 +364,7 @@ const SETTINGS_KEYS: &[&str] = &[
     "OPENAI_BASE_URL",
     "OPENAI_API_KEY",
     "OPENAI_MODEL",
-    "CLAW_SERVED_MODEL_ID",
+    "CLOUDLING_SERVED_MODEL_ID",
     "CLAW_PERMISSION_MODE",
     "CLAWD_WEB_SEARCH_BASE_URL",
 ];
@@ -378,7 +378,7 @@ pub(super) async fn ui_settings_get() -> Response {
         );
     }
     // Saving is always possible now: settings apply live and persist to the env file,
-    // which resolves to a per-user default when `CLAW_OPENAI_ENV_FILE` is unset.
+    // which resolves to a per-user default when `CLOUDLING_OPENAI_ENV_FILE` is unset.
     map.insert("_can_save".to_string(), serde_json::Value::Bool(true));
     Json(serde_json::Value::Object(map)).into_response()
 }
@@ -424,7 +424,7 @@ fn write_env_file(
     // Prefer a crash-safe atomic write (temp file + rename); it also lets us lock down the
     // mode before the file is visible. But temp+rename needs write permission on the parent
     // *directory*. Hardened installs make the env file group-writable yet keep its directory
-    // root-owned (e.g. /etc/claw-lab), so the atomic path fails there with EACCES — fall back
+    // root-owned (e.g. /etc/cloudling), so the atomic path fails there with EACCES — fall back
     // to rewriting the existing file in place, which only needs write permission on the file
     // itself and preserves its mode (the inode is unchanged).
     match atomic_write_env_file(path, &out) {
@@ -703,7 +703,7 @@ fn drive_roots() -> Vec<String> {
 /// List directories under a path so the UI can pick a working folder *on this server*.
 /// A browser folder picker would target the user's own machine, not the agent host, so we
 /// expose the server's own filesystem here. Read-only — returns directory names only, never
-/// file contents. Gated by `CLAW_UI_TOKEN` like every `/ui/*` endpoint. With no `path` it
+/// file contents. Gated by `CLOUDLING_UI_TOKEN` like every `/ui/*` endpoint. With no `path` it
 /// starts at the per-OS home; callers climb via the returned `parent`.
 pub(super) async fn ui_browse(Query(params): Query<std::collections::HashMap<String, String>>) -> Response {
     use std::path::PathBuf;
@@ -772,7 +772,7 @@ fn as_pos_u64(value: &Value) -> Option<u64> {
 /// *shorter* than the backend connect timeout itself (10s default), so a slow link
 /// aborted the probe before it could even connect, leaving the context gauge blank
 /// while the chat (which sets no total request timeout) still worked. Scale with the
-/// configured connect timeout so this tracks `CLAW_BACKEND_CONNECT_TIMEOUT_SECS`
+/// configured connect timeout so this tracks `CLOUDLING_BACKEND_CONNECT_TIMEOUT_SECS`
 /// instead of hardcoding a second, inconsistent number.
 fn probe_timeout() -> std::time::Duration {
     api::TimeoutConfig::from_env()
@@ -1111,7 +1111,7 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("clab-env-test-{unique}"));
+        let dir = std::env::temp_dir().join(format!("cloudling-env-test-{unique}"));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("openai.env");
         std::fs::write(&path, "OPENAI_MODEL=old\nUNRELATED=keep\n").unwrap();

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Claw Lab installer
+# Cloudling installer
 #
 # Detects the host OS, verifies the Rust toolchain (rustc + cargo),
-# builds the `clab` binary from the `rust/` workspace, and runs a
+# builds the `cloudling` binary from the `rust/` workspace, and runs a
 # post-install verification step. Linux is the supported target;
 # macOS and WSL are best-effort.
 #
@@ -13,8 +13,8 @@
 #   ./install.sh --help         # print usage
 #
 # Environment overrides:
-#   CLAW_BUILD_PROFILE=debug|release   same as --release toggle
-#   CLAW_SKIP_VERIFY=1                 same as --no-verify
+#   CLOUDLING_BUILD_PROFILE=debug|release   same as --release toggle
+#   CLOUDLING_SKIP_VERIFY=1                 same as --no-verify
 
 set -euo pipefail
 
@@ -67,7 +67,7 @@ print_banner() {
   \____||_|\__,_| \_/\_/   |_____\__,_|_.__/
 EOF
     printf '%s\n' "${COLOR_RESET}"
-    printf '%sClaw Lab installer%s\n' "${COLOR_DIM}" "${COLOR_RESET}"
+    printf '%sCloudling installer%s\n' "${COLOR_DIM}" "${COLOR_RESET}"
 }
 
 print_usage() {
@@ -90,12 +90,12 @@ Options:
   -h, --help      Show this help text and exit.
 
 Environment overrides:
-  CLAW_BUILD_PROFILE   debug | release
-  CLAW_SKIP_VERIFY     set to 1 to skip verification
-  CLAW_INSTALL_DEPS    yes | no   (default: ask interactively)
-  CLAW_SETUP_SERVICE   yes | no   (default: ask interactively, Linux only)
-  CLAW_PREBUILT        set to 1 to download a prebuilt binary
-  CLAW_PREBUILT_TAG    release tag to download (default: latest)
+  CLOUDLING_BUILD_PROFILE   debug | release
+  CLOUDLING_SKIP_VERIFY     set to 1 to skip verification
+  CLOUDLING_INSTALL_DEPS    yes | no   (default: ask interactively)
+  CLOUDLING_SETUP_SERVICE   yes | no   (default: ask interactively, Linux only)
+  CLOUDLING_PREBUILT        set to 1 to download a prebuilt binary
+  CLOUDLING_PREBUILT_TAG    release tag to download (default: latest)
 EOF
 }
 
@@ -103,12 +103,12 @@ EOF
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-BUILD_PROFILE="${CLAW_BUILD_PROFILE:-debug}"
-SKIP_VERIFY="${CLAW_SKIP_VERIFY:-0}"
-INSTALL_DEPS="${CLAW_INSTALL_DEPS:-ask}"
-SETUP_SERVICE="${CLAW_SETUP_SERVICE:-ask}"
-PREBUILT="${CLAW_PREBUILT:-0}"
-PREBUILT_TAG="${CLAW_PREBUILT_TAG:-}"
+BUILD_PROFILE="${CLOUDLING_BUILD_PROFILE:-debug}"
+SKIP_VERIFY="${CLOUDLING_SKIP_VERIFY:-0}"
+INSTALL_DEPS="${CLOUDLING_INSTALL_DEPS:-ask}"
+SETUP_SERVICE="${CLOUDLING_SETUP_SERVICE:-ask}"
+PREBUILT="${CLOUDLING_PREBUILT:-0}"
+PREBUILT_TAG="${CLOUDLING_PREBUILT_TAG:-}"
 # Arguments after a literal `--` are forwarded verbatim to install-openai-service.sh.
 SERVICE_ARGS=()
 
@@ -221,9 +221,9 @@ ${COLOR_DIM}---------------${COLOR_RESET}
        cd rust && cargo clean && cargo build --workspace
      If the failure mentions ring/openssl, double check step 2.
 
-  ${COLOR_BOLD}6. 'clab' not found after install${COLOR_RESET}
+  ${COLOR_BOLD}6. 'cloudling' not found after install${COLOR_RESET}
      The binary lives at:
-       rust/target/${BUILD_PROFILE}/clab
+       rust/target/${BUILD_PROFILE}/cloudling
      Add it to your PATH or invoke it with the full path.
 
 EOF
@@ -242,7 +242,7 @@ require_cmd() {
 # --- prebuilt download helpers ---------------------------------------------
 
 # Map this host to the release artifact name from .github/workflows/release.yml
-# (currently only claw-linux-x64; Windows ships its own .exe). Echoes the name;
+# (currently only cloudling-linux-x64; Windows ships its own .exe). Echoes the name;
 # returns 1 if unsupported. macOS is intentionally absent: CI does not build a
 # macOS artifact (no macOS port yet), so --prebuilt falls back to build-from-source.
 prebuilt_artifact_name() {
@@ -256,7 +256,7 @@ prebuilt_artifact_name() {
         arm64|aarch64) arch="arm64" ;;
         *) return 1 ;;
     esac
-    printf 'claw-%s-%s' "${os}" "${arch}"
+    printf 'cloudling-%s-%s' "${os}" "${arch}"
 }
 
 # Derive owner/repo from the checkout's git remote so forks work without edits.
@@ -611,16 +611,16 @@ fi
 fi  # end prerequisite checks (source build)
 
 # ---------------------------------------------------------------------------
-# Step 4: obtain the clab binary (build from source or download prebuilt)
+# Step 4: obtain the cloudling binary (build from source or download prebuilt)
 # ---------------------------------------------------------------------------
 
-CLAW_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/clab"
+CLOUDLING_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/cloudling"
 
 if [ "${PREBUILT}" = "1" ]; then
-    step "Downloading the prebuilt clab binary"
-    download_prebuilt "${CLAW_BIN}"
+    step "Downloading the prebuilt cloudling binary"
+    download_prebuilt "${CLOUDLING_BIN}"
 else
-    step "Building the clab workspace (${BUILD_PROFILE})"
+    step "Building the cloudling workspace (${BUILD_PROFILE})"
 
     CARGO_FLAGS=("build" "--workspace")
     if [ "${BUILD_PROFILE}" = "release" ]; then
@@ -636,12 +636,12 @@ else
     )
 fi
 
-if [ ! -x "${CLAW_BIN}" ]; then
-    error "Expected binary not found at ${CLAW_BIN}"
+if [ ! -x "${CLOUDLING_BIN}" ]; then
+    error "Expected binary not found at ${CLOUDLING_BIN}"
     exit 1
 fi
 
-ok "binary ready: ${CLAW_BIN}"
+ok "binary ready: ${CLOUDLING_BIN}"
 
 # ---------------------------------------------------------------------------
 # Step 5: post-install verification
@@ -650,22 +650,22 @@ ok "binary ready: ${CLAW_BIN}"
 step "Verifying the installed binary"
 
 if [ "${SKIP_VERIFY}" = "1" ]; then
-    warn "verification skipped (--no-verify or CLAW_SKIP_VERIFY=1)"
+    warn "verification skipped (--no-verify or CLOUDLING_SKIP_VERIFY=1)"
 else
-    info "running: clab --version"
-    if VERSION_OUT="$("${CLAW_BIN}" --version 2>&1)"; then
-        ok "clab --version -> ${VERSION_OUT}"
+    info "running: cloudling --version"
+    if VERSION_OUT="$("${CLOUDLING_BIN}" --version 2>&1)"; then
+        ok "cloudling --version -> ${VERSION_OUT}"
     else
-        error "clab --version failed:"
+        error "cloudling --version failed:"
         printf '%s\n' "${VERSION_OUT}" 1>&2
         exit 1
     fi
 
-    info "running: clab --help (smoke test)"
-    if "${CLAW_BIN}" --help >/dev/null 2>&1; then
-        ok "clab --help responded"
+    info "running: cloudling --help (smoke test)"
+    if "${CLOUDLING_BIN}" --help >/dev/null 2>&1; then
+        ok "cloudling --help responded"
     else
-        error "clab --help failed"
+        error "cloudling --help failed"
         exit 1
     fi
 fi
@@ -707,7 +707,7 @@ if [ "${DO_SETUP}" = "1" ]; then
     # runtime path without a manual copy step. With no forwarded args the installer
     # drops into its interactive wizard; args after `--` are passed through verbatim
     # (e.g. --ui ...) for a non-interactive setup.
-    CLAB_RUNTIME_BIN_SRC="${CLAW_BIN}" bash "${SETUP_SCRIPT}" ${SERVICE_ARGS[@]+"${SERVICE_ARGS[@]}"}
+    CLOUDLING_RUNTIME_BIN_SRC="${CLOUDLING_BIN}" bash "${SETUP_SCRIPT}" ${SERVICE_ARGS[@]+"${SERVICE_ARGS[@]}"}
     ok "service setup finished"
 else
     info "you can run it later with: bash ${SETUP_SCRIPT}"
@@ -720,9 +720,9 @@ fi
 step "Next steps"
 
 cat <<EOF
-${COLOR_GREEN}Claw Lab is built and ready.${COLOR_RESET}
+${COLOR_GREEN}Cloudling is built and ready.${COLOR_RESET}
 
-  Binary:  ${COLOR_BOLD}${CLAW_BIN}${COLOR_RESET}
+  Binary:  ${COLOR_BOLD}${CLOUDLING_BIN}${COLOR_RESET}
   Profile: ${BUILD_PROFILE}
 
 Run it as a service (the main use case — backend, served model id, bind, permissions):
@@ -732,10 +732,10 @@ Run it as a service (the main use case — backend, served model id, bind, permi
 Or try the CLI directly:
 
   ${COLOR_DIM}# smoke test${COLOR_RESET}
-  ${CLAW_BIN} --help
+  ${CLOUDLING_BIN} --help
 
   ${COLOR_DIM}# one-shot prompt against your configured backend${COLOR_RESET}
-  ${CLAW_BIN} prompt "summarize this repository"
+  ${CLOUDLING_BIN} prompt "summarize this repository"
 
 For deeper docs, see USAGE.md and rust/README.md.
 EOF

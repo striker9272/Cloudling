@@ -1,10 +1,10 @@
-//! `claw-analog agents` — run multiple specialized sub-agents sequentially.
+//! `cloudling-analog agents` — run multiple specialized sub-agents sequentially.
 
 use std::path::{Path, PathBuf};
 
 use api::InputMessage;
 use clap::{Parser, ValueEnum};
-use clab_analog::{
+use cloudling_analog::{
     enforce_non_interactive_permission_rules, load_analog_toml, resolve_analog_options,
     resolve_analog_profile_path, resolve_rag_base_url, AnalogConfig, AnalogDoctorOverrides,
     AnalogFileConfig, OutputFormat, PermissionMode, Preset, StreamOverride,
@@ -227,7 +227,7 @@ fn ensure_base_session(base_session: &Path, workspace: &Path, prompt: &str) -> R
     } else {
         vec![InputMessage::user_text(prompt.to_string())]
     };
-    clab_analog::session_save(base_session, &ws_s, &model, Preset::None, &messages)?;
+    cloudling_analog::session_save(base_session, &ws_s, &model, Preset::None, &messages)?;
     Ok(())
 }
 
@@ -242,7 +242,7 @@ pub fn run_agents(args: AgentsCli) -> Result<(), String> {
 pub async fn run_agents_async(args: AgentsCli) -> Result<(), String> {
     run_agents_inner(args, |cfg, out| {
         Box::pin(async move {
-            clab_analog::run(cfg, out)
+            cloudling_analog::run(cfg, out)
                 .await
                 .map_err(|e| e.to_string())?;
             Ok(())
@@ -278,7 +278,7 @@ where
         specs.push(parse_agent_spec(a)?);
     }
 
-    println!("claw-analog agents (sequential)\n");
+    println!("cloudling-analog agents (sequential)\n");
     println!("  workspace: {}", workspace.display());
     println!("  base_session: {}", args.base_session.display());
     println!("  agents: {}", specs.len());
@@ -321,7 +321,7 @@ where
         let profile_path =
             resolve_analog_profile_path(&workspace, None, file_cfg.profile.as_deref());
         let profile_hint = if let Some(ref p) = profile_path {
-            clab_analog::load_profile_hint(p).unwrap_or(None)
+            cloudling_analog::load_profile_hint(p).unwrap_or(None)
         } else {
             None
         };
@@ -354,7 +354,7 @@ where
             language: file_cfg
                 .language
                 .as_deref()
-                .and_then(clab_analog::AnalogLanguage::from_toml_str)
+                .and_then(cloudling_analog::AnalogLanguage::from_toml_str)
                 .unwrap_or_default(),
             session_path: Some(agent_session.clone()),
             session_save_path: None,

@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn scope_overrides_root_and_restores_on_drop() {
-        let scoped = PathBuf::from("/tmp/clab-test-root");
+        let scoped = PathBuf::from("/tmp/cloudling-test-root");
         {
             let _guard = scoped_workspace_root(Some(scoped.clone()));
             assert_eq!(current_workspace_root().expect("root"), scoped);
@@ -170,8 +170,8 @@ mod tests {
 
     #[test]
     fn nested_scopes_restore_the_previous_root() {
-        let outer = PathBuf::from("/tmp/clab-outer");
-        let inner = PathBuf::from("/tmp/clab-inner");
+        let outer = PathBuf::from("/tmp/cloudling-outer");
+        let inner = PathBuf::from("/tmp/cloudling-inner");
         let _outer_guard = scoped_workspace_root(Some(outer.clone()));
         assert_eq!(current_workspace_root().expect("root"), outer);
         {

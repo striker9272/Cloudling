@@ -9,19 +9,19 @@ For a task-oriented guide with copy/paste examples, see [`../USAGE.md`](../USAGE
 ```bash
 # Inspect available commands
 cd rust/
-cargo run -p rusty-claude-cli -- --help
+cargo run -p cloudling-cli -- --help
 
 # Build the workspace
 cargo build --workspace
 
 # Run the interactive REPL
-cargo run -p rusty-claude-cli -- --model claude-opus-4-6
+cargo run -p cloudling-cli -- --model claude-opus-4-6
 
 # One-shot prompt
-cargo run -p rusty-claude-cli -- prompt "explain this codebase"
+cargo run -p cloudling-cli -- prompt "explain this codebase"
 
 # JSON output for automation
-cargo run -p rusty-claude-cli -- --output-format json prompt "summarize src/main.rs"
+cargo run -p cloudling-cli -- --output-format json prompt "summarize src/main.rs"
 ```
 
 ## Configuration
@@ -70,7 +70,7 @@ Harness coverage:
 Primary artifacts:
 
 - `crates/mock-anthropic-service/` — reusable mock Anthropic-compatible service
-- `crates/rusty-claude-cli/tests/mock_parity_harness.rs` — clean-env CLI harness
+- `crates/cloudling-cli/tests/mock_parity_harness.rs` — clean-env CLI harness
 - `scripts/run_mock_parity_harness.sh` — reproducible wrapper
 - `scripts/run_mock_parity_diff.py` — scenario checklist + PARITY mapping runner
 - `mock_parity_scenarios.json` — scenario-to-PARITY manifest
@@ -150,7 +150,7 @@ Top-level commands:
 The command surface is moving quickly. For the canonical live help text, run:
 
 ```bash
-cargo run -p rusty-claude-cli -- --help
+cargo run -p cloudling-cli -- --help
 ```
 
 ## Slash Commands (REPL)
@@ -173,7 +173,7 @@ Notable claw-first surfaces now available directly in slash form:
 - `/plugin [list|install <path>|enable <name>|disable <name>|uninstall <id>|update <id>]`
 - `/subagent [list|steer <target> <msg>|kill <id>]`
 
-See [`../USAGE.md`](../USAGE.md) for usage examples and run `cargo run -p rusty-claude-cli -- --help` for the live canonical command list.
+See [`../USAGE.md`](../USAGE.md) for usage examples and run `cargo run -p cloudling-cli -- --help` for the live canonical command list.
 
 ## Workspace Layout
 
@@ -183,13 +183,13 @@ rust/
 ├── Cargo.lock
 └── crates/
     ├── api/                # Provider clients + streaming + request preflight
-    ├── clab-desktop/       # Windows tray/desktop integration (FFI quarantine; no-op off Windows)
+    ├── cloudling-desktop/       # Windows tray/desktop integration (FFI quarantine; no-op off Windows)
     ├── commands/           # Shared slash-command registry + help rendering
     ├── compat-harness/     # TS manifest extraction harness
     ├── mock-anthropic-service/ # Deterministic local Anthropic-compatible mock
     ├── plugins/            # Plugin metadata, manager, install/enable/disable surfaces
     ├── runtime/            # Session, config, permissions, MCP, prompts, auth/runtime loop
-    ├── rusty-claude-cli/   # Main CLI binary (`claw`)
+    ├── cloudling-cli/   # Main CLI binary (`cloudling`)
     ├── telemetry/          # Session tracing and usage telemetry types
     └── tools/              # Built-in tools, skill resolution, tool search, agent runtime surfaces
 ```
@@ -197,13 +197,13 @@ rust/
 ### Crate Responsibilities
 
 - **api** — provider clients, SSE streaming, request/response types, auth (`ANTHROPIC_API_KEY` + bearer-token support), request-size/context-window preflight
-- **clab-desktop** — Windows-only desktop integration: system-tray app (`clab tray`), console hiding, registry autostart, uninstall (`clab uninstall`). Quarantines all Windows FFI `unsafe`; the rest of the workspace stays `unsafe_code = forbid`. No-op stubs on non-Windows.
+- **cloudling-desktop** — Windows-only desktop integration: system-tray app (`cloudling tray`), console hiding, registry autostart, uninstall (`cloudling uninstall`). Quarantines all Windows FFI `unsafe`; the rest of the workspace stays `unsafe_code = forbid`. No-op stubs on non-Windows.
 - **commands** — slash command definitions, parsing, help text generation, JSON/text command rendering
 - **compat-harness** — extracts tool/prompt manifests from upstream TS source
 - **mock-anthropic-service** — deterministic `/v1/messages` mock for CLI parity tests and local harness runs
 - **plugins** — plugin metadata, install/enable/disable/update flows, plugin tool definitions, hook integration surfaces
 - **runtime** — `ConversationRuntime`, config loading, session persistence, permission policy, MCP client lifecycle, system prompt assembly, usage tracking
-- **rusty-claude-cli** — REPL, one-shot prompt, direct CLI subcommands, streaming display, tool call rendering, CLI argument parsing
+- **cloudling-cli** — REPL, one-shot prompt, direct CLI subcommands, streaming display, tool call rendering, CLI argument parsing
 - **telemetry** — session trace events and supporting telemetry payloads
 - **tools** — tool specs + execution: Bash, ReadFile, WriteFile, EditFile, GlobSearch, GrepSearch, WebSearch, WebFetch, Agent, TodoWrite, NotebookEdit, Skill, ToolSearch, and runtime-facing tool discovery
 
@@ -211,7 +211,7 @@ rust/
 
 - **~20K lines** of Rust
 - **12 crates** in workspace
-- **Binary name:** `clab` (package `clab-cli`)
+- **Binary name:** `cloudling` (package `cloudling-cli`)
 - **Default model:** `claude-opus-4-6`
 - **Default permissions:** `danger-full-access`
 

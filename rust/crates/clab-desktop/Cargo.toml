@@ -1,5 +1,5 @@
 [package]
-name = "clab-desktop"
+name = "cloudling-desktop"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -20,7 +20,7 @@ windows-sys = { version = "0.61", features = [
 
 # Linux-only desktop integration deps. `ksni` is a pure-Rust implementation of
 # the freedesktop StatusNotifierItem (tray) spec over D-Bus (via `zbus`) — it
-# pulls NO gtk/appindicator C libraries, so the Linux build of `clab` stays a
+# pulls NO gtk/appindicator C libraries, so the Linux build of `cloudling` stays a
 # fully static musl binary (see the release pipeline). The `blocking` feature
 # gives a non-async API so the tray coexists with the server's own runtime
 # without nesting executors. Tray icons appear on desktops with a

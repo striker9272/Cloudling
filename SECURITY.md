@@ -35,7 +35,7 @@ In scope:
   code or leak secrets;
 - built-in web UI (`--ui`) auth issues: reaching the `/ui/*` data endpoints —
   which can read the backend API key, rewrite the service env file, and change
-  the sandbox/permission config — without the configured `CLAW_UI_TOKEN`, or the
+  the sandbox/permission config — without the configured `CLOUDLING_UI_TOKEN`, or the
   fail-closed default (disabled on non-loopback binds when no token is set) not
   holding.
 

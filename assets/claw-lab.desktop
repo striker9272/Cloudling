@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Claw Lab
+Name=Cloudling
 Comment=Local agentic layer: model, agent, chat
-Exec=clab tray
-Icon=claw-lab
+Exec=cloudling tray
+Icon=cloudling
 Categories=Utility;Development;
 Terminal=false

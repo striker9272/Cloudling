@@ -1,5 +1,5 @@
 [package]
-name = "clab-analog"
+name = "cloudling-analog"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,11 +7,11 @@ publish.workspace = true
 description = "Minimal agent harness: tool loop with explicit permissions and workspace jail."
 
 [lib]
-name = "clab_analog"
+name = "cloudling_analog"
 path = "src/lib.rs"
 
 [[bin]]
-name = "clab-analog"
+name = "cloudling-analog"
 path = "src/main.rs"
 
 [dependencies]

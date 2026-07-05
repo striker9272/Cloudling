@@ -1250,7 +1250,7 @@ impl McpStdioProcess {
 
     /// Read one JSON-RPC message, auto-detecting the framing regardless of the
     /// configured write framing: a line starting with `Content-Length:` opens an
-    /// LSP-style header block (legacy clab framing), anything else is treated as a
+    /// LSP-style header block (legacy cloudling framing), anything else is treated as a
     /// newline-delimited JSON message (the MCP specification). Blank lines between
     /// messages are tolerated.
     pub async fn read_frame(&mut self) -> io::Result<Vec<u8>> {
@@ -1324,7 +1324,7 @@ impl McpStdioProcess {
                 self.write_all(b"\n").await?;
                 self.flush().await
             }
-            // Legacy clab framing (LSP-style headers) for servers written against it.
+            // Legacy cloudling framing (LSP-style headers) for servers written against it.
             crate::config::McpStdioFraming::ContentLength => self.write_frame(&body).await,
         }
     }

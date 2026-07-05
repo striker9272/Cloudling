@@ -23,7 +23,7 @@ impl ProviderClient {
         anthropic_auth: Option<AuthSource>,
     ) -> Result<Self, ApiError> {
         let resolved_model = providers::resolve_model_alias(model);
-        // An explicitly configured `OPENAI_BASE_URL` pins clab to a specific
+        // An explicitly configured `OPENAI_BASE_URL` pins cloudling to a specific
         // OpenAI-compatible endpoint (a gateway like OpenRouter, or a local
         // server). That explicit choice must win over model-name auto-detection:
         // otherwise a family prefix (`qwen/*` → DashScope, `grok*` → xAI,

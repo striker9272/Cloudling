@@ -53,7 +53,7 @@ pub fn enforce_non_interactive_permission_rules_with_tty(
     }
     if mode == PermissionMode::Prompt && !stdin_is_tty {
         eprintln!(
-            "[claw-analog] warning: 'prompt' without a TTY cannot confirm tool use; writes remain denied. For headless edits use --permission workspace-write."
+            "[cloudling-analog] warning: 'prompt' without a TTY cannot confirm tool use; writes remain denied. For headless edits use --permission workspace-write."
         );
     }
     Ok(())
@@ -243,7 +243,7 @@ pub const NDJSON_FORMAT_VERSION: u32 = 1;
 /// Default `model` when CLI and TOML omit it.
 pub const ANALOG_DEFAULT_MODEL: &str = "sonnet";
 
-/// Map TOML / policy strings to [`PermissionMode`] (same rules as the main `claw-analog` CLI).
+/// Map TOML / policy strings to [`PermissionMode`] (same rules as the main `cloudling-analog` CLI).
 #[must_use]
 pub fn permission_mode_from_toml_str(s: &str) -> Option<PermissionMode> {
     match s.to_ascii_lowercase().replace('_', "-").as_str() {
@@ -298,7 +298,7 @@ pub struct ResolvedAnalogOptions {
     pub provenance: Vec<String>,
 }
 
-/// Effective options after merging `.claw-analog.toml` with optional CLI overrides (same precedence as `claw-analog` run).
+/// Effective options after merging `.claw-analog.toml` with optional CLI overrides (same precedence as `cloudling-analog` run).
 #[must_use]
 pub fn resolve_analog_options(
     file: &AnalogFileConfig,
@@ -555,20 +555,20 @@ pub fn session_bootstrap_messages(
     }
     if file.workspace != workspace {
         eprintln!(
-            "[claw-analog] warning: session workspace differs (file: {}, current: {})",
+            "[cloudling-analog] warning: session workspace differs (file: {}, current: {})",
             file.workspace, workspace
         );
     }
     if file.model != model {
         eprintln!(
-            "[claw-analog] warning: session model differs (file: {}, current: {})",
+            "[cloudling-analog] warning: session model differs (file: {}, current: {})",
             file.model, model
         );
     }
     let want_preset = preset.label().map(String::from);
     if want_preset.as_deref() != file.preset.as_deref() {
         eprintln!(
-            "[claw-analog] warning: session preset {:?} vs current {:?}",
+            "[cloudling-analog] warning: session preset {:?} vs current {:?}",
             file.preset, want_preset
         );
     }
@@ -598,7 +598,7 @@ pub fn session_save(
 
 fn session_warn_common() {
     eprintln!(
-        "[claw-analog] session: files may contain secrets (tool output, pasted keys). Do not share. Large histories increase API cost."
+        "[cloudling-analog] session: files may contain secrets (tool output, pasted keys). Do not share. Large histories increase API cost."
     );
 }
 
@@ -628,7 +628,7 @@ pub fn load_profile_hint(path: &Path) -> Result<Option<String>, String> {
     let nchars = line.chars().count();
     if nchars > PROFILE_LINE_MAX_CHARS {
         eprintln!(
-            "[claw-analog] warning: profile line truncated ({} chars; max {})",
+            "[cloudling-analog] warning: profile line truncated ({} chars; max {})",
             nchars, PROFILE_LINE_MAX_CHARS
         );
         let truncated: String = line.chars().take(PROFILE_LINE_MAX_CHARS).collect();
@@ -1312,7 +1312,7 @@ pub async fn run(
         };
 
         eprintln!(
-            "[claw-analog] turn {} stop_reason={:?} tokens≈{}",
+            "[cloudling-analog] turn {} stop_reason={:?} tokens≈{}",
             turn + 1,
             response.stop_reason,
             response.total_tokens(),
@@ -1384,7 +1384,7 @@ pub async fn run(
             };
             let is_err = text.starts_with("error:");
             eprintln!(
-                "[claw-analog] tool {} -> {} chars is_error={}",
+                "[cloudling-analog] tool {} -> {} chars is_error={}",
                 tu.name,
                 text.len(),
                 is_err,

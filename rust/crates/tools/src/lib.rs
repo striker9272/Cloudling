@@ -3255,7 +3255,7 @@ fn execute_web_search(input: &WebSearchInput) -> Result<WebSearchOutput, String>
         )
     };
 
-    // Honest fallback notice: with no configured search backend, clab scrapes
+    // Honest fallback notice: with no configured search backend, cloudling scrapes
     // DuckDuckGo HTML, which is unreliable. Surface that instead of silently
     // presenting the built-in default as a first-class search provider.
     if configured_web_search_base().is_none() {
@@ -4425,7 +4425,7 @@ fn run_agent_job_blocking(
     // `allow-list` from the Security panel).
     let parent_fs_policy = runtime::current_filesystem_policy();
     let outcome_for_thread = std::sync::Arc::clone(outcome);
-    let thread_name = format!("clab-agent-{}", job.manifest.agent_id);
+    let thread_name = format!("cloudling-agent-{}", job.manifest.agent_id);
     let handle = std::thread::Builder::new()
         .name(thread_name)
         .spawn(move || {
@@ -4519,11 +4519,11 @@ fn resolve_agent_model(model: Option<&str>) -> String {
         return explicit.to_string();
     }
     // Otherwise inherit the active backend instead of a hardcoded provider:
-    // prefer an explicit CLAW_AGENT_MODEL override, then the openai-serve backend
+    // prefer an explicit CLOUDLING_AGENT_MODEL override, then the openai-serve backend
     // model (OPENAI_MODEL). Only fall back to the built-in default when neither is
     // set (e.g. a bare CLI run), so the sub-agent stays on the same provider as the
     // main runtime and the fork remains portable.
-    for var in ["CLAW_AGENT_MODEL", "OPENAI_MODEL"] {
+    for var in ["CLOUDLING_AGENT_MODEL", "OPENAI_MODEL"] {
         if let Ok(value) = std::env::var(var) {
             let value = value.trim();
             if !value.is_empty() {

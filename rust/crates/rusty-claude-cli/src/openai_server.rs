@@ -39,7 +39,7 @@ pub(crate) struct OpenAiServerState {
     /// Dialog persistence for the built-in UI. `Some` only when `--ui` is on and the
     /// store opened successfully; the chat path never touches it.
     dialog_store: Option<Arc<crate::dialog_store::DialogStore>>,
-    /// Shared secret guarding the `/ui/*` data endpoints (`CLAW_UI_TOKEN`). `None` means
+    /// Shared secret guarding the `/ui/*` data endpoints (`CLOUDLING_UI_TOKEN`). `None` means
     /// no token is configured; then those endpoints are open on loopback binds only.
     ui_token: Option<String>,
     /// Whether the listen address is loopback. Decides the no-token default: open on
@@ -119,7 +119,7 @@ impl OpenAiServerState {
         }
         let backend = self.backend_model();
         let served =
-            served_model_id_from_value(updates.get("CLAW_SERVED_MODEL_ID").cloned(), &backend);
+            served_model_id_from_value(updates.get("CLOUDLING_SERVED_MODEL_ID").cloned(), &backend);
         *self
             .served_model_id
             .write()
@@ -136,12 +136,12 @@ impl OpenAiServerState {
     }
 }
 
-/// Path to the env file that persists engine settings. Honors `CLAW_OPENAI_ENV_FILE`
+/// Path to the env file that persists engine settings. Honors `CLOUDLING_OPENAI_ENV_FILE`
 /// (set by the Linux service installer); otherwise defaults to a per-user location in
 /// the config home so saving works on a plain manual launch (e.g. native Windows),
 /// without any installer. Portable — no hardcoded absolute paths.
 pub(super) fn resolve_openai_env_file() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("CLAW_OPENAI_ENV_FILE") {
+    if let Ok(path) = std::env::var("CLOUDLING_OPENAI_ENV_FILE") {
         let trimmed = path.trim();
         if !trimmed.is_empty() {
             return std::path::PathBuf::from(trimmed);
@@ -257,7 +257,7 @@ async fn serve(
         model
     };
     let served_model_id =
-        served_model_id_from_value(std::env::var("CLAW_SERVED_MODEL_ID").ok(), &model);
+        served_model_id_from_value(std::env::var("CLOUDLING_SERVED_MODEL_ID").ok(), &model);
     // Resolve the effective access (permission) mode now that the env file is loaded.
     // Symmetric to re-reading OPENAI_MODEL above: an explicit `--permission-mode` flag
     // (Some) wins; otherwise adopt the persisted CLAW_PERMISSION_MODE so a mode saved in
@@ -270,7 +270,7 @@ async fn serve(
         match crate::dialog_store::DialogStore::open() {
             Ok(store) => Some(Arc::new(store)),
             Err(error) => {
-                eprintln!("claw openai-serve: dialog store disabled ({error})");
+                eprintln!("cloudling openai-serve: dialog store disabled ({error})");
                 None
             }
         }
@@ -278,13 +278,13 @@ async fn serve(
         None
     };
 
-    let ui_token = std::env::var("CLAW_UI_TOKEN")
+    let ui_token = std::env::var("CLOUDLING_UI_TOKEN")
         .ok()
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty());
     if ui && ui_token.is_none() && !addr.ip().is_loopback() {
         eprintln!(
-            "claw openai-serve: CLAW_UI_TOKEN is not set and the bind is not loopback; \
+            "cloudling openai-serve: CLOUDLING_UI_TOKEN is not set and the bind is not loopback; \
              /ui/* endpoints are disabled (the chat API and static page still work)"
         );
     }
@@ -314,7 +314,7 @@ async fn serve(
             .route("/app.css", get(ui_css))
             .route("/app.js", get(ui_js));
         // Data/settings endpoints can read the API key, rewrite the env file, and
-        // disable the sandbox — gate them behind `CLAW_UI_TOKEN` (see ui_auth_decision).
+        // disable the sandbox — gate them behind `CLOUDLING_UI_TOKEN` (see ui_auth_decision).
         let ui_api = Router::new()
             .route("/ui/dialogs", get(ui_dialogs_list))
             .route(
@@ -344,9 +344,9 @@ async fn serve(
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
     if ui {
-        eprintln!("claw openai-serve listening on http://{addr} (web UI at /)");
+        eprintln!("cloudling openai-serve listening on http://{addr} (web UI at /)");
     } else {
-        eprintln!("claw openai-serve listening on http://{addr}");
+        eprintln!("cloudling openai-serve listening on http://{addr}");
     }
     axum::serve(listener, app).await?;
     Ok(())
@@ -355,7 +355,7 @@ async fn serve(
 async fn health(State(state): State<Arc<OpenAiServerState>>) -> impl IntoResponse {
     Json(HealthResponse {
         ok: true,
-        service: "claw-openai-serve",
+        service: "cloudling-openai-serve",
         model: state.served_model_id(),
         version: env!("CARGO_PKG_VERSION"),
         git_sha: option_env!("GIT_SHA"),
@@ -368,7 +368,7 @@ async fn models(State(state): State<Arc<OpenAiServerState>>) -> impl IntoRespons
         data: vec![ModelObject {
             id: state.served_model_id(),
             object: "model",
-            owned_by: "claw-openai-serve",
+            owned_by: "cloudling-openai-serve",
         }],
     })
 }

@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# dogfood-build.sh — Build clab from current checkout and verify provenance.
+# dogfood-build.sh — Build cloudling from current checkout and verify provenance.
 #
 # Injects GIT_SHA at build time so version JSON is non-null.
 # Suppresses Cargo compile noise on stderr.
 # Prints the verified binary path on success. Use as:
 #
-#   CLAW=$(bash scripts/dogfood-build.sh)
+#   CLOUDLING=$(bash scripts/dogfood-build.sh)
 #
 # Then dogfood with config isolation (avoids real user config bleeding in):
 #
-#   CLAW_CONFIG_HOME=$(mktemp -d) $CLAW plugins list --output-format json
+#   CLAW_CONFIG_HOME=$(mktemp -d) $CLOUDLING plugins list --output-format json
 #
 set -euo pipefail
 
@@ -33,10 +33,10 @@ fi
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUST_DIR="$REPO_ROOT/rust"
-BINARY="$RUST_DIR/target/debug/clab"
+BINARY="$RUST_DIR/target/debug/cloudling"
 EXPECTED_SHA="$(git -C "$REPO_ROOT" rev-parse --short HEAD)"
 
-echo "▶ Building clab from $REPO_ROOT" >&2
+echo "▶ Building cloudling from $REPO_ROOT" >&2
 echo "  Commit: $(git -C "$REPO_ROOT" log --oneline -1)" >&2
 
 # Inject GIT_SHA so version JSON returns a non-null sha.
@@ -44,12 +44,12 @@ echo "  Commit: $(git -C "$REPO_ROOT" log --oneline -1)" >&2
 # on build failure cargo exits non-zero and set -e aborts.
 if ! GIT_SHA="$EXPECTED_SHA" cargo build \
         --manifest-path "$RUST_DIR/Cargo.toml" \
-        -p clab-cli -q 2>/dev/null; then
+        -p cloudling-cli -q 2>/dev/null; then
     # Re-run with visible output so the user sees the error
     echo "✗ Build failed — rerunning with output:" >&2
     GIT_SHA="$EXPECTED_SHA" cargo build \
         --manifest-path "$RUST_DIR/Cargo.toml" \
-        -p clab-cli 2>&1 | sed 's/^/  /' >&2
+        -p cloudling-cli 2>&1 | sed 's/^/  /' >&2
     exit 1
 fi
 
@@ -74,12 +74,12 @@ fi
 
 echo "✓ Binary verified: $BINARY_SHA == HEAD" >&2
 echo "" >&2
-echo "  export CLAW=$BINARY" >&2
+echo "  export CLOUDLING=$BINARY" >&2
 echo "" >&2
 echo "  Dogfood with isolated config (no real user config on stderr):" >&2
-echo "    CLAW_ISOLATED=\$(mktemp -d)" >&2
-echo "    trap 'rm -rf \"\$CLAW_ISOLATED\"' EXIT" >&2
-echo "    CLAW_CONFIG_HOME=\$CLAW_ISOLATED \$CLAW plugins list --output-format json" >&2
+echo "    CLOUDLING_ISOLATED=\$(mktemp -d)" >&2
+echo "    trap 'rm -rf \"\$CLOUDLING_ISOLATED\"' EXIT" >&2
+echo "    CLAW_CONFIG_HOME=\$CLOUDLING_ISOLATED \$CLOUDLING plugins list --output-format json" >&2
 echo "" >&2
 echo "  cargo run overhead: ~1s/invocation vs 7ms for pre-built binary." >&2
 echo "  Prefer pre-built binary (\$CLAW) for dogfood loops." >&2

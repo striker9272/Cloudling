@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install-openai-service.sh — install, configure, or remove the Claw Lab
+# install-openai-service.sh — install, configure, or remove the Cloudling
 # OpenAI-compatible service (systemd unit + env file + wrapper).
 #
 # Modes:
@@ -15,26 +15,26 @@
 #       --ui-data-dir flag overrides what the env file says.
 #
 # Nothing here hardcodes a host: every path and name is a flag with a portable
-# claw-lab-* default, so the fork stays movable across machines.
+# cloudling-* default, so the fork stays movable across machines.
 set -euo pipefail
 
-# --- defaults (claw-lab-* canon; all overridable via flags) ---
-SERVICE_NAME="claw-lab-openai.service"
+# --- defaults (cloudling-* canon; all overridable via flags) ---
+SERVICE_NAME="cloudling.service"
 USER_NAME="$(id -un)"
 GROUP_NAME=""
-RUNTIME_BIN="/opt/claw-lab/bin/clab"
+RUNTIME_BIN="/opt/cloudling/bin/cloudling"
 # A freshly built binary to install at RUNTIME_BIN. install.sh passes this via
-# CLAB_RUNTIME_BIN_SRC for end-to-end setup; --runtime-bin-src overrides it.
-RUNTIME_BIN_SRC="${CLAB_RUNTIME_BIN_SRC:-}"
-WRAPPER_PATH="/usr/local/bin/claw-lab-openai-serve"
-ENV_FILE="/etc/claw-lab/openai.env"
-WORKDIR="/var/lib/claw-lab/work"
-SANDBOX_DIR="/var/lib/claw-lab/sandbox"
+# CLOUDLING_RUNTIME_BIN_SRC for end-to-end setup; --runtime-bin-src overrides it.
+RUNTIME_BIN_SRC="${CLOUDLING_RUNTIME_BIN_SRC:-}"
+WRAPPER_PATH="/usr/local/bin/cloudling-serve"
+ENV_FILE="/etc/cloudling/openai.env"
+WORKDIR="/var/lib/cloudling/work"
+SANDBOX_DIR="/var/lib/cloudling/sandbox"
 TMPDIR_VALUE=""
 # bind / served-id / permission resolve with precedence later (flag > existing env
 # > built-in default); start empty so we can tell "flag passed" from "use existing".
 DEFAULT_BIND="127.0.0.1:4097"
-DEFAULT_SERVED_MODEL_ID="clab-agent"
+DEFAULT_SERVED_MODEL_ID="cloudling"
 DEFAULT_PERMISSION_MODE="read-only"
 BIND=""
 OPENAI_BASE_URL=""
@@ -53,7 +53,7 @@ KEEP_DATA=0
 # in the browser, so the wizard skips all backend questions. All overridable.
 UI_MODE=0
 UI_TOKEN=""
-UI_DATA_DIR="/var/lib/claw-lab/ui"
+UI_DATA_DIR="/var/lib/cloudling/ui"
 # Track whether a data dir was pinned with an explicit flag. When it was not,
 # `--uninstall` discovers the real path from the installed env file (source of truth),
 # so a custom install is cleaned up without re-passing every --*-dir flag. Precedence:
@@ -71,23 +71,23 @@ Usage:
 Install (no required flags on a terminal -> interactive wizard):
   --base-url URL              OpenAI-compatible backend base URL
   --backend-model MODEL       backend/adaptor model id sent to the provider
-  --served-model-id MODEL     model id exposed to clients. Default: clab-agent.
+  --served-model-id MODEL     model id exposed to clients. Default: cloudling.
 
 Built-in web UI mode (configure the engine in the browser, not here):
   --ui                        enable UI mode: serve the chat page; skip backend questions.
-  --ui-token VALUE            CLAW_UI_TOKEN guarding /ui/*. Auto-generated if omitted.
-  --ui-data-dir PATH          UI dialog/preset storage. Default: /var/lib/claw-lab/ui
+  --ui-token VALUE            CLOUDLING_UI_TOKEN guarding /ui/*. Auto-generated if omitted.
+  --ui-data-dir PATH          UI dialog/preset storage. Default: /var/lib/cloudling/ui
 
 Common options:
-  --service NAME              systemd service name. Default: claw-lab-openai.service
+  --service NAME              systemd service name. Default: cloudling.service
   --user USER                 service user. Default: current user.
   --group GROUP               service group. Default: USER.
-  --runtime-bin PATH          installed clab runtime binary. Default: /opt/claw-lab/bin/clab
+  --runtime-bin PATH          installed cloudling runtime binary. Default: /opt/cloudling/bin/cloudling
   --runtime-bin-src PATH      install this binary to --runtime-bin before setup.
-  --wrapper PATH              wrapper script. Default: /usr/local/bin/claw-lab-openai-serve
-  --env-file PATH             environment file. Default: /etc/claw-lab/openai.env
-  --workdir PATH              neutral agent working directory. Default: /var/lib/claw-lab/work
-  --sandbox-dir PATH          sandbox directory. Default: /var/lib/claw-lab/sandbox
+  --wrapper PATH              wrapper script. Default: /usr/local/bin/cloudling-serve
+  --env-file PATH             environment file. Default: /etc/cloudling/openai.env
+  --workdir PATH              neutral agent working directory. Default: /var/lib/cloudling/work
+  --sandbox-dir PATH          sandbox directory. Default: /var/lib/cloudling/sandbox
   --tmpdir PATH               TMPDIR. Default: SANDBOX_DIR/tmp.
   --bind ADDR                 bind address. Default: 127.0.0.1:4097.
   --permission-mode MODE      read-only|workspace-write|danger-full-access, etc. Default: read-only.
@@ -106,7 +106,7 @@ Uninstall:
                               an explicit --workdir/--sandbox-dir/--ui-data-dir flag.)
 
 Design:
-  - Installs systemd service + env + wrapper for the OpenAI-compatible Claw Lab server.
+  - Installs systemd service + env + wrapper for the OpenAI-compatible Cloudling server.
   - Uses a neutral workdir by default via --workdir.
   - Does not build the binary; install a prebuilt one via --runtime-bin-src, or use
     deploy-openai-server.sh to build and replace it.
@@ -200,7 +200,7 @@ existing_var() {
   fi
 }
 
-gen_token() {  # print a random hex token for CLAW_UI_TOKEN
+gen_token() {  # print a random hex token for CLOUDLING_UI_TOKEN
   if command -v openssl >/dev/null 2>&1; then
     openssl rand -hex 24
   elif [ -r /dev/urandom ]; then
@@ -231,20 +231,20 @@ do_uninstall() {
   local unit="/etc/systemd/system/$SERVICE_NAME"
 
   # Source of truth for data dirs is the installed env file: read the real paths from
-  # it so a custom install (e.g. a relocated CLAW_UI_DATA_DIR holding dialogs.sqlite) is
+  # it so a custom install (e.g. a relocated CLOUDLING_UI_DATA_DIR holding dialogs.sqlite) is
   # actually removed, not the defaults. An explicit --*-dir flag still wins; if the env
   # file is missing/unreadable, existing_var yields empty and we keep the flag/default.
   local from_env
   if [ "$WORKDIR_SET" != "1" ]; then
-    from_env="$(existing_var CLAW_WORKING_DIRECTORY)"
+    from_env="$(existing_var CLOUDLING_WORKING_DIRECTORY)"
     [ -n "$from_env" ] && WORKDIR="$from_env"
   fi
   if [ "$SANDBOX_DIR_SET" != "1" ]; then
-    from_env="$(existing_var CLAW_SANDBOX_DIR)"
+    from_env="$(existing_var CLOUDLING_SANDBOX_DIR)"
     [ -n "$from_env" ] && SANDBOX_DIR="$from_env"
   fi
   if [ "$UI_DATA_DIR_SET" != "1" ]; then
-    from_env="$(existing_var CLAW_UI_DATA_DIR)"
+    from_env="$(existing_var CLOUDLING_UI_DATA_DIR)"
     [ -n "$from_env" ] && UI_DATA_DIR="$from_env"
   fi
 
@@ -325,7 +325,7 @@ ask() {  # ask "Prompt" "default" -> echoes the answer (default if empty)
 }
 
 run_wizard() {
-  echo "=== Claw Lab — service setup ==="
+  echo "=== Cloudling — service setup ==="
 
   local mode
   read -r -p 'Setup type: [1] built-in web UI (set the engine in the browser), [2] classic API (configure here) [1]: ' mode
@@ -405,9 +405,9 @@ run_wizard() {
 # else carry over the value from an existing env file (so re-running the installer
 # never silently resets a configured service), else the built-in default. Resolved
 # before the wizard so its prompts show the effective default too.
-[ -n "$BIND" ]            || BIND="$(existing_var CLAW_OPENAI_BIND)"
+[ -n "$BIND" ]            || BIND="$(existing_var CLOUDLING_OPENAI_BIND)"
 [ -n "$BIND" ]            || BIND="$DEFAULT_BIND"
-[ -n "$SERVED_MODEL_ID" ] || SERVED_MODEL_ID="$(existing_var CLAW_SERVED_MODEL_ID)"
+[ -n "$SERVED_MODEL_ID" ] || SERVED_MODEL_ID="$(existing_var CLOUDLING_SERVED_MODEL_ID)"
 [ -n "$SERVED_MODEL_ID" ] || SERVED_MODEL_ID="$DEFAULT_SERVED_MODEL_ID"
 [ -n "$PERMISSION_MODE" ] || PERMISSION_MODE="$(existing_var CLAW_PERMISSION_MODE)"
 [ -n "$PERMISSION_MODE" ] || PERMISSION_MODE="$DEFAULT_PERMISSION_MODE"
@@ -458,7 +458,7 @@ fi
 
 # UI mode: reuse an existing token on re-runs, otherwise generate one.
 if [ "$UI_MODE" = "1" ] && [ -z "$UI_TOKEN" ]; then
-  UI_TOKEN="$(existing_var CLAW_UI_TOKEN)"
+  UI_TOKEN="$(existing_var CLOUDLING_UI_TOKEN)"
   [ -n "$UI_TOKEN" ] || UI_TOKEN="$(gen_token)"
 fi
 
@@ -484,21 +484,21 @@ trap cleanup EXIT
   if [ -n "$BACKEND_MODEL" ]; then
     printf 'OPENAI_MODEL=%s\n' "$BACKEND_MODEL"
   fi
-  printf 'CLAW_SERVED_MODEL_ID=%s\n' "$SERVED_MODEL_ID"
-  printf 'CLAW_OPENAI_BIND=%s\n' "$BIND"
+  printf 'CLOUDLING_SERVED_MODEL_ID=%s\n' "$SERVED_MODEL_ID"
+  printf 'CLOUDLING_OPENAI_BIND=%s\n' "$BIND"
   printf 'CLAW_PERMISSION_MODE=%s\n' "$PERMISSION_MODE"
-  printf 'CLAW_WORKING_DIRECTORY=%s\n' "$WORKDIR"
-  printf 'CLAW_SANDBOX_DIR=%s\n' "$SANDBOX_DIR"
+  printf 'CLOUDLING_WORKING_DIRECTORY=%s\n' "$WORKDIR"
+  printf 'CLOUDLING_SANDBOX_DIR=%s\n' "$SANDBOX_DIR"
   printf 'TMPDIR=%s\n' "$TMPDIR_VALUE"
   if [ -n "$WEBSEARCH_URL" ]; then
     printf 'CLAWD_WEB_SEARCH_BASE_URL=%s\n' "$WEBSEARCH_URL"
   fi
   if [ "$UI_MODE" = "1" ]; then
-    printf 'CLAW_OPENAI_UI=1\n'
-    printf 'CLAW_UI_DATA_DIR=%s\n' "$UI_DATA_DIR"
-    printf 'CLAW_OPENAI_ENV_FILE=%s\n' "$ENV_FILE"
+    printf 'CLOUDLING_OPENAI_UI=1\n'
+    printf 'CLOUDLING_UI_DATA_DIR=%s\n' "$UI_DATA_DIR"
+    printf 'CLOUDLING_OPENAI_ENV_FILE=%s\n' "$ENV_FILE"
     if [ -n "$UI_TOKEN" ]; then
-      printf 'CLAW_UI_TOKEN=%s\n' "$UI_TOKEN"
+      printf 'CLOUDLING_UI_TOKEN=%s\n' "$UI_TOKEN"
     fi
   fi
 } > "$TMP_ENV"
@@ -507,14 +507,14 @@ cat > "$TMP_WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 
-BIND="\${CLAW_OPENAI_BIND:-127.0.0.1:4097}"
+BIND="\${CLOUDLING_OPENAI_BIND:-127.0.0.1:4097}"
 PERMISSION_MODE="\${CLAW_PERMISSION_MODE:-read-only}"
-WORKDIR="\${CLAW_WORKING_DIRECTORY:-$WORKDIR}"
+WORKDIR="\${CLOUDLING_WORKING_DIRECTORY:-$WORKDIR}"
 
-if [ "\${CLAW_OPENAI_UI:-0}" = "1" ]; then
+if [ "\${CLOUDLING_OPENAI_UI:-0}" = "1" ]; then
   # UI mode: the engine can be set in the browser, so no backend is required to start.
   if [ ! -d "\$WORKDIR" ]; then
-    echo "missing CLAW_WORKING_DIRECTORY: \$WORKDIR" >&2
+    echo "missing CLOUDLING_WORKING_DIRECTORY: \$WORKDIR" >&2
     exit 66
   fi
   cd "\$WORKDIR"
@@ -534,7 +534,7 @@ if [ -z "\${OPENAI_BASE_URL:-}" ]; then
 fi
 
 if [ ! -d "\$WORKDIR" ]; then
-  echo "missing CLAW_WORKING_DIRECTORY: \$WORKDIR" >&2
+  echo "missing CLOUDLING_WORKING_DIRECTORY: \$WORKDIR" >&2
   exit 66
 fi
 
@@ -553,7 +553,7 @@ fi
 
 cat > "$TMP_UNIT" <<EOF
 [Unit]
-Description=Claw Lab OpenAI-compatible API server
+Description=Cloudling OpenAI-compatible API server
 After=network-online.target
 Wants=network-online.target
 

@@ -559,7 +559,7 @@ fn plugin_load_failure_json(failure: &plugins::PluginLoadFailure) -> Value {
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     // Windows: a bare double-click (no args, our own fresh console) launches the
-    // desktop tray instead of the interactive REPL. Running `clab` from a
+    // desktop tray instead of the interactive REPL. Running `cloudling` from a
     // terminal keeps the REPL, because the shell shares the console.
     #[cfg(windows)]
     if args.is_empty() && desktop::launched_by_double_click() {
@@ -821,7 +821,7 @@ enum CliAction {
     },
     /// Windows desktop mode: run serve + built-in UI in the background, place a
     /// tray icon with a menu, and (on Windows) hide the console window. The same
-    /// `clab` binary in a different role (see `desktop` module). Implemented on
+    /// `cloudling` binary in a different role (see `desktop` module). Implemented on
     /// Windows (win32 tray) and Linux (SNI tray via `ksni`); on other platforms
     /// the dispatch returns a clear "not available" error. The variant itself is
     /// cross-platform so the parser/dispatch compile everywhere.
@@ -1845,7 +1845,7 @@ fn resolve_openai_serve_model(
     // With `--ui` the server may start unconfigured: it serves the built-in web UI
     // so the backend (OPENAI_MODEL / OPENAI_BASE_URL) can be set in the browser, then
     // save-restart brings the process back up with a real model. An empty model means
-    // "not configured yet" — the served model id still comes from CLAW_SERVED_MODEL_ID,
+    // "not configured yet" — the served model id still comes from CLOUDLING_SERVED_MODEL_ID,
     // and the chat path errors gracefully until a backend is configured (the UI's
     // first-run setup screen routes the user there before they can chat).
     if ui {
@@ -1858,7 +1858,7 @@ fn resolve_openai_serve_model(
     )
 }
 
-/// Parse `clab tray [--bind ADDR]`. Mirrors `parse_openai_serve_args`: the tray
+/// Parse `cloudling tray [--bind ADDR]`. Mirrors `parse_openai_serve_args`: the tray
 /// always serves the built-in UI (it is the desktop front end), so `--ui` is
 /// implicit and an unconfigured engine is allowed (configured in the browser).
 fn parse_tray_args(
@@ -1875,7 +1875,7 @@ fn parse_tray_args(
         match args[index].as_str() {
             "--bind" => {
                 let value = args.get(index + 1).ok_or_else(|| {
-                    "missing_flag_value: missing value for --bind.\nUsage: clab tray [--bind 127.0.0.1:4097]".to_string()
+                    "missing_flag_value: missing value for --bind.\nUsage: cloudling tray [--bind 127.0.0.1:4097]".to_string()
                 })?;
                 bind = value.clone();
                 index += 2;
@@ -1886,13 +1886,13 @@ fn parse_tray_args(
             }
             "--help" | "-h" => {
                 return Err(
-                    "Usage: clab tray [--bind 127.0.0.1:4097]\nWindows desktop mode: runs the server + built-in web UI in the background, adds a tray icon, and hides the console window. Configure the engine in the browser. Windows-only."
+                    "Usage: cloudling tray [--bind 127.0.0.1:4097]\nWindows desktop mode: runs the server + built-in web UI in the background, adds a tray icon, and hides the console window. Configure the engine in the browser. Windows-only."
                         .to_string(),
                 );
             }
             other => {
                 return Err(format!(
-                    "unknown_option: unknown tray option: {other}.\nUsage: clab tray [--bind 127.0.0.1:4097]"
+                    "unknown_option: unknown tray option: {other}.\nUsage: cloudling tray [--bind 127.0.0.1:4097]"
                 ));
             }
         }
@@ -1909,7 +1909,7 @@ fn parse_tray_args(
     })
 }
 
-/// Parse `clab uninstall [--yes]`. `--yes`/`-y` skips the interactive
+/// Parse `cloudling uninstall [--yes]`. `--yes`/`-y` skips the interactive
 /// confirmation (the tray-menu path uses a GUI dialog instead).
 fn parse_uninstall_args(args: &[String]) -> Result<CliAction, String> {
     let mut assume_yes = false;
@@ -1918,13 +1918,13 @@ fn parse_uninstall_args(args: &[String]) -> Result<CliAction, String> {
             "--yes" | "-y" => assume_yes = true,
             "--help" | "-h" => {
                 return Err(
-                    "Usage: clab uninstall [--yes]\nRemoves the desktop integration (shortcuts, autostart) and, after confirmation, the per-user data directory (conversations, keys, settings). Windows-only."
+                    "Usage: cloudling uninstall [--yes]\nRemoves the desktop integration (shortcuts, autostart) and, after confirmation, the per-user data directory (conversations, keys, settings). Windows-only."
                         .to_string(),
                 );
             }
             other => {
                 return Err(format!(
-                    "unknown_option: unknown uninstall option: {other}.\nUsage: clab uninstall [--yes]"
+                    "unknown_option: unknown uninstall option: {other}.\nUsage: cloudling uninstall [--yes]"
                 ));
             }
         }
@@ -9319,7 +9319,7 @@ fn render_version_report() -> String {
     let git_sha = GIT_SHA.unwrap_or("unknown");
     let target = BUILD_TARGET.unwrap_or("unknown");
     format!(
-        "Claw Lab\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
+        "Cloudling\n  Version          {VERSION}\n  Git SHA          {git_sha}\n  Target           {target}\n  Build date       {DEFAULT_DATE}"
     )
 }
 
@@ -10325,7 +10325,7 @@ impl AnthropicRuntimeClient {
         // so we can explicitly apply `api::read_base_url()` — that
         // reads `ANTHROPIC_BASE_URL` and is required for the local
         // mock-server test harness
-        // (`crates/rusty-claude-cli/tests/compact_output.rs`) to point
+        // (`crates/cloudling-cli/tests/compact_output.rs`) to point
         // claw at its fake Anthropic endpoint. We also attach a
         // session-scoped prompt cache on the Anthropic path; the
         // prompt cache is Anthropic-only so non-Anthropic variants
@@ -11924,12 +11924,12 @@ fn print_help_to(out: &mut impl Write) -> io::Result<()> {
         out,
         "      Dump the latest (or named) session as markdown; writes to PATH or stdout"
     )?;
-    writeln!(out, "  clab tray [--bind ADDR]")?;
+    writeln!(out, "  cloudling tray [--bind ADDR]")?;
     writeln!(
         out,
         "      Windows only: run server + web UI in the background with a tray icon (no console window)"
     )?;
-    writeln!(out, "  clab uninstall [--yes]")?;
+    writeln!(out, "  cloudling uninstall [--yes]")?;
     writeln!(
         out,
         "      Windows only: remove desktop integration and (after confirmation) per-user data"
@@ -12309,7 +12309,7 @@ mod tests {
             .expect("time should be after epoch")
             .as_nanos();
         let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("rusty-claude-cli-{nanos}-{unique}"))
+        std::env::temp_dir().join(format!("cloudling-cli-{nanos}-{unique}"))
     }
 
     fn git(args: &[&str], cwd: &Path) {
@@ -16372,7 +16372,7 @@ UU conflicted.rs",
             task_label: "ship plugin progress".to_string(),
             step: 3,
             phase: "running read_file".to_string(),
-            detail: Some("reading rust/crates/rusty-claude-cli/src/main.rs".to_string()),
+            detail: Some("reading rust/crates/cloudling-cli/src/main.rs".to_string()),
             saw_final_text: false,
         };
 
@@ -16419,8 +16419,8 @@ UU conflicted.rs",
             "reading src/main.rs"
         );
         assert!(
-            describe_tool_progress("bash", r#"{"command":"cargo test -p rusty-claude-cli"}"#)
-                .contains("cargo test -p rusty-claude-cli")
+            describe_tool_progress("bash", r#"{"command":"cargo test -p cloudling-cli"}"#)
+                .contains("cargo test -p cloudling-cli")
         );
         assert_eq!(
             describe_tool_progress("grep_search", r#"{"pattern":"ultraplan","path":"rust"}"#),

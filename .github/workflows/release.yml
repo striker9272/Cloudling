@@ -32,14 +32,14 @@ jobs:
           - name: linux-x64
             os: ubuntu-latest
             target: x86_64-unknown-linux-musl
-            bin: clab
-            artifact_name: claw-linux-x64
+            bin: cloudling
+            artifact_name: cloudling-linux-x64
             publish: true
           - name: windows-x64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            bin: clab.exe
-            artifact_name: claw-windows-x64.exe
+            bin: cloudling.exe
+            artifact_name: cloudling-windows-x64.exe
             publish: true
           # macos-arm64 is disabled until the macOS build is smoke-tested on real
           # hardware. macOS is publish:false (no asset is attached to the release),
@@ -49,8 +49,8 @@ jobs:
           # - name: macos-arm64
           #   os: macos-latest
           #   target: aarch64-apple-darwin
-          #   bin: clab
-          #   artifact_name: claw-macos-arm64
+          #   bin: cloudling
+          #   artifact_name: cloudling-macos-arm64
           #   publish: false
     defaults:
       run:
@@ -75,7 +75,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build release binary
-        run: cargo build --release -p clab-cli --target ${{ matrix.target }}
+        run: cargo build --release -p cloudling-cli --target ${{ matrix.target }}
 
       - name: Package artifact and checksum
         shell: bash
@@ -86,8 +86,8 @@ jobs:
           (cd dist && { if command -v sha256sum >/dev/null; then sha256sum "${{ matrix.artifact_name }}"; else shasum -a 256 "${{ matrix.artifact_name }}"; fi; } > "${{ matrix.artifact_name }}.sha256")
 
       # Linux desktop artifact: a .deb so it installs with a double-click (the
-      # graphical App Center / gdebi — no terminal), places "Claw Lab" in the
-      # apps menu, and launches the tray role (`clab tray`: server + UI + tray
+      # graphical App Center / gdebi — no terminal), places "Cloudling" in the
+      # apps menu, and launches the tray role (`cloudling tray`: server + UI + tray
       # icon) like the Windows .exe. Reuses the static musl binary + assets/.
       - name: Build .deb (Linux desktop)
         if: matrix.target == 'x86_64-unknown-linux-musl'
@@ -103,32 +103,32 @@ jobs:
           else
             version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')-dev"
           fi
-          pkg="$(mktemp -d)/claw-lab"
+          pkg="$(mktemp -d)/cloudling"
           mkdir -p "$pkg/DEBIAN" "$pkg/usr/bin" \
                    "$pkg/usr/share/applications" \
                    "$pkg/usr/share/icons/hicolor/256x256/apps" \
                    "$pkg/usr/share/icons/hicolor/scalable/apps"
-          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$pkg/usr/bin/clab"
-          install -m 644 "$GITHUB_WORKSPACE/assets/claw-lab.desktop" "$pkg/usr/share/applications/claw-lab.desktop"
-          rsvg-convert -w 256 -h 256 "$GITHUB_WORKSPACE/assets/claw-lab.svg" \
-            -o "$pkg/usr/share/icons/hicolor/256x256/apps/claw-lab.png"
-          install -m 644 "$GITHUB_WORKSPACE/assets/claw-lab.svg" \
-            "$pkg/usr/share/icons/hicolor/scalable/apps/claw-lab.svg"
+          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$pkg/usr/bin/cloudling"
+          install -m 644 "$GITHUB_WORKSPACE/assets/cloudling.desktop" "$pkg/usr/share/applications/cloudling.desktop"
+          rsvg-convert -w 256 -h 256 "$GITHUB_WORKSPACE/assets/cloudling.svg" \
+            -o "$pkg/usr/share/icons/hicolor/256x256/apps/cloudling.png"
+          install -m 644 "$GITHUB_WORKSPACE/assets/cloudling.svg" \
+            "$pkg/usr/share/icons/hicolor/scalable/apps/cloudling.svg"
           # control file built line-by-line (avoids YAML/heredoc whitespace pitfalls;
           # Description continuation lines must start with a single space).
           {
-            echo "Package: claw-lab"
+            echo "Package: cloudling"
             echo "Version: ${version}"
             echo "Section: utils"
             echo "Priority: optional"
             echo "Architecture: amd64"
-            echo "Maintainer: Claw Lab <noreply@users.noreply.github.com>"
+            echo "Maintainer: Cloudling <noreply@users.noreply.github.com>"
             echo "Description: Local agentic layer - model, agent, chat"
             echo " Wraps an OpenAI-compatible backend with built-in tools, web search,"
             echo " and an agent workflow; serves an OpenAI-compatible endpoint with a"
-            echo " built-in web UI. 'clab tray' runs it as a desktop tray app."
+            echo " built-in web UI. 'cloudling tray' runs it as a desktop tray app."
           } > "$pkg/DEBIAN/control"
-          deb="claw-lab_${version}_amd64.deb"
+          deb="cloudling_${version}_amd64.deb"
           dpkg-deb --build --root-owner-group "$pkg" "dist/${deb}"
           ( cd dist && sha256sum "${deb}" > "${deb}.sha256" )
           echo "DEB_NAME=${deb}" >> "$GITHUB_ENV"
@@ -136,12 +136,12 @@ jobs:
           dpkg-deb --contents "dist/${deb}"
           ls -la dist
 
-      # macOS desktop artifact: a .dmg holding a "Claw Lab.app" bundle so it
+      # macOS desktop artifact: a .dmg holding a "Cloudling.app" bundle so it
       # installs by drag-to-Applications and launches the tray role on a double
       # click (the .deb's macOS counterpart). The app is a menu-bar agent
       # (LSUIElement -> no Dock icon). Its executable is a tiny launcher that runs
-      # `clab tray`, because a bundle launches its executable with no arguments and
-      # bare `clab` would start the REPL. Unsigned: Gatekeeper warns on download
+      # `cloudling tray`, because a bundle launches its executable with no arguments and
+      # bare `cloudling` would start the REPL. Unsigned: Gatekeeper warns on download
       # until code signing (BACKLOG), and this artifact is NOT attached to the
       # public release until verified on real hardware (publish: false).
       - name: Build .app and .dmg (macOS desktop)
@@ -156,16 +156,16 @@ jobs:
           else
             version="$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
           fi
-          app="dist/Claw Lab.app"
+          app="dist/Cloudling.app"
           mkdir -p "$app/Contents/MacOS"
-          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$app/Contents/MacOS/clab"
+          install -m 755 "target/${{ matrix.target }}/release/${{ matrix.bin }}" "$app/Contents/MacOS/cloudling"
           # Launcher executable: the bundle runs this with no args, so it execs the
-          # tray role explicitly (bare `clab` would open the REPL).
+          # tray role explicitly (bare `cloudling` would open the REPL).
           {
             echo '#!/bin/sh'
-            echo 'exec "$(dirname "$0")/clab" tray'
-          } > "$app/Contents/MacOS/ClawLab"
-          chmod 755 "$app/Contents/MacOS/ClawLab"
+            echo 'exec "$(dirname "$0")/cloudling" tray'
+          } > "$app/Contents/MacOS/Cloudling"
+          chmod 755 "$app/Contents/MacOS/Cloudling"
           # Info.plist built line-by-line (avoids heredoc/whitespace pitfalls).
           {
             echo '<?xml version="1.0" encoding="UTF-8"?>'
@@ -173,13 +173,13 @@ jobs:
             echo '<plist version="1.0">'
             echo '<dict>'
             echo '	<key>CFBundleName</key>'
-            echo '	<string>Claw Lab</string>'
+            echo '	<string>Cloudling</string>'
             echo '	<key>CFBundleDisplayName</key>'
-            echo '	<string>Claw Lab</string>'
+            echo '	<string>Cloudling</string>'
             echo '	<key>CFBundleIdentifier</key>'
-            echo '	<string>lab.claw.clab</string>'
+            echo '	<string>io.github.OWNER.cloudling</string>'  # TODO clean-start: set the real repo owner
             echo '	<key>CFBundleExecutable</key>'
-            echo '	<string>ClawLab</string>'
+            echo '	<string>Cloudling</string>'
             echo '	<key>CFBundlePackageType</key>'
             echo '	<string>APPL</string>'
             echo '	<key>CFBundleVersion</key>'
@@ -198,7 +198,7 @@ jobs:
           cp -R "$app" "$dmgroot/"
           ln -s /Applications "$dmgroot/Applications"
           dmg="${{ matrix.artifact_name }}.dmg"
-          hdiutil create -volname "Claw Lab" -srcfolder "$dmgroot" -ov -format UDZO "dist/${dmg}"
+          hdiutil create -volname "Cloudling" -srcfolder "$dmgroot" -ov -format UDZO "dist/${dmg}"
           ( cd dist && shasum -a 256 "${dmg}" > "${dmg}.sha256" )
           ls -la dist
 
@@ -214,7 +214,7 @@ jobs:
         if: matrix.target == 'x86_64-unknown-linux-musl'
         uses: actions/upload-artifact@v6
         with:
-          name: claw-lab-deb
+          name: cloudling-deb
           path: |
             rust/dist/*.deb
             rust/dist/*.deb.sha256
@@ -223,7 +223,7 @@ jobs:
         if: matrix.target == 'aarch64-apple-darwin'
         uses: actions/upload-artifact@v6
         with:
-          name: claw-macos-dmg
+          name: cloudling-macos-dmg
           path: |
             rust/dist/*.dmg
             rust/dist/*.dmg.sha256

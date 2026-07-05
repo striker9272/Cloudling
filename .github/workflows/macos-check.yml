@@ -1,13 +1,13 @@
 name: macOS check
 
-# Phase 0 of the macOS port: confirm the Rust workspace compiles and the `clab`
+# Phase 0 of the macOS port: confirm the Rust workspace compiles and the `cloudling`
 # binary runs on Apple Silicon, before investing in the desktop tray / packaging.
 #
 # Dispatch-only on purpose. It is NOT a merge gate: mirroring the project policy
 # that the build is validated out-of-band (the pinned-toolchain Rust CI gates on
 # docs, not on `cargo build`), this runs only when triggered. `macos-latest`
 # runners are Apple Silicon (M-series), so the host target is aarch64-apple-darwin
-# and no cross toolchain is needed. The desktop crate (`clab-desktop`) has its
+# and no cross toolchain is needed. The desktop crate (`cloudling-desktop`) has its
 # Windows/Linux tray deps gated by target, so on macOS it builds the stub only.
 
 on:
@@ -46,8 +46,8 @@ jobs:
 
       # Mirror what the release pipeline will build for the macOS asset.
       - name: Build release binary
-        run: cargo build --release -p clab-cli
+        run: cargo build --release -p cloudling-cli
 
       # Smoke: the freshly built binary links and runs on macOS.
       - name: Smoke - binary runs
-        run: ./target/release/clab --version
+        run: ./target/release/cloudling --version

@@ -1,5 +1,5 @@
 [package]
-name = "clab-rag-service"
+name = "cloudling-rag-service"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

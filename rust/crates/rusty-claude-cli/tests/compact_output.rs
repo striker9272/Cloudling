@@ -342,7 +342,7 @@ fn run_claw(
     base_url: &str,
     args: &[&str],
 ) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_clab"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_cloudling"));
     command
         .current_dir(cwd)
         .env_clear()
@@ -363,7 +363,7 @@ fn run_claw_closed_stdin_with_timeout(
     args: &[&str],
     timeout: Duration,
 ) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_clab"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_cloudling"))
         .current_dir(cwd)
         .env_clear()
         .env("CLAW_CONFIG_HOME", config_home)

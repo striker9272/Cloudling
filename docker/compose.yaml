@@ -1,39 +1,39 @@
-# Standalone / test run of the containerised Claw Lab server (built-in UI + serve).
+# Standalone / test run of the containerised Cloudling server (built-in UI + serve).
 #
 # This is independent of the host systemd service (prod): different process, different
 # port. By default it exposes the container on host port 4098 so it never collides with
 # a prod service on 4097.
 #
-# Required: set CLAW_UI_TOKEN in your shell before `up` (the /ui/* endpoints are
+# Required: set CLOUDLING_UI_TOKEN in your shell before `up` (the /ui/* endpoints are
 # token-gated on a non-loopback bind). Optionally set OPENAI_BASE_URL / OPENAI_MODEL /
 # OPENAI_API_KEY to point at a backend now, or leave them unset and configure the engine
 # in the browser on first run.
 #
-#   CLAW_UI_TOKEN=... docker compose -f docker/compose.yaml up --build
+#   CLOUDLING_UI_TOKEN=... docker compose -f docker/compose.yaml up --build
 #
 # Build context is the repo root so the Rust workspace under rust/ is available.
 services:
-  clab:
+  cloudling:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: claw-lab:dev
+    image: cloudling:dev
     ports:
-      - "${CLAB_HOST_PORT:-4098}:4097"   # host 4098 -> container 4097
+      - "${CLOUDLING_HOST_PORT:-4098}:4097"   # host 4098 -> container 4097
     environment:
-      CLAW_OPENAI_BIND: "0.0.0.0:4097"
+      CLOUDLING_OPENAI_BIND: "0.0.0.0:4097"
       CLAW_PERMISSION_MODE: "${CLAW_PERMISSION_MODE:-read-only}"
-      CLAW_UI_TOKEN: "${CLAW_UI_TOKEN:?set CLAW_UI_TOKEN in your env before up}"
+      CLOUDLING_UI_TOKEN: "${CLOUDLING_UI_TOKEN:?set CLOUDLING_UI_TOKEN in your env before up}"
       # Optional backend — empty values are dropped by the entrypoint (UI first-run setup).
       OPENAI_BASE_URL: "${OPENAI_BASE_URL:-}"
       OPENAI_MODEL: "${OPENAI_MODEL:-}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       CLAWD_WEB_SEARCH_BASE_URL: "${CLAWD_WEB_SEARCH_BASE_URL:-}"
     volumes:
-      - clab-ui-data:/data/ui
-      - clab-workspace:/workspace
+      - cloudling-ui-data:/data/ui
+      - cloudling-workspace:/workspace
     restart: unless-stopped
 
 volumes:
-  clab-ui-data:
-  clab-workspace:
+  cloudling-ui-data:
+  cloudling-workspace:
