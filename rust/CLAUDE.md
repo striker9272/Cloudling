@@ -12,5 +12,5 @@ This file provides guidance to Claw Code (clawcode.dev) when working with code i
 
 ## Working agreement
 - Prefer small, reviewable changes and keep generated bootstrap files aligned with actual repo workflows.
-- Keep shared defaults in `.claw.json`; reserve `.claw/settings.local.json` for machine-local overrides.
+- Keep machine-local agent overrides in `.claw/settings.local.json` (gitignored).
 - Do not overwrite existing `CLAUDE.md` content automatically; update it intentionally when repo workflows change.

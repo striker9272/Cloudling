@@ -137,5 +137,5 @@ deploy interactively.
   it does **not** run fmt, clippy, tests, or build. `.github/workflows/release.yml` builds
   the platform binaries only on a `v*` tag. The real build/test signal is `cargo build`
   (and the commands above) on the Linux build host.
-- Prefer small, reviewable changes. Reserve machine-local overrides for
-  `.claude/settings.local.json`; keep shared defaults in `.claude.json`.
+- Prefer small, reviewable changes. Keep machine-local agent overrides in
+  `.claude/settings.local.json` / `.claw/settings.local.json` (both gitignored).
