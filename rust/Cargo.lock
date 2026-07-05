@@ -469,26 +469,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "cloudling-analog"
-version = "0.10.3"
-dependencies = [
- "api",
- "clap",
- "clap_complete",
- "globset",
- "ignore",
- "mock-anthropic-service",
- "reqwest",
- "runtime",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "walkdir",
-]
-
-[[package]]
 name = "cloudling-cli"
 version = "0.10.3"
 dependencies = [
@@ -511,24 +491,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tools",
-]
-
-[[package]]
-name = "cloudling-rag-service"
-version = "0.10.3"
-dependencies = [
- "axum 0.8.9",
- "blake3",
- "clap",
- "dotenvy",
- "qdrant-client",
- "reqwest",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "walkdir",
 ]
 
 [[package]]

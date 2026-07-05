@@ -580,9 +580,7 @@ cargo test --workspace
 Current Rust crates:
 
 - `api`
-- `cloudling-analog`
 - `cloudling-desktop` (Windows-only tray/desktop integration; no-op stubs elsewhere)
-- `cloudling-rag-service`
 - `commands`
 - `compat-harness`
 - `mock-anthropic-service`

@@ -18,11 +18,10 @@ and deploy tooling are Cloudling's.
 ## Stack & repository shape
 
 - Language: Rust. The workspace lives in `rust/` (members under `rust/crates/*`).
-- Binary: **`cloudling`** (defined in crate `cloudling-cli`). Other notable crates: `cloudling-desktop`
-  (desktop integration — Windows + Linux tray), `cloudling-analog`, `cloudling-rag-service`.
+- Binary: **`cloudling`** (defined in crate `cloudling-cli`). Other notable crate: `cloudling-desktop`
+  (desktop integration — Windows + Linux tray).
 - `USAGE.md` — task-oriented usage guide. `docs/` — Windows, local providers, containers,
-  model compatibility, RAG/web-ui, navigation/file-context.
-- `src/` + `tests/` — companion reference/audit workspace, not the primary runtime.
+  model compatibility, web-ui, navigation/file-context.
 - **Desktop (`cloudling tray` / `cloudling uninstall`):** `cloudling tray` runs serve + the built-in UI in
   the background as a system-tray app (a bare double-click does the same on Windows; `cloudling` in
   a terminal stays the CLI/REPL); `cloudling uninstall` removes per-user data + the autostart entry.
@@ -120,8 +119,8 @@ deploy interactively.
 
 - **Branding:** the project, binary, and crates are `cloudling` / `cloudling-*`; fork-added
   env vars use the `CLOUDLING_*` namespace. Do NOT touch upstream plumbing: the config dir
-  `.claw/`, upstream env vars (`CLAW_CONFIG_HOME`, `CLAW_PERMISSION_MODE`, `CLAWD_*`,
-  `CLAW_RAG_*`, …), or config files like `.claw-analog.toml`. Keep all `claw-code` / "Claw Code" references that credit
+  `.claw/` and upstream env vars (`CLAW_CONFIG_HOME`, `CLAW_PERMISSION_MODE`, `CLAWD_*`, …).
+  Keep all `claw-code` / "Claw Code" references that credit
   the **upstream** project (MIT attribution requirement — `LICENSE` must stay intact).
 - **Language:** code, commits, and public docs in English; maintainer conversation may
   be in another language.
@@ -137,7 +136,6 @@ deploy interactively.
   (`check_doc_source_of_truth.py` for branding/links and `check_release_readiness.py`);
   it does **not** run fmt, clippy, tests, or build. `.github/workflows/release.yml` builds
   the platform binaries only on a `v*` tag. The real build/test signal is `cargo build`
-  (and the commands above) on the Linux build host — keep `rust/` source and `tests/` in
-  sync when behavior changes.
+  (and the commands above) on the Linux build host.
 - Prefer small, reviewable changes. Reserve machine-local overrides for
   `.claude/settings.local.json`; keep shared defaults in `.claude.json`.

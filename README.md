@@ -161,7 +161,6 @@ scripts/deploy-openai-server.sh \
 - **`rust/`** — Rust-воркспейс и бинарник `cloudling` (CLI + сервер); каноническая реализация
 - **`USAGE.md`** — сборка, авторизация, CLI, сессии, провайдеры
 - **`docs/`** — Windows, macOS, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI
-- **`src/` + `tests/`** — вспомогательный референс/аудит-воркспейс; не основная среда выполнения
 
 ### Благодарности
 
@@ -315,7 +314,6 @@ To remove the service, use the counterpart command `uninstall.sh` (removes the u
 - **`rust/`** — the Rust workspace and the `cloudling` CLI + server binary (the canonical implementation)
 - **`USAGE.md`** — build, auth, CLI, sessions, providers
 - **`docs/`** — Windows install, macOS install, local OpenAI-compatible providers, file-context, containers, the built-in web UI
-- **`src/` + `tests/`** — companion reference/audit workspace; not the primary runtime
 
 ### Credits
 
