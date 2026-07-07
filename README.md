@@ -27,6 +27,10 @@
   Ollama · llama.cpp ─▶  инструменты · веб-поиск    ─▶  Open WebUI ·
   vLLM · облако          агентный воркфлоу               любой OpenAI-клиент
                          (наружу — как OpenAI API)
+                             │
+                             ▼
+                         встроенный веб-UI
+                         (свой чат в браузере, флаг --ui)
 ```
 
 ### Зачем это
@@ -182,6 +186,10 @@ Cloudling — форк проекта **[Claw Code](https://github.com/ultrawork
   Ollama · llama.cpp ─▶  tools · web search      ─▶  Open WebUI ·
   vLLM · cloud           agentic workflow             any OpenAI client
                          (served as OpenAI API)
+                             │
+                             ▼
+                         built-in web UI
+                         (your own chat in the browser, --ui flag)
 ```
 
 ### Why
