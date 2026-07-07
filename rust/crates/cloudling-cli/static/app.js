@@ -1,4 +1,218 @@
 (function(){
+  /* ---------- i18n (built-in UI is bilingual; strings live here, not hardcoded) ----------
+     English ships as the default (index.html text + `en` below) so a first-time visitor sees
+     English. A chosen language is saved to localStorage and survives reloads; switching just
+     persists the choice and reloads, so every view re-renders cleanly in the new language.
+     `t(key, vars)` looks up the active language, falls back to English, then to the raw key;
+     `{name}`-style placeholders are filled from `vars`. Static index.html chrome is annotated
+     with data-i18n* attributes and translated by applyStaticI18n() on load. */
+  var I18N = {
+    en: {
+      'common.copy':'Copy','common.copied':'Copied','common.edit':'Edit','common.regen':'Regenerate',
+      'common.retry':'Retry','common.save':'Save','common.cancel':'Cancel','common.delete':'Delete',
+      'common.back':'Back','common.remove':'Remove','common.rename':'Rename','common.done':'Done','common.menu':'Actions',
+      'nav.dialogs':'Chats','nav.settings':'Settings',
+      'dialogs.title':'Chats','dialogs.new':'New chat','dialogs.search':'Search chats…',
+      'dialogs.pinned':'Pinned','dialogs.earlier':'Earlier','dialogs.emptyTitle':'No chats yet',
+      'dialogs.emptyHint':'Start one with the + button above','dialogs.noResultsTitle':'Nothing found',
+      'dialogs.noResultsHint':'Try a different search','dialogs.untitled':'Untitled',
+      'settings.title':'Settings','settings.general':'General',
+      'settings.engineUrl':'Engine URL','settings.checkConn':'Check connection','settings.apiKey':'API key',
+      'settings.model':'Model','settings.servedModel':'Served model name','settings.webSearchUrl':'Web search URL',
+      'settings.applyImmediate':'Changes apply immediately — no restart needed.',
+      'settings.systemPrompt':'System prompt','settings.chat':'Chat','settings.reasoning':'Model reasoning',
+      'settings.reasoningNote':'A collapsible block with the reasoning model’s thinking. Applies from the next message; if the model has no such mode, the block simply won’t appear.',
+      'settings.tools':'Tools','settings.mcpServers':'MCP servers',
+      'settings.mcpNote':'An MCP server is an external program that gives the model new tools (they appear in chat as <b>mcp__name__*</b>). The stdio transport is supported: the given command runs for the duration of each reply.',
+      'settings.mcpAdd':'+ Add server','settings.applyNextMsg':'Applies from the next message — no restart needed.',
+      'settings.security':'Security','settings.accessLevel':'Access level','settings.workFolder':'Working folder',
+      'settings.workFolderPh':'path to the working folder','settings.pickFolder':'Pick a folder on the server',
+      'settings.advanced':'Advanced','settings.trustedRoots':'Additional trusted folders',
+      'settings.trustedRootsNote':'Folders outside the working one that the agent may also access (in “Working folder” mode). One path per line.',
+      'settings.trustedRootsPh':'e.g. /home/user/shared','settings.toolRules':'Tool access rules',
+      'settings.toolRulesNote':'Fine-tuning for advanced users: which tools to always allow or deny. One rule per line.',
+      'settings.allow':'Allow','settings.deny':'Deny','settings.rulePh':'One rule per line',
+      'settings.saving':'Saving…','settings.saveErrEngine':'Couldn’t save — enter a valid engine URL',
+      'settings.serverNoReturn':'The server didn’t come back — check manually','settings.saveErr':'Couldn’t save: {msg}',
+      'settings.savedNextMsg':'Saved — applies from the next message',
+      'access.read':'Read-only','access.workspace':'Working folder','access.full':'Full access',
+      'access.readNote':'The agent reads files and searches the whole computer, but changes nothing and runs no commands.',
+      'access.workspaceNote':'The agent reads, edits files and runs commands — only in the working folder (and its own temp scratch). Nothing else is touched.',
+      'access.fullNote':'The agent reads, edits and runs anything anywhere on this machine. No restrictions.',
+      'home.sub':'A local agent with tools and web search. Describe a task — cloudling answers and reaches for tools when needed.',
+      'home.composerPh':'Ask or give a task…','dialog.composerPh':'Reply…',
+      'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
+      'composer.scrollDown':'Down','composer.scrollDownAria':'Scroll to bottom',
+      'setup.hi':'Hi! This is cloudling',
+      'setup.intro':'A local agent with tools and web search. To begin, connect an engine — the model cloudling will talk to.',
+      'setup.step1':'Enter the engine URL','setup.step1sub':'— e.g. a local Ollama or llama-server.',
+      'setup.step2':'Add a key','setup.step2sub':'— if the engine requires one.',
+      'setup.step3':'Check the connection','setup.step3sub':'— and you’re ready to chat.',
+      'setup.openSettings':'Open settings','setup.hint':'These live under “General” (the gear on the right).',
+      'preset.namePh':'Preset name','preset.promptPh':'Describe how cloudling should behave in this preset…',
+      'preset.none':'No preset','preset.new':'+ New preset','preset.unnamed':'Unnamed',
+      'confirm.delTitle':'Delete chat?','confirm.delBody':'“{title}” will be deleted permanently.',
+      'token.title':'Access token required',
+      'token.text':'The server protects the interface’s service functions with a token. Enter the CLOUDLING_UI_TOKEN value from the service settings file — the browser will remember it.',
+      'token.ph':'Token','token.enter':'Enter','token.disabledTitle':'Service functions disabled',
+      'token.disabledText':'CLOUDLING_UI_TOKEN is not set on the server and the address is reachable beyond localhost — chats and settings are disabled. Set CLOUDLING_UI_TOKEN in the service settings file and restart it.',
+      'token.wrong':'That token didn’t work. Use the CLOUDLING_UI_TOKEN value from the server settings.',
+      'token.serverStatus':'The server responded {status}.','token.serverUnreachable':'The server is unreachable.',
+      'browse.title':'Folder on this server','browse.pick':'Pick this folder','browse.empty':'No subfolders.',
+      'chat.thinking':'cloudling is thinking…','chat.stopped':'Stopped',
+      'reason.title':'Reasoning','reason.live':'Reasoning…',
+      'tool.done':'done','tool.failed':'failed','tool.noOutput':'(no output)','tool.genericName':'Tool','tool.stopped':'stopped',
+      'tasks.title':'Tasks','tasks.done':'Done',
+      'ctx.gaugeTitle':'Context: {n} of {total} tokens in the model window','ctx.plainCount':'{n} tok.',
+      'ctx.plainTitle':'Context tokens in the last request to the model',
+      'compact.header':'[Summary of the earlier conversation · folded {n}, ≈{est} tok.]',
+      'compact.banner':'Context compacted · freed ≈{est} tok.','compact.markFallback':'Context folded',
+      'err.noResponseHead':'Couldn’t get a response',
+      'err.noEngine':'The engine didn’t respond. Check that the backend is running and the URL is correct.',
+      'err.emptyHead':'The model returned no answer',
+      'err.emptyBody':'The turn finished with no answer text. Try regenerating.',
+      'err.emptyBodyReason':'The turn finished with no answer text (reasoning only). Try regenerating.',
+      'err.truncated':'The answer was cut off by the context limit — regenerate to get the full one.',
+      'err.saveDialog':'Couldn’t save the chat','err.deleteDialog':'Couldn’t delete the chat',
+      'conn.ok':'Connected','conn.fail':'Couldn’t connect',
+      'att.tooBig':'File “{name}” is over 10 MB — skipped','att.readFail':'Couldn’t read “{name}”',
+      'att.imageName':'image','att.pasteName':'pasted','att.fileFallback':'file','att.attachment':'Attachment','att.noName':'no name',
+      'att.imageAbove':'[image “{name}” attached above]','att.fileInline':'File “{name}”:',
+      'att.fileNotSent':'[attached file {name}, {size} — contents not sent]',
+      'size.b':'B','size.kb':'KB','size.mb':'MB',
+      'menu.pin':'Pin','menu.unpin':'Unpin','edit.saveSend':'Save & send',
+      'mcp.name':'Server name','mcp.namePh':'e.g. filesystem','mcp.delServer':'Delete server',
+      'mcp.command':'Command','mcp.args':'Arguments — one per line','mcp.framing':'Framing',
+      'mcp.framingNewline':'standard MCP (newline)','mcp.framingLegacy':'legacy (content-length)',
+      'mcp.timeout':'Call timeout, ms','mcp.empty':'No servers configured.',
+      'mcp.errNameCmd':'Every server needs both a name and a command.',
+      'mcp.errNameChars':'Server name — letters, digits, hyphen, underscore only: “{name}”',
+      'mcp.errNameUniq':'Server names must be unique: “{name}”',
+      'ask.questionFallback':'Question','ask.ownPh':'Your own answer…','ask.answer':'Answer','ask.orOwn':'or write your own',
+      'title.msg':'Message: {u}','title.answer':'Answer: {a}','code.langFallback':'code'
+    },
+    ru: {
+      'common.copy':'Копировать','common.copied':'Скопировано','common.edit':'Редактировать','common.regen':'Перегенерировать',
+      'common.retry':'Повторить','common.save':'Сохранить','common.cancel':'Отмена','common.delete':'Удалить',
+      'common.back':'Назад','common.remove':'Убрать','common.rename':'Переименовать','common.done':'Готово','common.menu':'Действия',
+      'nav.dialogs':'Диалоги','nav.settings':'Настройки',
+      'dialogs.title':'Диалоги','dialogs.new':'Новый чат','dialogs.search':'Поиск диалогов…',
+      'dialogs.pinned':'Закреплённые','dialogs.earlier':'Ранее','dialogs.emptyTitle':'Пока нет диалогов',
+      'dialogs.emptyHint':'Начни новый — кнопкой + сверху','dialogs.noResultsTitle':'Ничего не найдено',
+      'dialogs.noResultsHint':'Попробуй другой запрос','dialogs.untitled':'Без названия',
+      'settings.title':'Настройки','settings.general':'Основное',
+      'settings.engineUrl':'Адрес движка','settings.checkConn':'Проверить подключение','settings.apiKey':'Ключ API',
+      'settings.model':'Модель','settings.servedModel':'Имя модели','settings.webSearchUrl':'Адрес веб-поиска',
+      'settings.applyImmediate':'Изменения применяются сразу — перезапуск не нужен.',
+      'settings.systemPrompt':'Системный промпт','settings.chat':'Чат','settings.reasoning':'Размышления модели',
+      'settings.reasoningNote':'Сворачиваемый блок с рассуждениями reasoning-модели. Применяется со следующего сообщения; если у модели нет этого режима — блока просто не будет.',
+      'settings.tools':'Инструменты','settings.mcpServers':'Серверы MCP',
+      'settings.mcpNote':'MCP-сервер — внешняя программа, которая добавляет модели новые инструменты (в чате они видны как <b>mcp__имя__*</b>). Поддерживается транспорт stdio: указанная команда запускается на время каждого ответа.',
+      'settings.mcpAdd':'+ Добавить сервер','settings.applyNextMsg':'Применяется со следующего сообщения — перезапуск не нужен.',
+      'settings.security':'Безопасность','settings.accessLevel':'Уровень доступа','settings.workFolder':'Рабочая папка',
+      'settings.workFolderPh':'путь к рабочей папке','settings.pickFolder':'Выбрать папку на сервере',
+      'settings.advanced':'Расширенные','settings.trustedRoots':'Дополнительные доверенные папки',
+      'settings.trustedRootsNote':'Папки вне рабочей, к которым агенту тоже разрешён доступ (в режиме «Рабочая папка»). По одному пути на строку.',
+      'settings.trustedRootsPh':'например, /home/user/shared','settings.toolRules':'Правила доступа к инструментам',
+      'settings.toolRulesNote':'Тонкая настройка для опытных: какие инструменты всегда разрешать или запрещать. По одному правилу на строку.',
+      'settings.allow':'Разрешить','settings.deny':'Запретить','settings.rulePh':'По одному правилу на строку',
+      'settings.saving':'Сохранение…','settings.saveErrEngine':'Не удалось сохранить — укажи корректный адрес движка',
+      'settings.serverNoReturn':'Сервер не вернулся — проверь вручную','settings.saveErr':'Не удалось сохранить: {msg}',
+      'settings.savedNextMsg':'Сохранено — применится со следующего сообщения',
+      'access.read':'Только чтение','access.workspace':'Рабочая папка','access.full':'Полный доступ',
+      'access.readNote':'Агент читает файлы и ищет по всему компьютеру, но ничего не меняет и не выполняет команды.',
+      'access.workspaceNote':'Агент читает, меняет файлы и выполняет команды — только в рабочей папке (и своём временном черновике). Остального не касается.',
+      'access.fullNote':'Агент читает, меняет и выполняет всё и везде на этой машине. Без ограничений.',
+      'home.sub':'Локальный агент с инструментами и веб-поиском. Опиши задачу — cloudling ответит и при необходимости сам сходит в инструменты.',
+      'home.composerPh':'Спроси или дай задачу…','dialog.composerPh':'Ответить…',
+      'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
+      'composer.scrollDown':'Вниз','composer.scrollDownAria':'Прокрутить вниз',
+      'setup.hi':'Привет! Это cloudling',
+      'setup.intro':'Локальный агент с инструментами и веб-поиском. Чтобы начать, подключи движок — модель, к которой cloudling будет обращаться.',
+      'setup.step1':'Укажи адрес движка','setup.step1sub':'— например, локальный Ollama или llama-server.',
+      'setup.step2':'Добавь ключ','setup.step2sub':'— если движок его требует.',
+      'setup.step3':'Проверь подключение','setup.step3sub':'— и можно общаться.',
+      'setup.openSettings':'Открыть настройки','setup.hint':'Эти настройки — в разделе «Основное» (шестерёнка справа).',
+      'preset.namePh':'Имя пресета','preset.promptPh':'Опиши, как cloudling должен себя вести в этом пресете…',
+      'preset.none':'Без пресета','preset.new':'+ Новый пресет','preset.unnamed':'Без имени',
+      'confirm.delTitle':'Удалить диалог?','confirm.delBody':'«{title}» будет удалён без возможности восстановления.',
+      'token.title':'Нужен токен доступа',
+      'token.text':'Сервер защищает служебные функции интерфейса токеном. Введи значение CLOUDLING_UI_TOKEN из файла настроек сервиса — браузер запомнит его.',
+      'token.ph':'Токен','token.enter':'Войти','token.disabledTitle':'Служебные функции отключены',
+      'token.disabledText':'На сервере не задан CLOUDLING_UI_TOKEN, а адрес доступен не только с localhost — диалоги и настройки отключены. Задай CLOUDLING_UI_TOKEN в файле настроек сервиса и перезапусти его.',
+      'token.wrong':'Токен не подошёл. Нужно значение CLOUDLING_UI_TOKEN из настроек сервера.',
+      'token.serverStatus':'Сервер ответил {status}.','token.serverUnreachable':'Сервер недоступен.',
+      'browse.title':'Папка на этом сервере','browse.pick':'Выбрать эту папку','browse.empty':'Вложенных папок нет.',
+      'chat.thinking':'cloudling думает…','chat.stopped':'Остановлено',
+      'reason.title':'Размышление','reason.live':'Размышление…',
+      'tool.done':'выполнено','tool.failed':'ошибка','tool.noOutput':'(нет вывода)','tool.genericName':'Инструмент','tool.stopped':'остановлено',
+      'tasks.title':'Задачи','tasks.done':'Готово',
+      'ctx.gaugeTitle':'Контекст: {n} из {total} токенов окна модели','ctx.plainCount':'{n} ток.',
+      'ctx.plainTitle':'Токенов контекста в последнем запросе к модели',
+      'compact.header':'[Сводка предыдущей части диалога · свёрнуто {n}, ≈{est} ток.]',
+      'compact.banner':'Контекст сжат · освобождено ≈{est} ток.','compact.markFallback':'Контекст свёрнут',
+      'err.noResponseHead':'Не удалось получить ответ',
+      'err.noEngine':'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.',
+      'err.emptyHead':'Модель не вернула ответ',
+      'err.emptyBody':'Ход завершился без текста ответа. Попробуйте перегенерировать.',
+      'err.emptyBodyReason':'Ход завершился без текста ответа (только рассуждение). Попробуйте перегенерировать.',
+      'err.truncated':'Ответ оборван по лимиту контекста — перегенерируйте, чтобы получить полный.',
+      'err.saveDialog':'Не удалось сохранить диалог','err.deleteDialog':'Не удалось удалить диалог',
+      'conn.ok':'Подключено','conn.fail':'Не удалось подключиться',
+      'att.tooBig':'Файл «{name}» больше 10 МБ — пропущен','att.readFail':'Не удалось прочитать «{name}»',
+      'att.imageName':'изображение','att.pasteName':'вставка','att.fileFallback':'файл','att.attachment':'Вложение','att.noName':'без имени',
+      'att.imageAbove':'[изображение «{name}» приложено выше]','att.fileInline':'Файл «{name}»:',
+      'att.fileNotSent':'[вложен файл {name}, {size} — содержимое не передаётся]',
+      'size.b':'Б','size.kb':'КБ','size.mb':'МБ',
+      'menu.pin':'Закрепить','menu.unpin':'Открепить','edit.saveSend':'Сохранить и отправить',
+      'mcp.name':'Имя сервера','mcp.namePh':'например, filesystem','mcp.delServer':'Удалить сервер',
+      'mcp.command':'Команда','mcp.args':'Аргументы — по одному на строку','mcp.framing':'Фрейминг',
+      'mcp.framingNewline':'стандартный MCP (newline)','mcp.framingLegacy':'legacy (content-length)',
+      'mcp.timeout':'Таймаут вызова, мс','mcp.empty':'Серверы не настроены.',
+      'mcp.errNameCmd':'У каждого сервера должны быть и имя, и команда.',
+      'mcp.errNameChars':'Имя сервера — только латиница, цифры, дефис, подчёркивание: «{name}»',
+      'mcp.errNameUniq':'Имена серверов должны быть уникальны: «{name}»',
+      'ask.questionFallback':'Вопрос','ask.ownPh':'Свой ответ…','ask.answer':'Ответить','ask.orOwn':'или впишите свой',
+      'title.msg':'Сообщение: {u}','title.answer':'Ответ: {a}','code.langFallback':'код'
+    }
+  };
+  function resolveLang(){ var l=null; try{ l=localStorage.getItem('cloudling_lang'); }catch(e){}
+    return (l==='ru'||l==='en') ? l : 'en'; } /* first run → English (broad audience) */
+  var LANG=resolveLang();
+  var LOCALE=(LANG==='ru')?'ru-RU':'en-US';
+  function t(key, vars){
+    var s=(I18N[LANG] && I18N[LANG][key]);
+    if(s==null) s=(I18N.en[key]!=null ? I18N.en[key] : key);
+    if(vars) s=s.replace(/\{(\w+)\}/g, function(m,k){ return (vars[k]!=null) ? vars[k] : m; });
+    return s;
+  }
+  /* translate the static index.html chrome: text nodes (data-i18n), innerHTML (data-i18n-html),
+     and placeholder/title/aria-label attributes. Runs once on load; a language switch reloads. */
+  function applyStaticI18n(){
+    document.querySelectorAll('[data-i18n]').forEach(function(el){ el.textContent=t(el.getAttribute('data-i18n')); });
+    document.querySelectorAll('[data-i18n-html]').forEach(function(el){ el.innerHTML=t(el.getAttribute('data-i18n-html')); });
+    document.querySelectorAll('[data-i18n-ph]').forEach(function(el){ el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
+    document.querySelectorAll('[data-i18n-title]').forEach(function(el){ el.setAttribute('title', t(el.getAttribute('data-i18n-title'))); });
+    document.querySelectorAll('[data-i18n-aria]').forEach(function(el){ el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria'))); });
+    document.documentElement.lang=LANG;
+  }
+  /* language selector (settings): reflect the active choice, and on change persist + reload so
+     the whole UI re-renders in the new language (state is reloaded from the server anyway). */
+  function initLangPicker(){
+    var seg=document.getElementById('langPick'); if(!seg) return;
+    seg.querySelectorAll('button').forEach(function(btn){
+      var l=(btn.getAttribute('data-lang')==='ru')?'ru':'en';
+      btn.classList.toggle('on', l===LANG);
+      btn.addEventListener('click', function(){
+        if(l===LANG) return;
+        try{ localStorage.setItem('cloudling_lang', l); }catch(e){}
+        location.reload();
+      });
+    });
+  }
+  applyStaticI18n(); /* translate static chrome before the splash fades (no flash for a saved ru) */
+  initLangPicker();
+
   /* ---------- icons / loaders ---------- */
   var IC={
     copy:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
@@ -9,7 +223,7 @@
     pin:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l-1 6 3 3v1H7v-1l3-3z"/><path d="M12 17v4"/></svg>',
     trash:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M7 7l1 13h8l1-13"/><path d="M9 7V4h6v3"/></svg>',
     check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>',
-    send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 7.2 L19.6 16.4 L12 15 L4.4 16.4 Z"/></svg>',
+    send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 6.4 L19.2 15.2 L12 13.9 L4.8 15.2 Z"/><path fill="none" stroke="#16161a" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="M10 19.6 H14"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
@@ -81,7 +295,7 @@
     t=t.replace(/\uE000(\d+)\uE000/g,function(_,i){ return '<code>'+codes[+i]+'</code>'; });
     return t;
   }
-  function codeBlock(lang,code){ return '<div class="code"><div class="chead"><span class="lang">'+(lang||'код')+'</span><button class="copy" type="button">'+IC.copy+'<span>Копировать</span></button></div><pre>'+esc(code)+'</pre></div>'; }
+  function codeBlock(lang,code){ return '<div class="code"><div class="chead"><span class="lang">'+(lang||t('code.langFallback'))+'</span><button class="copy" type="button">'+IC.copy+'<span>'+t('common.copy')+'</span></button></div><pre>'+esc(code)+'</pre></div>'; }
   function md(src){
     var fences=[]; src=src.replace(/```(\w*)\n([\s\S]*?)```/g,function(_,l,c){fences.push([l,c.replace(/\n$/,'')]);return ' F'+(fences.length-1)+' ';});
     var L=src.split('\n'), out=[], i=0;
@@ -101,7 +315,7 @@
   }
 
   /* ---------- copy ---------- */
-  function flashCopied(btn){ if(!btn) return; var o=btn.innerHTML; btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>Скопировано</span>':''); setTimeout(function(){btn.innerHTML=o;},1100); }
+  function flashCopied(btn){ if(!btn) return; var o=btn.innerHTML; btn.innerHTML=IC.check+(btn.querySelector('span')?'<span>'+t('common.copied')+'</span>':''); setTimeout(function(){btn.innerHTML=o;},1100); }
   function fallback(t){var ta=document.createElement('textarea');ta.value=t;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);}
   function copyText(t,btn){
     if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t).then(function(){flashCopied(btn);},function(){fallback(t);flashCopied(btn);});} else {fallback(t);flashCopied(btn);} }
@@ -149,8 +363,8 @@
         ok=document.getElementById('tokenOk'), text=document.getElementById('tokenText'),
         title=document.getElementById('tokenTitle');
     if(forbidden){
-      title.textContent='Служебные функции отключены';
-      text.textContent='На сервере не задан CLOUDLING_UI_TOKEN, а адрес доступен не только с localhost — диалоги и настройки отключены. Задай CLOUDLING_UI_TOKEN в файле настроек сервиса и перезапусти его.';
+      title.textContent=t('token.disabledTitle');
+      text.textContent=t('token.disabledText');
       input.hidden=true; ok.hidden=true;
     }
     scrim.hidden=false;
@@ -162,8 +376,8 @@
       var submit=function(){ var v=(input.value||'').trim(); if(!v) return;
         ok.disabled=true; err.hidden=true;
         fetch('/ui/dialogs',{headers:{'Authorization':'Bearer '+v}}).then(function(r){
-          if(r.status===401){ fail('Токен не подошёл. Нужно значение CLOUDLING_UI_TOKEN из настроек сервера.'); return; }
-          if(!r.ok){ fail('Сервер ответил '+r.status+'.'); return; }
+          if(r.status===401){ fail(t('token.wrong')); return; }
+          if(!r.ok){ fail(t('token.serverStatus',{status:r.status})); return; }
           var saved=false;
           try{ localStorage.setItem('cloudling_ui_token', v); saved=(localStorage.getItem('cloudling_ui_token')===v); }catch(e){}
           if(saved){ location.reload(); return; }
@@ -171,7 +385,7 @@
              token in memory for this page; it will be asked again after a reload */
           uiToken=v; tokenGateShown=false; scrim.hidden=true;
           refreshSidebar(); loadSettings(); loadModelInfo(); loadDlgToks(); loadDlgErrs(); loadDlgPins(); loadPresets();
-        }).catch(function(){ fail('Сервер недоступен.'); });
+        }).catch(function(){ fail(t('token.serverUnreachable')); });
       };
       ok.addEventListener('click', submit);
       input.addEventListener('keydown', function(e){ if(e.key==='Enter') submit(); });
@@ -202,8 +416,8 @@
   function apiList(){ return dlgApi('GET','').then(function(r){ return r.ok ? r.json() : []; }).catch(function(){ return []; }); }
   function apiGet(id){ return dlgApi('GET','/'+encodeURIComponent(id)).then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; }); }
   /* surface save/delete failures (token gate already handles 401/403) instead of swallowing them */
-  function apiSave(id,title,messages){ return dlgApi('PUT','/'+encodeURIComponent(id),{title:title,messages:messages}).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast('Не удалось сохранить диалог'); return r; },function(){ toast('Не удалось сохранить диалог'); }); }
-  function apiDelete(id){ return dlgApi('DELETE','/'+encodeURIComponent(id)).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast('Не удалось удалить диалог'); return r; },function(){ toast('Не удалось удалить диалог'); }); }
+  function apiSave(id,title,messages){ return dlgApi('PUT','/'+encodeURIComponent(id),{title:title,messages:messages}).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast(t('err.saveDialog')); return r; },function(){ toast(t('err.saveDialog')); }); }
+  function apiDelete(id){ return dlgApi('DELETE','/'+encodeURIComponent(id)).then(function(r){ if(r&&!r.ok&&r.status!==401&&r.status!==403) toast(t('err.deleteDialog')); return r; },function(){ toast(t('err.deleteDialog')); }); }
 
   var viewHome=document.getElementById('view-home');
   var viewDlg=document.getElementById('view-dialog');
@@ -224,17 +438,17 @@
 
   function actBtn(act,label){return '<button class="act" data-act="'+act+'" title="'+label+'" aria-label="'+label+'">'+IC[act]+'</button>';}
   /* user turn: `msg` is a string (text-only) or a convo entry {content:text, atts:[…]} */
-  function userTurn(msg){ var t=document.createElement('div'); t.className='turn u';
+  function userTurn(msg){ var el=document.createElement('div'); el.className='turn u';
     var text=(typeof msg==='string')?msg:((msg&&msg.content)||'');
     var atts=(msg&&typeof msg==='object'&&msg.atts)?msg.atts:[];
     var inner=(text?esc(text):'')+(atts.length?'<div class="att-row">'+atts.map(attChipHTML).join('')+'</div>':'');
-    t.innerHTML='<div class="bubble">'+inner+'</div><div class="row-acts">'+actBtn('copy','Копировать')+actBtn('edit','Редактировать')+'</div>'; return t; }
+    el.innerHTML='<div class="bubble">'+inner+'</div><div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('edit',t('common.edit'))+'</div>'; return el; }
   /* stored assistant message → turn (content may carry inline tool-call <details>) */
   function assistantTurnEl(content){
-    var t=document.createElement('div'); t.className='turn a';
-    paintTurn(t, content||'', false);
-    t.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>');
-    return t;
+    var el=document.createElement('div'); el.className='turn a';
+    paintTurn(el, content||'', false);
+    el.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('regen',t('common.regen'))+'</div>');
+    return el;
   }
   /* context-token counter: prompt_tokens from the final usage chunk = size of the context
      the model received last turn. Cleared on dialog switch (no usage for stored history). */
@@ -292,15 +506,15 @@
     var el=document.getElementById('ctxToks'); if(!el) return;
     el.classList.remove('warn','crit');
     if(typeof n!=='number'){ el.textContent=''; return; }
-    var nf=n.toLocaleString('ru-RU');
+    var nf=n.toLocaleString(LOCALE);
     if(ctxWindow){
       var pct=Math.min(100, Math.round(n/ctxWindow*100));
-      el.textContent=nf+' / '+ctxWindow.toLocaleString('ru-RU')+' ('+pct+'%)';
-      el.title='Контекст: '+nf+' из '+ctxWindow.toLocaleString('ru-RU')+' токенов окна модели';
+      el.textContent=nf+' / '+ctxWindow.toLocaleString(LOCALE)+' ('+pct+'%)';
+      el.title=t('ctx.gaugeTitle',{n:nf, total:ctxWindow.toLocaleString(LOCALE)});
       if(pct>=90){ el.classList.add('crit'); } else if(pct>=75){ el.classList.add('warn'); }
     } else {
-      el.textContent=nf+' ток.';
-      el.title='Токенов контекста в последнем запросе к модели';
+      el.textContent=t('ctx.plainCount',{n:nf});
+      el.title=t('ctx.plainTitle');
     }
   }
   /* ---- client-side context compaction (persistent, UI-owned) ----
@@ -309,7 +523,7 @@
      shorter history in the dialog. Survives across turns — unlike the per-request server-side
      auto-compaction. Needs a known window (else stays silent). */
   var COMPACT_AT=0.80, COMPACT_KEEP=6, compacting=false;
-  var COMPACT_RE=/^\[Сводка предыдущей части диалога[^\]]*\]\n?/;
+  var COMPACT_RE=/^\[(Сводка предыдущей части диалога|Summary of the earlier conversation)[^\]]*\]\n?/;
   function maybeAutoCompact(pt){
     if(compacting || !ctxWindow || typeof pt!=='number') return;
     if(pt < Math.round(ctxWindow*COMPACT_AT)) return;
@@ -327,10 +541,10 @@
         var summary=((d&&d.summary)||'').trim();
         if(!summary || id!==activeId) return;
         var est=Math.round((text.length - summary.length)/4); if(est<0) est=0;
-        var header='[Сводка предыдущей части диалога · свёрнуто '+older.length+', ≈'+est.toLocaleString('ru-RU')+' ток.]';
+        var header=t('compact.header',{n:older.length, est:est.toLocaleString(LOCALE)});
         convo=[{role:'assistant', content:header+'\n'+summary}].concat(tail);
         renderConvo(convo); saveActive();
-        showCompactBanner('Контекст сжат · освобождено ≈'+est.toLocaleString('ru-RU')+' ток.');
+        showCompactBanner(t('compact.banner',{est:est.toLocaleString(LOCALE)}));
       })
       .catch(function(){ compacting=false; });
   }
@@ -347,7 +561,7 @@
   function compactMark(content){
     var d=document.createElement('div'); d.className='compact-mark';
     var m=String(content||'').match(COMPACT_RE);
-    var head=m ? m[0].replace(/^\[|\]\n?$/g,'') : 'Контекст свёрнут';
+    var head=m ? m[0].replace(/^\[|\]\n?$/g,'') : t('compact.markFallback');
     var body=String(content||'').replace(COMPACT_RE,'');
     var ic='<svg class="cm-ic" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9 5-9 5-9-5 9-5z"/><path d="M3 12l9 5 9-5"/></svg>';
     d.innerHTML='<details><summary>'+ic+'<span>'+esc(head)+'</span></summary><div class="cm-body">'+esc(body)+'</div></details>';
@@ -367,7 +581,7 @@
     return ('0'+d.getDate()).slice(-2)+'.'+('0'+(d.getMonth()+1)).slice(-2); }
   function sidebarItem(d){ var it=document.createElement('div'); it.className='item'; it.dataset.id=d.id; it.dataset.updated=d.updated_ms||0;
     if(dlgPins[d.id]) it.classList.add('pinned');
-    it.innerHTML='<span class="t">'+esc(d.title||'Без названия')+'</span><span class="date">'+fmtDate(d.updated_ms)+'</span><button class="kebab" aria-label="Действия">⋯</button>'; return it; }
+    it.innerHTML='<span class="t">'+esc(d.title||t('dialogs.untitled'))+'</span><span class="date">'+fmtDate(d.updated_ms)+'</span><button class="kebab" aria-label="'+escAttr(t('common.menu'))+'">⋯</button>'; return it; }
   function refreshSidebar(){ return apiList().then(function(list){
     leftDrawer.querySelectorAll('.item').forEach(function(n){ n.remove(); });
     var anchor=document.getElementById('emptyNone');
@@ -383,7 +597,7 @@
     var firstUser=((convo[0]&&convo[0].content)||'').slice(0,400);
     var firstAsst=stripBlocks((convo[1]&&convo[1].content)||'').slice(0,400);
     if(!firstUser) return;
-    var text='Сообщение: '+firstUser+(firstAsst?('\nОтвет: '+firstAsst):'');
+    var text=t('title.msg',{u:firstUser})+(firstAsst?('\n'+t('title.answer',{a:firstAsst})):'');
     uiFetch('/ui/title',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:text})})
       .then(function(r){ return r.ok?r.json():null; })
       .then(function(d){
@@ -438,7 +652,7 @@
     } else { viewDlg.hidden=true; }
   }
   /* persist the active dialog (full transcript) */
-  function saveActive(){ if(!activeId) return; var title=(dtitle.textContent||'').trim() || ((convo[0]&&convo[0].content)||'').slice(0,42) || 'Без названия'; apiSave(activeId, title, convo); }
+  function saveActive(){ if(!activeId) return; var title=(dtitle.textContent||'').trim() || ((convo[0]&&convo[0].content)||'').slice(0,42) || t('dialogs.untitled'); apiSave(activeId, title, convo); }
   document.getElementById('newDlg').onclick=function(){ newDialog(); closeDrawers(); };
 
   function showSetup(){ viewHome.hidden=true; viewDlg.hidden=true; document.getElementById('view-setup').hidden=false; }
@@ -456,12 +670,12 @@
   }
 
   /* ---------- send → generation lifecycle ---------- */
-  function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off'); btn.innerHTML='<span class="sq"></span>'; btn.title='Остановить'; } else { btn.classList.remove('stop'); btn.innerHTML=IC.send; btn.title='Отправить'; var ta=btn.closest('.entry').querySelector('textarea'); btn.classList.toggle('off', !(ta.value||'').trim()); } }
+  function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off'); btn.innerHTML='<span class="sq"></span>'; btn.title=t('composer.stop'); } else { btn.classList.remove('stop'); btn.innerHTML=IC.send; btn.title=t('composer.send'); var ta=btn.closest('.entry').querySelector('textarea'); btn.classList.toggle('off', !(ta.value||'').trim()); } }
   function clearTimers(){ genTimers.forEach(function(t){clearTimeout(t);clearInterval(t);}); genTimers=[]; }
 
   function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); if(pendingLiveCancel){ pendingLiveCancel(); pendingLiveCancel=null; } }
 
-  function errboxHTML(msg){ var detail = msg ? esc(String(msg)) : 'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.'; return '<div class="errbox"><div class="ehead">'+IC.warn+'Не удалось получить ответ</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+'Повторить</button></div>'; }
+  function errboxHTML(msg){ var detail = msg ? esc(String(msg)) : t('err.noEngine'); return '<div class="errbox"><div class="ehead">'+IC.warn+t('err.noResponseHead')+'</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+t('common.retry')+'</button></div>'; }
 
   /* ---------- real chat ----------
      The page is the client: it holds the dialog history and re-sends it every turn
@@ -536,7 +750,7 @@
     var fromAttr=attrVal(attrs,'answer');
     var chosen=fromAttr!==''?fromAttr:(Object.prototype.hasOwnProperty.call(askAnswered,qid)?askAnswered[qid]:null);
     var box=document.createElement('div'); box.className='askw';
-    var q=document.createElement('div'); q.className='askq'; q.textContent=question||'Вопрос'; box.appendChild(q);
+    var q=document.createElement('div'); q.className='askq'; q.textContent=question||t('ask.questionFallback'); box.appendChild(q);
     /* once answered, the widget collapses to a compact question→answer view (chat-style):
        the chosen value with a check, options/input removed. */
     function answerRow(val){
@@ -552,8 +766,8 @@
     }
     if(chosen!=null){ box.classList.add('answered'); box.appendChild(answerRow(chosen)); return box; }
     /* interactive (unanswered): large full-width option rows + free-text (design variant 1) */
-    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder='Свой ответ…';
-    var go=document.createElement('button'); go.type='button'; go.className='askgo'; go.textContent='Ответить';
+    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder=t('ask.ownPh');
+    var go=document.createElement('button'); go.type='button'; go.className='askgo'; go.textContent=t('ask.answer');
     function choose(val){
       if(Object.prototype.hasOwnProperty.call(askAnswered, qid)) return;
       askAnswered[qid]=val;
@@ -572,8 +786,8 @@
       var or=document.createElement('div'); or.className='askor';
       var l1=document.createElement('span'); l1.className='askln';
       var l2=document.createElement('span'); l2.className='askln';
-      var t=document.createElement('span'); t.textContent='или впишите свой';
-      or.appendChild(l1); or.appendChild(t); or.appendChild(l2); box.appendChild(or);
+      var orSpan=document.createElement('span'); orSpan.textContent=t('ask.orOwn');
+      or.appendChild(l1); or.appendChild(orSpan); or.appendChild(l2); box.appendChild(or);
     }
     var row=document.createElement('div'); row.className='askother';
     function submitOther(){ var v=inp.value.trim(); if(v) choose(v); }
@@ -598,7 +812,7 @@
     var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
     var d=document.createElement('details'); d.className='tool'+(fail?' fail':'');
     var sum=document.createElement('summary'); sum.className='head';
-    sum.innerHTML=(fail?IC.warn:'')+'<span class="tag">'+esc(decodeEntities(name))+'</span> · '+(fail?'ошибка':'выполнено');
+    sum.innerHTML=(fail?IC.warn:'')+'<span class="tag">'+esc(decodeEntities(name))+'</span> · '+(fail?t('tool.failed'):t('tool.done'));
     var pre=document.createElement('pre'); pre.className='toolout';
     var raw=decodeEntities(out), text;
     try{
@@ -619,7 +833,7 @@
         if(parsed.stdout) parts.push(String(parsed.stdout));
         if(parsed.stderr) parts.push(String(parsed.stderr));
         text=parts.join('\n').replace(/\r\n?/g,'\n').replace(/^\n+|\n+$/g,'');
-        if(!text) text='(нет вывода)';
+        if(!text) text=t('tool.noOutput');
       } else {
         text=(typeof parsed==='string')?parsed:JSON.stringify(parsed,null,2);
       }
@@ -637,7 +851,7 @@
     var out=inner.replace(/<summary>[\s\S]*?<\/summary>/i,'').replace(/^\s+|\s+$/g,'');
     var d=document.createElement('details'); d.className='tool reason';
     var sum=document.createElement('summary'); sum.className='head';
-    sum.innerHTML='<span class="tag">Размышление</span>';
+    sum.innerHTML='<span class="tag">'+t('reason.title')+'</span>';
     var pre=document.createElement('pre'); pre.className='toolout'; pre.textContent=decodeEntities(out);
     d.appendChild(sum); d.appendChild(pre); return d;
   }
@@ -696,9 +910,9 @@
     var total=todos.length, done=0, active=null;
     todos.forEach(function(t){ if(t.status==='completed') done++; else if(t.status==='in_progress' && !active) active=t; });
     var pct=Math.round(done/total*100), allDone=(done===total);
-    var nowTxt=active ? (active.activeForm||active.content||'') : (allDone?'Готово':'');
+    var nowTxt=active ? (active.activeForm||active.content||'') : (allDone?t('tasks.done'):'');
     var head='<button class="tb-head" type="button" aria-expanded="'+(taskbarOpen?'true':'false')+'">'+
-      '<span class="tb-ic">'+TB_IC.active+'</span><span class="tb-title">Задачи</span>'+
+      '<span class="tb-ic">'+TB_IC.active+'</span><span class="tb-title">'+t('tasks.title')+'</span>'+
       '<span class="tb-count">'+done+'/'+total+'</span>'+
       '<span class="tb-prog"><i style="width:'+pct+'%"></i></span>'+
       (nowTxt?'<span class="tb-now">'+esc(nowTxt)+'</span>':'')+
@@ -723,7 +937,7 @@
     clearDlgErr();
     thread.querySelectorAll('.turn').forEach(function(t){ if(t.querySelector('.errbox')) t.remove(); });
     var turn=document.createElement('div'); turn.className='turn a';
-    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>cloudling думает…</span></div>';
+    turn.innerHTML='<div class="thinking">'+cloud(38)+'<span>'+t('chat.thinking')+'</span></div>';
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null, reasonLiveEl=null;
@@ -757,7 +971,7 @@
         /* Collapsed while streaming: a growing, expanded block reflows/jerks the whole thread
            on every token. The summary shows it's active; the user expands it if they want. */
         reasonLiveEl=document.createElement('details'); reasonLiveEl.className='tool reason';
-        reasonLiveEl.innerHTML='<summary class="head"><span class="tag">Размышление…</span></summary>';
+        reasonLiveEl.innerHTML='<summary class="head"><span class="tag">'+t('reason.live')+'</span></summary>';
         var pre=document.createElement('pre'); pre.className='toolout'; reasonLiveEl.appendChild(pre);
         turn.insertBefore(reasonLiveEl, liveBox);
       }
@@ -824,10 +1038,9 @@
         paintTurn(turn, acc, false); /* renders the reasoning block if present, else empty */
         turn.classList.add('noconv');
         turn.insertAdjacentHTML('beforeend',
-          '<div class="errbox"><div class="ehead">'+IC.warn+'Модель не вернула ответ</div>'+
-          '<div class="emsg">Ход завершился без текста ответа'+(acc?' (только рассуждение)':'')+
-          '. Попробуйте перегенерировать.</div>'+
-          '<button class="retry" type="button">'+IC.regen+'Перегенерировать</button></div>');
+          '<div class="errbox"><div class="ehead">'+IC.warn+t('err.emptyHead')+'</div>'+
+          '<div class="emsg">'+(acc?t('err.emptyBodyReason'):t('err.emptyBody'))+'</div>'+
+          '<button class="retry" type="button">'+IC.regen+t('common.regen')+'</button></div>');
         attachRetry(turn, btn);
         finishGen(btn); maybeScroll();
         return;
@@ -835,9 +1048,9 @@
       acc=bakeAskAnswers(acc); /* persist any chosen AskUserQuestion answers into the saved markup (survives reload) */
       paintTurn(turn, acc, false); /* one clean final render (markdown + tool blocks, no caret) */
       if(lastFinish==='length'){ /* backend hit its output/context limit — answer is cut off, not complete */
-        turn.insertAdjacentHTML('beforeend','<div class="note trunc">'+IC.warn+'Ответ оборван по лимиту контекста — перегенерируйте, чтобы получить полный.</div>');
+        turn.insertAdjacentHTML('beforeend','<div class="note trunc">'+IC.warn+t('err.truncated')+'</div>');
       }
-      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy','Копировать')+actBtn('regen','Перегенерировать')+'</div>');
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('regen',t('common.regen'))+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
@@ -925,7 +1138,7 @@
       var homeEntry=document.querySelector('#view-home .entry');
       var fromRect=homeEntry?homeEntry.getBoundingClientRect():null;
       activeId=genId();
-      var title=(dispText||'Вложение').slice(0,42);
+      var title=(dispText||t('att.attachment')).slice(0,42);
       var it=sidebarItem({id:activeId, title:title, updated_ms:Date.now()}); it.classList.add('active');
       var firstItem=leftDrawer.querySelector('.item'); leftDrawer.insertBefore(it, firstItem || document.getElementById('emptyNone'));
       leftDrawer.querySelectorAll('.item').forEach(function(x){x.classList.toggle('active', x===it);});
@@ -952,14 +1165,14 @@
     liveAcc='';
     var c=turn.querySelector('.caret'); if(c) c.remove();
     /* stopped mid tool-call: freeze the running ripple into a neutral head */
-    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head){ var tag=head.querySelector('.tag'); var tname=tag?tag.textContent:'Инструмент'; head.innerHTML='<span class="tag">'+esc(tname)+'</span> · остановлено'; } }
-    if(!turn.querySelector('.stopped')){ var s=document.createElement('div'); s.className='stopped'; s.innerHTML='⏹ Остановлено'; turn.appendChild(s); }
+    var rip=turn.querySelector('.tool .rip'); if(rip){ var head=turn.querySelector('.tool .head'); if(head){ var tag=head.querySelector('.tag'); var tname=tag?tag.textContent:t('tool.genericName'); head.innerHTML='<span class="tag">'+esc(tname)+'</span> · '+t('tool.stopped'); } }
+    if(!turn.querySelector('.stopped')){ var s=document.createElement('div'); s.className='stopped'; s.innerHTML='⏹ '+t('chat.stopped'); turn.appendChild(s); }
     var mdbox=turn.querySelector('.md');
     var hasText=mdbox && mdbox.textContent.trim();
     /* regen on a stopped turn that produced answer text OR only reasoning (stopping a
        reasoning model mid-think leaves a reasoning block but no .md text — still regen-able) */
     if((hasText || turn.querySelector('.tool.reason, [type="reasoning"]')) && !turn.querySelector('.row-acts')){
-      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+(hasText?actBtn('copy','Копировать'):'')+actBtn('regen','Перегенерировать')+'</div>');
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+(hasText?actBtn('copy',t('common.copy')):'')+actBtn('regen',t('common.regen'))+'</div>');
     }
     refreshTaskbar();
   }
@@ -974,7 +1187,7 @@
      transcript → survives F5) and outgoingMessages() assembles the OWUI content array. */
   var MAX_ATT=10*1024*1024; /* soft 10 MB/file cap (base64 images bloat the request/context) */
   var TEXT_EXT=/\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|js|jsx|mjs|cjs|ts|tsx|py|rs|go|java|c|h|cpp|hpp|cc|rb|php|sh|bash|zsh|sql|r|lua|pl|swift|kt|scala|dart|vue|svelte|tex|rst|env|gitignore|dockerfile|makefile|diff|patch)$/i;
-  function humanSize(n){ if(n==null) return ''; if(n<1024) return n+' Б'; if(n<1024*1024) return (n/1024).toFixed(n<10240?1:0)+' КБ'; return (n/1048576).toFixed(1)+' МБ'; }
+  function humanSize(n){ if(n==null) return ''; if(n<1024) return n+' '+t('size.b'); if(n<1024*1024) return (n/1024).toFixed(n<10240?1:0)+' '+t('size.kb'); return (n/1048576).toFixed(1)+' '+t('size.mb'); }
   function fileKind(f){
     if(/^image\//.test(f.type||'')) return 'image';
     if(/^text\//.test(f.type||'') || /(json|xml|yaml|javascript|x-sh|x-python|csv|html)/.test(f.type||'') || TEXT_EXT.test(f.name||'')) return 'text';
@@ -985,12 +1198,12 @@
   /* chip inner HTML shared by composer (removable) and bubble (static) */
   function attChipInner(att){
     if(att.kind==='image' && att.url) return '<img src="'+escAttr(att.url)+'" alt="'+escAttr(att.name||'')+'" />';
-    return '<span class="ic">'+IC.doc+'</span><span class="nm">'+esc(att.name||'файл')+'</span>'+(att.size!=null?'<span class="sz">'+humanSize(att.size)+'</span>':'');
+    return '<span class="ic">'+IC.doc+'</span><span class="nm">'+esc(att.name||t('att.fileFallback'))+'</span>'+(att.size!=null?'<span class="sz">'+humanSize(att.size)+'</span>':'');
   }
   function attChipHTML(att){ return '<div class="att-chip'+((att.kind==='image'&&att.url)?' img':'')+'">'+attChipInner(att)+'</div>'; }
   function attChipEl(att, onRemove){
     var c=document.createElement('div'); c.className='att-chip'+((att.kind==='image'&&att.url)?' img':'');
-    c.innerHTML=attChipInner(att)+'<button class="rm" type="button" title="Убрать" aria-label="Убрать">✕</button>';
+    c.innerHTML=attChipInner(att)+'<button class="rm" type="button" title="'+escAttr(t('common.remove'))+'" aria-label="'+escAttr(t('common.remove'))+'">✕</button>';
     if(onRemove) c.querySelector('.rm').addEventListener('click', onRemove);
     return c;
   }
@@ -1011,12 +1224,12 @@
       pending.forEach(function(att){ atts.appendChild(attChipEl(att, function(){ var i=pending.indexOf(att); if(i>=0) pending.splice(i,1); renderPending(); refresh(); })); });
     }
     function addFiles(files){ Array.prototype.slice.call(files||[]).forEach(function(f){
-      if(f.size>MAX_ATT){ toast('Файл «'+(f.name||'без имени')+'» больше 10 МБ — пропущен'); return; }
+      if(f.size>MAX_ATT){ toast(t('att.tooBig',{name:(f.name||t('att.noName'))})); return; }
       /* Pasted screenshots often arrive without a name — give them one. */
-      var name=f.name || ((f.type&&f.type.indexOf('image/')===0) ? ('изображение.'+(f.type.split('/')[1]||'png')) : 'вставка');
+      var name=f.name || ((f.type&&f.type.indexOf('image/')===0) ? (t('att.imageName')+'.'+(f.type.split('/')[1]||'png')) : t('att.pasteName'));
       var att={kind:fileKind(f), name:name, size:f.size};
       pending.push(att); renderPending(); refresh();
-      if(att.kind==='image'){ readAsDataURL(f).then(function(u){ att.url=u; renderPending(); }).catch(function(){ var i=pending.indexOf(att); if(i>=0){ pending.splice(i,1); renderPending(); refresh(); } toast('Не удалось прочитать «'+f.name+'»'); }); }
+      if(att.kind==='image'){ readAsDataURL(f).then(function(u){ att.url=u; renderPending(); }).catch(function(){ var i=pending.indexOf(att); if(i>=0){ pending.splice(i,1); renderPending(); refresh(); } toast(t('att.readFail',{name:f.name})); }); }
       else if(att.kind==='text'){ readAsText(f).then(function(t){ att.text=t; }).catch(function(){ att.kind='file'; }); }
     }); }
     function trySend(){ if(btn.classList.contains('stop')) return; var v=(ta.value||'').trim(); if(!v && pending.length===0) return;
@@ -1050,13 +1263,13 @@
   /* ---------- sidebar item click + kebab menu ---------- */
   var current=null;
   var menu=document.createElement('div'); menu.className='menu';
-  menu.innerHTML='<button data-m="rename">'+IC.edit+'Переименовать</button><button data-m="pin">'+IC.pin+'<span class="pin-label">Закрепить</span></button><div class="sep"></div><button data-m="del" class="danger">'+IC.trash+'Удалить</button>';
+  menu.innerHTML='<button data-m="rename">'+IC.edit+t('common.rename')+'</button><button data-m="pin">'+IC.pin+'<span class="pin-label">'+t('menu.pin')+'</span></button><div class="sep"></div><button data-m="del" class="danger">'+IC.trash+t('common.delete')+'</button>';
   document.body.appendChild(menu);
   leftDrawer.addEventListener('click', function(e){
     var kb=e.target.closest('.kebab');
     if(kb){ e.stopPropagation(); current=kb.closest('.item');
       var r=kb.getBoundingClientRect(); menu.style.top=(r.bottom+6)+'px'; menu.style.left=Math.max(8, Math.min(r.right-176, window.innerWidth-184))+'px';
-      menu.querySelector('.pin-label').textContent=current.classList.contains('pinned')?'Открепить':'Закрепить'; menu.style.display='block'; return; }
+      menu.querySelector('.pin-label').textContent=current.classList.contains('pinned')?t('menu.unpin'):t('menu.pin'); menu.style.display='block'; return; }
     var it=e.target.closest('.item'); if(it && it.dataset.id){ openDialog(it.dataset.id, it); }
   });
   document.addEventListener('click', function(){ menu.style.display='none'; });
@@ -1071,7 +1284,7 @@
 
   /* delete confirmation modal */
   var pendingDel=null, confirmScrim=document.getElementById('confirmScrim');
-  function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent='«'+item.querySelector('.t').textContent.trim()+'» будет удалён без возможности восстановления.'; confirmScrim.hidden=false; }
+  function askDelete(item){ pendingDel=item; document.getElementById('confirmText').textContent=t('confirm.delBody',{title:item.querySelector('.t').textContent.trim()}); confirmScrim.hidden=false; }
   function closeConfirm(){ confirmScrim.hidden=true; pendingDel=null; }
   document.getElementById('confirmOk').addEventListener('click', function(){ if(pendingDel){ var wasActive=(pendingDel===activeItem); var id=pendingDel.dataset.id; if(id){ apiDelete(id); if(id in dlgToks){ delete dlgToks[id]; saveDlgToks(); } if(id in dlgErrs){ delete dlgErrs[id]; saveDlgErrs(); } if(id in dlgPins){ delete dlgPins[id]; savePins(); } } pendingDel.remove(); updateDialogList(); if(wasActive) newDialog(); } closeConfirm(); });
   document.getElementById('confirmCancel').addEventListener('click', closeConfirm);
@@ -1105,7 +1318,7 @@
     var rowacts=turn.querySelector('.row-acts');
     var ta=document.createElement('textarea'); ta.className='editbox'; ta.value=orig;
     var acts=document.createElement('div'); acts.className='editacts';
-    acts.innerHTML='<button class="ecancel" type="button">Отмена</button><button class="esave" type="button">Сохранить и отправить</button>';
+    acts.innerHTML='<button class="ecancel" type="button">'+t('common.cancel')+'</button><button class="esave" type="button">'+t('edit.saveSend')+'</button>';
     /* hide the bubble (it holds the attachment chips too) instead of replacing it,
        so Cancel restores text + attachments intact */
     bubble.style.display='none'; if(rowacts) rowacts.style.display='none';
@@ -1164,7 +1377,7 @@
     }).catch(function(){});
   }
   function engineUrlValid(){ var u=document.querySelector('.drawer.right [data-key="OPENAI_BASE_URL"]'); return /^https?:\/\/.+/i.test((u&&u.value||'').trim()); }
-  function saveError(msg){ var sm=document.getElementById('saveMsg'); sm.hidden=false; sm.className='savemsg err'; sm.textContent=msg||'Не удалось сохранить — укажи корректный адрес движка'; }
+  function saveError(msg){ var sm=document.getElementById('saveMsg'); sm.hidden=false; sm.className='savemsg err'; sm.textContent=msg||t('settings.saveErrEngine'); }
 
   /* the server rewrites the env file then exits; systemd restarts it with the new values.
      we show a loader and poll /health until it answers again. */
@@ -1174,8 +1387,8 @@
       (function poll(){ tries++;
         fetch('/health',{cache:'no-store'}).then(function(r){ return r.ok; }).catch(function(){ return false; })
           .then(function(ok){
-            if(ok){ btn.innerHTML=IC.check+' Готово'; loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=orig; btn.disabled=false; }, 1200); }
-            else if(tries>45){ btn.innerHTML=orig; btn.disabled=false; saveError('Сервер не вернулся — проверь вручную'); }
+            if(ok){ btn.innerHTML=IC.check+' '+t('common.done'); loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=orig; btn.disabled=false; }, 1200); }
+            else if(tries>45){ btn.innerHTML=orig; btn.disabled=false; saveError(t('settings.serverNoReturn')); }
             else setTimeout(poll, 600);
           });
       })();
@@ -1185,11 +1398,11 @@
     if(!engineUrlValid()){ saveError(); return; }
     var btn=this, o=btn.innerHTML; document.getElementById('saveMsg').hidden=true; btn.disabled=true;
     var body={}; settingsFields().forEach(function(el){ body[el.getAttribute('data-key')]=el.value||''; });
-    btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+'Сохранение…</span>';
+    btn.innerHTML='<span style="display:inline-flex;align-items:center;gap:9px;justify-content:center;">'+cloud(26)+t('settings.saving')+'</span>';
     uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.innerHTML=IC.check+' Готово'; loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
-      .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError('Не удалось сохранить: '+((err&&err.message)||'')); });
+      .then(function(){ btn.innerHTML=IC.check+' '+t('common.done'); loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
+      .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError(t('settings.saveErr',{msg:((err&&err.message)||'')})); });
   });
 
   /* ---------- tools section: MCP servers (settings.json mcpServers, no restart) ---------- */
@@ -1197,11 +1410,11 @@
   function mcpRow(s){
     var d=document.createElement('div'); d.className='mcpsrv';
     d.innerHTML=
-      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">Имя сервера</div><input class="m-name" placeholder="например, filesystem" /><button class="m-del" type="button" title="Удалить сервер" aria-label="Удалить сервер">✕</button></div>'+
-      '<div class="fld"><div class="lab">Команда</div><input class="m-cmd" placeholder="python3" /></div>'+
-      '<div class="fld"><div class="lab">Аргументы — по одному на строку</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
-      '<div class="fld"><div class="lab">Фрейминг <span class="env">framing</span></div><select class="m-framing"><option value="newline">стандартный MCP (newline)</option><option value="content-length">legacy (content-length)</option></select></div>'+
-      '<div class="fld"><div class="lab">Таймаут вызова, мс <span class="env">toolCallTimeoutMs</span></div><input class="m-timeout" type="number" min="1" placeholder="60000" /></div>';
+      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">'+t('mcp.name')+'</div><input class="m-name" placeholder="'+escAttr(t('mcp.namePh'))+'" /><button class="m-del" type="button" title="'+escAttr(t('mcp.delServer'))+'" aria-label="'+escAttr(t('mcp.delServer'))+'">✕</button></div>'+
+      '<div class="fld"><div class="lab">'+t('mcp.command')+'</div><input class="m-cmd" placeholder="python3" /></div>'+
+      '<div class="fld"><div class="lab">'+t('mcp.args')+'</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
+      '<div class="fld"><div class="lab">'+t('mcp.framing')+' <span class="env">framing</span></div><select class="m-framing"><option value="newline">'+t('mcp.framingNewline')+'</option><option value="content-length">'+t('mcp.framingLegacy')+'</option></select></div>'+
+      '<div class="fld"><div class="lab">'+t('mcp.timeout')+' <span class="env">toolCallTimeoutMs</span></div><input class="m-timeout" type="number" min="1" placeholder="60000" /></div>';
     d.querySelector('.m-name').value=s.name||'';
     d.querySelector('.m-cmd').value=s.command||'';
     d.querySelector('.m-args').value=(s.args||[]).join('\n');
@@ -1214,7 +1427,7 @@
     var list=document.getElementById('mcpList');
     var empty=list.querySelector('.mcpempty');
     var has=!!list.querySelector('.mcpsrv');
-    if(!has && !empty){ var e=document.createElement('div'); e.className='mcpempty'; e.textContent='Серверы не настроены.'; list.appendChild(e); }
+    if(!has && !empty){ var e=document.createElement('div'); e.className='mcpempty'; e.textContent=t('mcp.empty'); list.appendChild(e); }
     if(has && empty) empty.remove();
   }
   function renderMcp(){
@@ -1236,9 +1449,9 @@
       var name=(d.querySelector('.m-name').value||'').trim();
       var cmd=(d.querySelector('.m-cmd').value||'').trim();
       if(!name && !cmd) return; /* пустая карточка — игнорируем */
-      if(!name || !cmd){ err='У каждого сервера должны быть и имя, и команда.'; return; }
-      if(!/^[A-Za-z0-9_-]+$/.test(name)){ err='Имя сервера — только латиница, цифры, дефис, подчёркивание: «'+name+'»'; return; }
-      if(out[name]){ err='Имена серверов должны быть уникальны: «'+name+'»'; return; }
+      if(!name || !cmd){ err=t('mcp.errNameCmd'); return; }
+      if(!/^[A-Za-z0-9_-]+$/.test(name)){ err=t('mcp.errNameChars',{name:name}); return; }
+      if(out[name]){ err=t('mcp.errNameUniq',{name:name}); return; }
       var entry={ command: cmd };
       var args=linesToArray(d.querySelector('.m-args').value); if(args.length) entry.args=args;
       if(d.querySelector('.m-framing').value==='content-length') entry.framing='content-length';
@@ -1249,8 +1462,8 @@
     btn.disabled=true;
     uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mcpServers:out})})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.disabled=false; mcpStatus(true,'Сохранено — применится со следующего сообщения'); })
-      .catch(function(e){ btn.disabled=false; mcpStatus(false,'Не удалось сохранить: '+((e&&e.message)||'')); });
+      .then(function(){ btn.disabled=false; mcpStatus(true,t('settings.savedNextMsg')); })
+      .catch(function(e){ btn.disabled=false; mcpStatus(false,t('settings.saveErr',{msg:((e&&e.message)||'')})); });
   });
 
   /* ---------- access level: one preset → permission mode + filesystem scope + folder ---------- */
@@ -1262,9 +1475,9 @@
   var PRESET_PERM={ read:'read-only', workspace:'danger-full-access', full:'danger-full-access' };
   var PRESET_FS={ read:'off', workspace:'allow-list', full:'off' };
   var PRESET_NOTE={
-    read:'Агент читает файлы и ищет по всему компьютеру, но ничего не меняет и не выполняет команды.',
-    workspace:'Агент читает, меняет файлы и выполняет команды — только в рабочей папке (и своём временном черновике). Остального не касается.',
-    full:'Агент читает, меняет и выполняет всё и везде на этой машине. Без ограничений.'
+    read:t('access.readNote'),
+    workspace:t('access.workspaceNote'),
+    full:t('access.fullNote')
   };
   function presetFromState(perm, fs){
     if(perm==='read-only') return 'read';
@@ -1318,8 +1531,8 @@
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ return uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cBody)}); })
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.disabled=false; accessMsg(true,'Сохранено — применится со следующего сообщения'); })
-      .catch(function(err){ btn.disabled=false; accessMsg(false,'Не удалось сохранить: '+((err&&err.message)||'')); });
+      .then(function(){ btn.disabled=false; accessMsg(true,t('settings.savedNextMsg')); })
+      .catch(function(err){ btn.disabled=false; accessMsg(false,t('settings.saveErr',{msg:((err&&err.message)||'')})); });
   });
 
   /* ---------- server-side folder picker (browses THIS server's filesystem) ---------- */
@@ -1351,7 +1564,7 @@
       row.addEventListener('click', function(){ browseLoad(browseJoin(browseCur,name)); });
       list.appendChild(row);
     });
-    if(!(data.dirs||[]).length){ var e=document.createElement('div'); e.className='browse-empty'; e.textContent='Вложенных папок нет.'; list.appendChild(e); }
+    if(!(data.dirs||[]).length){ var e=document.createElement('div'); e.className='browse-empty'; e.textContent=t('browse.empty'); list.appendChild(e); }
   }
   function browseLoad(path){
     uiFetch('/ui/browse'+(path?('?path='+encodeURIComponent(path)):''))
@@ -1396,11 +1609,11 @@
       .then(function(d){
         btn.classList.remove('spin'); st.hidden=false;
         if(d && d.ok){
-          st.className='cstatus ok'; st.innerHTML='<span class="d"></span><span>Подключено</span>'; setConnDot('ok');
+          st.className='cstatus ok'; st.innerHTML='<span class="d"></span><span>'+t('conn.ok')+'</span>'; setConnDot('ok');
           if(!configured){ configured=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; }
         } else {
           var why=(d&&d.error)?(' — '+esc(String(d.error)).slice(0,120)):'';
-          st.className='cstatus err'; st.innerHTML='<span class="d"></span><span>Не удалось подключиться'+why+'</span>'; setConnDot('err');
+          st.className='cstatus err'; st.innerHTML='<span class="d"></span><span>'+t('conn.fail')+why+'</span>'; setConnDot('err');
         }
       });
   });
@@ -1438,11 +1651,9 @@
   var presets=[], activePresetId=null, editingId=null;
   var presetList=document.getElementById('presetList');
   var vPreset=document.getElementById('view-preset');
-  var DEFAULT_PRESETS=[
-    {name:'Обычный', prompt:'Ты — полезный локальный ассистент. Отвечай кратко и по делу, на русском.'},
-    {name:'Кодер', prompt:'Ты — старший инженер. Пиши идиоматичный код, кратко поясняй решения, предлагай тесты. Ответы — на русском, код и комментарии — на английском.'},
-    {name:'Краткий', prompt:'Отвечай максимально кратко — одно-два предложения, без воды.'}
-  ];
+  /* No default presets are shipped — a fresh install starts with an empty list and the
+     user creates their own (keeps the product language-neutral for a broad audience). */
+  var DEFAULT_PRESETS=[];
   function pFetchJSON(url, opts){ return uiFetch(url, opts).then(function(r){ return r.ok?r.json():null; }).catch(function(){ return null; }); }
   function savePreset(id,name,prompt){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name,prompt:prompt})}).catch(function(){}); }
   function deletePresetReq(id){ return uiFetch('/ui/presets/'+encodeURIComponent(id),{method:'DELETE'}).catch(function(){}); }
@@ -1465,10 +1676,10 @@
     m.atts.forEach(function(a){
       if(a.kind==='image' && a.url){
         if(keepImage) parts.push({type:'image_url', image_url:{url:a.url}});
-        else parts.push({type:'text', text:'[изображение «'+a.name+'» приложено выше]'});
+        else parts.push({type:'text', text:t('att.imageAbove',{name:a.name})});
       }
-      else if(a.kind==='text' && typeof a.text==='string') parts.push({type:'text', text:'Файл «'+a.name+'»:\n```\n'+a.text+'\n```'});
-      else parts.push({type:'text', text:'[вложен файл '+a.name+', '+humanSize(a.size)+' — содержимое не передаётся]'});
+      else if(a.kind==='text' && typeof a.text==='string') parts.push({type:'text', text:t('att.fileInline',{name:a.name})+'\n```\n'+a.text+'\n```'});
+      else parts.push({type:'text', text:t('att.fileNotSent',{name:a.name, size:humanSize(a.size)})});
     });
     if(!parts.length) parts.push({type:'text', text:''});
     return parts;
@@ -1486,7 +1697,7 @@
     return sys ? [{role:'system', content:sys}].concat(hist) : hist;
   }
 
-  function updateChip(){ var nm='Без пресета';
+  function updateChip(){ var nm=t('preset.none');
     for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId){ nm=presets[i].name; break; } }
     document.querySelectorAll('.entry .model').forEach(function(m){ m.innerHTML='<span class="dot"></span>'+esc(nm); }); }
 
@@ -1495,8 +1706,8 @@
     presets.forEach(function(p){
       var row=document.createElement('div'); row.className='prow'+(p.id===activePresetId?' active':'');
       row.innerHTML='<span class="pdot"></span><span class="pn">'+esc(p.name)+'</span>'+
-        '<button class="pm pedit" title="Изменить" aria-label="Изменить">'+IC.edit+'</button>'+
-        '<button class="pm pdel" title="Удалить" aria-label="Удалить">'+IC.trash+'</button>';
+        '<button class="pm pedit" title="'+escAttr(t('common.edit'))+'" aria-label="'+escAttr(t('common.edit'))+'">'+IC.edit+'</button>'+
+        '<button class="pm pdel" title="'+escAttr(t('common.delete'))+'" aria-label="'+escAttr(t('common.delete'))+'">'+IC.trash+'</button>';
       row.addEventListener('click', function(e){
         if(e.target.closest('.pedit')){ openPresetEditor(p.id); return; }
         if(e.target.closest('.pdel')){ deletePresetReq(p.id).then(loadPresets); return; }
@@ -1504,7 +1715,7 @@
       });
       presetList.appendChild(row);
     });
-    var add=document.createElement('div'); add.className='padd'; add.textContent='+ Новый пресет';
+    var add=document.createElement('div'); add.className='padd'; add.textContent=t('preset.new');
     add.addEventListener('click', function(){ openPresetEditor(null); });
     presetList.appendChild(add);
   }
@@ -1517,7 +1728,7 @@
   }
   function closePresetEditor(){ vPreset.hidden=true; newDialog(); }
   document.getElementById('presetSave').onclick=function(){
-    var name=(document.getElementById('presetName').value||'').trim()||'Без имени';
+    var name=(document.getElementById('presetName').value||'').trim()||t('preset.unnamed');
     var prompt=document.getElementById('presetPrompt').value||'';
     var id=editingId||genId(), isNew=!editingId;
     savePreset(id,name,prompt).then(function(){ if(isNew) return setActivePreset(id); }).then(loadPresets).then(closePresetEditor);
@@ -1527,7 +1738,7 @@
 
   function loadPresets(){
     return pFetchJSON('/ui/presets').then(function(list){
-      if(Array.isArray(list) && list.length===0){
+      if(Array.isArray(list) && list.length===0 && DEFAULT_PRESETS.length){
         return Promise.all(DEFAULT_PRESETS.map(function(p){ return savePreset(genId(), p.name, p.prompt); })).then(function(){ return pFetchJSON('/ui/presets'); });
       }
       return list;

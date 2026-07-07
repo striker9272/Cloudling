@@ -4,6 +4,7 @@
   --ubub:#2c2d36; --ubord:#3b3c46;
   --font:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   --display:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  --wordmark:"Audiowide",system-ui,sans-serif;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   --drawer-l:300px; --drawer-r:330px;
   /* reading-column width: thread + composer share it so they widen together */
@@ -37,9 +38,14 @@ html,body{height:100%;}
 .hero{display:flex; align-items:center; gap:20px; flex-wrap:wrap;}
 .hero .brand{display:inline-flex; align-items:center; gap:12px;}
 .hero .brand .cloud circle{fill:var(--load);}
-.hero .brand .cloud{transform-origin:center; animation:cloudling-breathe 3.0s ease-in-out infinite;}
-@keyframes cloudling-breathe{0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-6px) scale(1.072)}}
-.hero .title{font-family:var(--display); font-size:50px; font-weight:800; letter-spacing:-0.035em; line-height:1;}
+/* "living" home mark: the outer lobes drift gently so the goo-merged cloud undulates */
+.hero .brand .cloud .p1{animation:hero-p1 3.1s ease-in-out infinite;}
+.hero .brand .cloud .p2{animation:hero-p2 3.6s ease-in-out infinite;}
+.hero .brand .cloud .p3{animation:hero-p3 2.8s ease-in-out infinite;}
+@keyframes hero-p1{0%,100%{transform:translate(0,0)}50%{transform:translate(0,-1.3px)}}
+@keyframes hero-p2{0%,100%{transform:translate(0,0)}50%{transform:translate(-1.3px,.7px)}}
+@keyframes hero-p3{0%,100%{transform:translate(0,0)}50%{transform:translate(1.3px,.7px)}}
+.hero .title{font-family:var(--wordmark); font-size:40px; font-weight:400; letter-spacing:-0.01em; line-height:1;}
 /* home: center the hero+composer group vertically, biased slightly above center.
    :not([hidden]) so the id specificity doesn't override .view[hidden]{display:none}
    (that bug kept the home view visible over an open dialog → broke navigation). */
@@ -109,6 +115,12 @@ body.open-left .scrim, body.open-right .scrim{display:block;}
 body.open-left .drawer.left{transform:translateX(0);}
 body.open-right .drawer.right{transform:translateX(0);}
 .dtitle{font-size:17px; font-weight:600; letter-spacing:-0.01em; margin-bottom:14px;}
+.sethdr{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:14px;}
+.sethdr .dtitle{margin-bottom:0;}
+.langseg{display:inline-flex; border:1px solid var(--line); border-radius:9px; overflow:hidden;}
+.langseg button{appearance:none; border:0; background:transparent; color:var(--muted); font:inherit; font-size:12px; font-weight:500; padding:5px 12px; cursor:pointer; transition:background .12s, color .12s;}
+.langseg button+button{border-left:1px solid var(--line);}
+.langseg button.on{background:var(--accent); color:var(--on-accent);}
 .newbtn{background:none; border:1px solid var(--line); color:var(--text); width:28px; height:28px; border-radius:8px; cursor:pointer; font-size:17px; line-height:1; display:flex; align-items:center; justify-content:center; transition:background .12s;}
 .newbtn:hover{background:var(--s-ctrl);}
 .newchat{width:100%; display:flex; align-items:center; justify-content:center; gap:8px; background:var(--accent); border:none; color:var(--on-accent); border-radius:12px; padding:10px; font:inherit; font-size:14px; font-weight:600; cursor:pointer; margin-bottom:14px; transition:filter .12s, transform .1s;}
@@ -137,7 +149,7 @@ body.open-right .drawer.right{transform:translateX(0);}
 .empty{text-align:center; color:var(--muted); font-size:13px; padding:28px 12px 12px; display:flex; flex-direction:column; align-items:center; gap:5px;}
 .empty[hidden]{display:none;}
 .empty .ei{color:var(--faint); margin-bottom:4px;}
-.empty span{font-size:11.5px; color:var(--faint);}
+.empty .eh{font-size:11.5px; color:var(--faint);}
 
 .menu{position:fixed; z-index:80; min-width:176px; background:var(--s-hover); border:1px solid var(--line2); border-radius:12px; padding:5px; box-shadow:0 16px 44px rgba(0,0,0,.5); display:none;}
 .menu button{display:flex; align-items:center; gap:10px; width:100%; background:none; border:none; color:var(--text); font:inherit; font-size:13px; text-align:left; padding:8px 10px; border-radius:8px; cursor:pointer;}
@@ -278,7 +290,7 @@ body.open-right .drawer.right{transform:translateX(0);}
 .setup .step{display:flex; gap:12px; align-items:center; background:#141418; border:1px solid var(--line); border-radius:12px; padding:12px 14px;}
 .setup .step .n{width:24px; height:24px; border-radius:50%; background:#202028; border:1px solid var(--line); display:flex; align-items:center; justify-content:center; font-size:12.5px; font-weight:600; flex-shrink:0; color:var(--muted);}
 .setup .step .tx{font-size:13.5px; line-height:1.4;}
-.setup .step .tx span{color:var(--muted);}
+.setup .step .tx .sub{color:var(--muted);}
 .setup .cta{background:var(--accent); border:1px solid var(--accent); color:var(--on-accent); font:inherit; font-weight:500; font-size:14px; padding:11px 22px; border-radius:12px; cursor:pointer;}
 .setup .cta:hover{filter:brightness(.93);}
 .setup .hint{margin-top:16px; font-size:12px; color:var(--faint);}
@@ -458,7 +470,7 @@ details.tool[open]>summary.head::after{transform:rotate(180deg);}
 /* splash */
 .splash{position:fixed; inset:0; z-index:200; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:18px; transition:opacity .55s ease;}
 .splash.hide{opacity:0; pointer-events:none;}
-.splash .nm{font-family:var(--display); font-size:26px; font-weight:700; letter-spacing:-0.03em; color:#cfd2d8;}
+.splash .nm{font-family:var(--wordmark); font-size:24px; font-weight:400; letter-spacing:-0.01em; color:#cfd2d8;}
 
 /* responsive: narrow screens */
 @media (max-width:760px){
@@ -471,7 +483,7 @@ details.tool[open]>summary.head::after{transform:rotate(180deg);}
 @media (max-width:480px){
   body{--drawer-l:86vw; --drawer-r:86vw;}
   .hero{gap:12px;}
-  .hero .title{font-size:27px;}
+  .hero .title{font-size:22px;}
   #view-home,#view-setup,#view-preset{padding-top:74px; padding-left:14px; padding-right:14px;}
   #view-dialog{padding-left:14px; padding-right:14px;}
   .tab{width:34px; height:46px;}

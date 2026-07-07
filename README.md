@@ -1,4 +1,6 @@
-# Cloudling
+<p align="center">
+  <img src="assets/cloudling-wordmark.svg" alt="Cloudling" width="440">
+</p>
 
 <p align="center">
   <a href="https://github.com/striker9272/cloudling">striker9272/cloudling</a>
