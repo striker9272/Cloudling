@@ -711,9 +711,11 @@ mod linux_imp {
         // Single-instance: if a Cloudling server already answers `/health` on this
         // port, a copy is already running. Starting a second one would fail to
         // bind (EADDRINUSE) and used to make the new icon vanish; instead just
-        // open the browser at the running instance and exit cleanly.
+        // exit cleanly, leaving the running instance (and its tray icon) in place.
+        // We intentionally do NOT open a browser here — the UI opens only on an
+        // explicit tray click / "Open", never automatically on launch.
         if health_ok(&bind) {
-            open_in_browser(&url);
+            eprintln!("cloudling tray: a Cloudling server is already running; leaving it in place");
             return Ok(());
         }
 
@@ -756,18 +758,10 @@ mod linux_imp {
                 let _ = tx.send(serve());
             })?;
 
-        // Open the UI once the server is actually accepting connections rather
-        // than after a fixed delay (more robust on a cold start). If the server
-        // never comes up, the poll times out and we simply don't open a browser.
-        let open_bind = bind.clone();
-        let open_url = url.clone();
-        thread::Builder::new()
-            .name("cloudling-open-browser".into())
-            .spawn(move || {
-                if wait_for_health(&open_bind, Duration::from_secs(15)) {
-                    open_in_browser(&open_url);
-                }
-            })?;
+        // The UI is never opened automatically on launch — only via an explicit
+        // tray click / "Open" menu item. (A background thread used to poll /health
+        // and pop the browser here; at login that made the browser appear
+        // unbidden, so it was removed.)
 
         // Wait for the server to finish. While it runs this just blocks; the tray
         // lives on its own thread and `Quit` exits the process directly. If the
@@ -823,20 +817,6 @@ mod linux_imp {
         // Status line is e.g. "HTTP/1.0 200 OK" / "HTTP/1.1 200 OK".
         let head = String::from_utf8_lossy(&buf[..read]);
         head.starts_with("HTTP/1.") && head.contains(" 200")
-    }
-
-    /// Poll [`health_ok`] until it succeeds or `timeout` elapses.
-    fn wait_for_health(bind: &str, timeout: Duration) -> bool {
-        let start = std::time::Instant::now();
-        loop {
-            if health_ok(bind) {
-                return true;
-            }
-            if start.elapsed() >= timeout {
-                return false;
-            }
-            thread::sleep(Duration::from_millis(200));
-        }
     }
 
     pub fn run_uninstall(
@@ -936,10 +916,12 @@ mod macos_imp {
         let url = browser_url(&bind);
 
         // Single-instance: if a Cloudling server already answers `/health` on this
-        // port, a copy is running. Just open the browser at it and exit cleanly
-        // instead of failing to bind a second one. Mirrors the Linux tray.
+        // port, a copy is running. Exit cleanly, leaving it (and its menu-bar
+        // icon) in place, instead of failing to bind a second one. Mirrors the
+        // Linux tray: no browser is opened here — the UI opens only on an explicit
+        // "Open Cloudling" click, never automatically on launch.
         if health_ok(&bind) {
-            open_in_browser(&url);
+            eprintln!("cloudling tray: a Cloudling server is already running; leaving it in place");
             return Ok(());
         }
 
@@ -955,18 +937,10 @@ mod macos_imp {
                 }
             })?;
 
-        // Open the UI once the server is actually accepting connections rather
-        // than after a fixed delay (more robust on a cold start). If it never
-        // comes up, the poll times out and no browser opens.
-        let open_bind = bind.clone();
-        let open_url = url.clone();
-        thread::Builder::new()
-            .name("cloudling-open-browser".into())
-            .spawn(move || {
-                if wait_for_health(&open_bind, Duration::from_secs(15)) {
-                    open_in_browser(&open_url);
-                }
-            })?;
+        // The UI is never opened automatically on launch — only via an explicit
+        // "Open Cloudling" menu click. (A background thread used to poll /health
+        // and pop the browser here; it made the browser appear unbidden at login,
+        // so it was removed.)
 
         // Bootstrap a minimal NSApplication on the main thread. `Accessory` keeps
         // the app out of the Dock (menu-bar only), which is what a tray app wants.
@@ -1207,19 +1181,5 @@ mod macos_imp {
         };
         let head = String::from_utf8_lossy(&buf[..read]);
         head.starts_with("HTTP/1.") && head.contains(" 200")
-    }
-
-    /// Poll [`health_ok`] until it succeeds or `timeout` elapses.
-    fn wait_for_health(bind: &str, timeout: Duration) -> bool {
-        let start = std::time::Instant::now();
-        loop {
-            if health_ok(bind) {
-                return true;
-            }
-            if start.elapsed() >= timeout {
-                return false;
-            }
-            thread::sleep(Duration::from_millis(200));
-        }
     }
 }
