@@ -1,6 +1,6 @@
 # Cloudling Usage
 
-This guide covers the current Rust workspace under `rust/` and the `cloudling` CLI binary. If you are brand new, make the doctor health check your first run: start `cloudling`, then run `/doctor`.
+This is the reference for the **CLI/REPL side** of the `cloudling` binary: build, terminal usage, providers, authentication, proxies, sessions. The serve layer ("model → agent → chat" — the main use case) is covered in the [README](./README.md), and the built-in web UI in [`docs/web-ui.md`](./docs/web-ui.md). If you are brand new to the CLI, make the doctor health check your first run: start `cloudling`, then run `/doctor`.
 
 ## Quick-start health check
 
@@ -75,7 +75,7 @@ JSON mode for scripting:
 
 Returns structured output with `project_path`, `created[]`, `updated[]`, `skipped[]` arrays (one per artifact), and `artifacts[]` carrying each file's `name` and machine-stable `status` tag. The legacy `message` field preserves backward compatibility.
 
-**Why structured fields matter:** Claws can detect per-artifact state (`created` vs `updated` vs `skipped`) without substring-matching human prose. Use the `created[]`, `updated[]`, and `skipped[]` arrays for conditional follow-up logic (e.g., only commit if files were actually created, not just updated).
+**Why structured fields matter:** scripts can detect per-artifact state (`created` vs `updated` vs `skipped`) without substring-matching human prose. Use the `created[]`, `updated[]`, and `skipped[]` arrays for conditional follow-up logic (e.g., only commit if files were actually created, not just updated).
 
 ### Interactive REPL
 
@@ -244,7 +244,7 @@ export ANTHROPIC_AUTH_TOKEN="anthropic-oauth-or-proxy-bearer-token"
 
 The same provider rules work in PowerShell. Use placeholder values in docs and tests; put real keys only in your private environment. Remove unrelated provider env vars when validating a switch so failures are easy to diagnose.
 
-`CLAUDE_CODE_PROVIDER` is not required for normal Claw routing; prefer explicit model prefixes such as `openai/` and provider-specific env vars so PowerShell examples stay portable.
+`CLAUDE_CODE_PROVIDER` is not required for normal Cloudling routing; prefer explicit model prefixes such as `openai/` and provider-specific env vars so PowerShell examples stay portable.
 
 ```powershell
 # Anthropic direct
@@ -398,13 +398,13 @@ For gateway features that are not first-class request fields yet, `MessageReques
 
 ## File context and navigation
 
-Use `@path/to/file` in prompts to submit repository files as context, for example `Read @src/app.ts and explain the bug`, `Compare @old.md and @new.md`, or `Use @logs/error.txt as context and suggest a fix`. Prompt history, `Ctrl-r`, and long-output scrolling come from your shell, terminal, or tmux rather than from Claw itself. See [`docs/navigation-file-context.md`](./docs/navigation-file-context.md) for scrollback, attachment, and secret-redaction guidance.
+Use `@path/to/file` in prompts to submit repository files as context, for example `Read @src/app.ts and explain the bug`, `Compare @old.md and @new.md`, or `Use @logs/error.txt as context and suggest a fix`. Prompt history, `Ctrl-r`, and long-output scrolling come from your shell, terminal, or tmux rather than from Cloudling itself. See [`docs/navigation-file-context.md`](./docs/navigation-file-context.md) for scrollback, attachment, and secret-redaction guidance.
 
 ## FAQ
 
 ### Is Cloudling Claude-only?
 
-No. Cloudling is a Claude-Code-shaped workflow/runtime, not a Claude-only product. It can target Anthropic and OpenAI-compatible/provider-routed/local models depending on config. Non-Claude providers may require stricter response-shape and tool-call compatibility, so some workflows can be rougher than first-party Anthropic/OpenAI paths; provider-specific identity leaks are bugs, not product intent. See [`docs/local-openai-compatible-providers.md`](./docs/local-openai-compatible-providers.md) for local provider examples.
+No. Cloudling targets any OpenAI-compatible backend — local (Ollama, llama.cpp, vLLM) or cloud/provider-routed — as well as Anthropic models, depending on config. Open models vary in tool-call and response-shape discipline, so some workflows can be rougher than on first-party Anthropic/OpenAI paths; provider-specific identity leaks are bugs, not product intent. See [`docs/local-openai-compatible-providers.md`](./docs/local-openai-compatible-providers.md) for local provider examples and [`docs/MODEL_COMPATIBILITY.md`](./docs/MODEL_COMPATIBILITY.md) for model-specific notes.
 
 ### What about Codex?
 
