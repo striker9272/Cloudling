@@ -1452,13 +1452,21 @@
   function stripReasoning(t){ return (t||'').replace(/<details type="reasoning"[\s\S]*?<\/details>/g,'').replace(/\n{3,}/g,'\n\n'); }
   /* assemble the OWUI/OpenAI content array for a user message that carries attachments:
      text + inlined text files + {type:image_url} + a note for non-inlined binaries.
-     (text-only messages stay plain strings.) */
-  function userContentForBackend(m){
+     (text-only messages stay plain strings.)
+     `keepImage` gates whether the actual image bytes are (re)sent: an image is
+     inlined only on the latest user turn (the one being sent now). On older turns
+     it collapses to a short note, so an image attached once is uploaded/processed
+     by the backend once — not re-encoded on every subsequent message. Text files
+     stay inlined each turn (cheap tokens, and follow-ups usually want the text). */
+  function userContentForBackend(m, keepImage){
     if(!m.atts || !m.atts.length) return m.content;
     var parts=[];
     if(m.content) parts.push({type:'text', text:m.content});
     m.atts.forEach(function(a){
-      if(a.kind==='image' && a.url) parts.push({type:'image_url', image_url:{url:a.url}});
+      if(a.kind==='image' && a.url){
+        if(keepImage) parts.push({type:'image_url', image_url:{url:a.url}});
+        else parts.push({type:'text', text:'[изображение «'+a.name+'» приложено выше]'});
+      }
       else if(a.kind==='text' && typeof a.text==='string') parts.push({type:'text', text:'Файл «'+a.name+'»:\n```\n'+a.text+'\n```'});
       else parts.push({type:'text', text:'[вложен файл '+a.name+', '+humanSize(a.size)+' — содержимое не передаётся]'});
     });
@@ -1467,11 +1475,14 @@
   }
   function outgoingMessages(){
     var sys=activePresetPrompt();
+    /* index of the latest user message — only it (re)sends image bytes (see userContentForBackend) */
+    var lastUserIdx=-1;
+    for(var i=convo.length-1;i>=0;i--){ if(convo[i].role==='user'){ lastUserIdx=i; break; } }
     /* reasoning blocks are display-only — drop them from resent history so context stays lean;
        user messages may carry attachments → expand to a content array (UI-only fields dropped) */
-    var hist=convo.map(function(m){ return m.role==='assistant'
+    var hist=convo.map(function(m, idx){ return m.role==='assistant'
       ? {role:m.role, content:stripReasoning(m.content)}
-      : {role:m.role, content:userContentForBackend(m)}; });
+      : {role:m.role, content:userContentForBackend(m, idx===lastUserIdx)}; });
     return sys ? [{role:'system', content:sys}].concat(hist) : hist;
   }
 
