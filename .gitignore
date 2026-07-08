@@ -9,6 +9,8 @@ archive/
 # Claw Code local artifacts (any depth)
 **/.claw/settings.local.json
 **/.claw/sessions/
+**/.claw.json
+**/.clawd-todos.json
 .clawhip/
 status-help.txt
 # Personal notes / scratch (not for the repo)

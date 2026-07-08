@@ -177,7 +177,7 @@ jobs:
             echo '	<key>CFBundleDisplayName</key>'
             echo '	<string>Cloudling</string>'
             echo '	<key>CFBundleIdentifier</key>'
-            echo '	<string>io.github.OWNER.cloudling</string>'  # TODO clean-start: set the real repo owner
+            echo '	<string>io.github.striker9272.cloudling</string>'
             echo '	<key>CFBundleExecutable</key>'
             echo '	<string>Cloudling</string>'
             echo '	<key>CFBundlePackageType</key>'
