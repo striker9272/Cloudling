@@ -39,83 +39,117 @@
 
 От оригинального [Claw Code](https://github.com/ultraworkers/claw-code) (это агент для кодинга в терминале) Cloudling отличается фокусом: здесь главное — не CLI, а вот эта прослойка «модель → агент → чат» для самостоятельного хостинга на домашнем сервере.
 
-### Как это работает
-
-По задумке нужно всего две вещи:
-
-1. **Куда ходить за моделью** — адрес и ключ твоего OpenAI-совместимого бэкенда (локального или внешнего).
-2. **Куда отдавать результат** — на каком адресе поднять OpenAI-совместимый эндпоинт, который увидит твой чат.
-
-На выходе Cloudling поднимает `/v1/chat/completions` со стримингом, который Open WebUI (или другой клиент) видит как одну модель. Всё остальное — инструменты, поиск, сессии — уже внутри.
-
-> **Статус:** проект экспериментальный, для домашнего сервера. **Основная серверная платформа — Linux** (сервис ставится одной командой или интерактивным мастером — см. «Запуск как сервиса» ниже). Для **Windows** есть нативная десктоп-сборка: тот же `cloudling.exe` живёт значком в трее (двойной клик → фоновый serve+UI, без Docker и WSL), проверена на Windows 11 — см. [`docs/windows-install-release.md`](./docs/windows-install-release.md). Для **macOS** есть экспериментальная десктоп-сборка (значок в menu-bar, `.dmg`/`.app`, launchd-инсталлятор); требуется **Apple Silicon и macOS 11+**; собирается CI, но на живом железе пока не проверена, поэтому публикуется только как pre-release-артефакты — см. [`docs/macos.md`](./docs/macos.md). Качество агентного поведения зависит от способности модели к tool-calling — открытые модели умеют это по-разному; заметки по совместимости — [`docs/MODEL_COMPATIBILITY.md`](./docs/MODEL_COMPATIBILITY.md). Рассчитан на одного пользователя в доверенной (домашней) сети: чат-эндпоинт `/v1` не требует авторизации — не выставляй его в интернет без внешней прослойки.
+> **Статус:** проект экспериментальный, для домашнего сервера. Основная платформа — **Linux**. Есть нативные десктоп-сборки под Windows (проверена на Win11) и macOS (экспериментальная). Рассчитан на **одного пользователя в доверенной сети**: чат-эндпоинт `/v1` **без авторизации** — не выставляй его в интернет без внешней прослойки. Качество агента зависит от способности модели к tool-calling — открытые модели умеют это по-разному ([`docs/MODEL_COMPATIBILITY.md`](./docs/MODEL_COMPATIBILITY.md)).
 
 ### Что внутри
 
 - **Инструменты и агентный цикл** — модель не просто отвечает, а выполняет многошаговые задачи через встроенные инструменты.
-- **Встроенный веб-поиск** — ходит в настраиваемый JSON-бэкенд (например, self-hosted SearXNG) через `CLAWD_WEB_SEARCH_BASE_URL`; если он не задан — откат на скрейп DuckDuckGo/HTML (менее надёжный).
-- **MCP-серверы** — внешние программы-инструменты подключаются парой строк конфига (`mcpServers` в `settings.json` или Настройки → Инструменты во встроенном UI) и появляются у модели как `mcp__<сервер>__<инструмент>`; соединения живут в тёплом пуле, конфиг применяется без рестарта. Подробности — [`docs/web-ui.md`](./docs/web-ui.md).
-- **Управление контекстом** — встроенный UI определяет окно модели (llama.cpp/vLLM/Ollama), показывает счётчик «занято / окно (%)», а при заполнении сам сжимает историю модельной сводкой — длинный чат не упирается в переполнение; для внешних клиентов есть серверная страховка авто-компакта.
-- **Аккуратные tool-call'ы в Open WebUI** — вызовы инструментов показываются как сворачиваемые детали, а не как сырой текст в ответе.
-- **Сессии под чат** — эфемерные: историю держит фронт и присылает её целиком в каждом запросе (`messages[]`), а cloudling пересобирает сессию на каждый запрос. Истории не утекают между чатами.
-- **Стабильное имя модели** — фронт видит постоянный id (например `cloudling`), а реальная модель провайдера остаётся внутренней и заменяемой.
+- **MCP-серверы** — внешние программы-инструменты подключаются в интерфейсе (Настройки → Инструменты) или парой строк в `settings.json`; появляются у модели как `mcp__<сервер>__<инструмент>`, живут в тёплом пуле, применяются без рестарта. Каждый сервер можно включать/выключать переключателем — выключенный не грузит инструменты в контекст.
+- **Встроенный веб-поиск** — ходит в настраиваемый JSON-бэкенд (например, self-hosted SearXNG); без него — откат на скрейп DuckDuckGo (менее надёжный).
+- **Управление контекстом** — встроенный UI определяет окно модели, показывает счётчик «занято / окно (%)» и сам сжимает историю модельной сводкой перед переполнением; для внешних клиентов есть серверная страховка.
+- **Аккуратные tool-call'ы в Open WebUI** — вызовы показываются как сворачиваемые детали, а не сырой текст.
+- **Сессии под чат** — эфемерные: историю держит фронт и присылает целиком (`messages[]`), Cloudling пересобирает сессию на каждый запрос. Истории не утекают между чатами.
+- **Стабильное имя модели** — фронт видит постоянный id (например `cloudling`), реальная модель провайдера остаётся внутренней и заменяемой.
 - **Изоляция** — живой сервис работает в нейтральной директории и не тянет в обычные чаты `CLAUDE.md`, git-статус и настройки проекта.
-- **Встроенный веб-интерфейс (необязательно)** — с флагом `--ui` тот же бинарник отдаёт на том же порту страницу чата: стрим, сворачиваемые tool-call'ы, markdown, вложения-картинки, интерактивные вопросы модели (инструмент AskUserQuestion рисует в чате кликабельные варианты, выбор возвращается модели), серверное хранилище диалогов/пресетов/настроек. По умолчанию headless — UI не мешает API. Подробности — [`docs/web-ui.md`](./docs/web-ui.md).
-- **Нативное десктоп-приложение для Windows (необязательно)** — тот же `cloudling.exe` умеет жить значком в трее: двойной клик → фоновый serve+UI без окна консоли; меню «открыть в браузере / автозапуск / удалить»; без Docker и WSL. В терминале `cloudling` остаётся обычным CLI/REPL. Подробности — [`docs/windows-install-release.md`](./docs/windows-install-release.md).
-- **Десктоп-приложение для Linux (необязательно)** — пакет `.deb`: двойной клик → графический установщик (App Center / gdebi, без терминала) → «Cloudling» появляется в меню приложений → запуск кликом: фоновый serve+UI и значок в трее (открыть в браузере / автозапуск при входе / удалить). Бинарник статический (musl) — запускается на любом дистрибутиве, без подгонки под glibc. Удаление — через центр приложений или `apt remove`; пользовательские данные сносит `cloudling uninstall` (или пункт «Удалить» в меню). (Значок в трее показывают KDE и GNOME с расширением AppIndicator, которое в Ubuntu стоит из коробки.)
-- **Десктоп-приложение для macOS (экспериментально)** — тот же `cloudling` живёт значком в menu-bar через `.dmg`/`.app` (перетащить в Applications → значок в menu-bar: открыть в браузере / автозапуск при входе / удалить), плюс launchd-инсталлятор для headless-сервера. Требуется **Apple Silicon и macOS 11.0+** (Intel / старее — только сборка из исходников). Собрано CI на Apple Silicon, но **на живом железе пока не проверено** — бинарник и `.dmg` публикуются только как pre-release-артефакты. Подробности — [`docs/macos.md`](./docs/macos.md).
+- **Встроенный веб-интерфейс (опционально)** — с флагом `--ui` тот же бинарник отдаёт на том же порту страницу чата: стрим, tool-call'ы, markdown, вложения-картинки, интерактивные вопросы модели, серверное хранилище диалогов/пресетов/настроек. По умолчанию headless. Подробнее — [`docs/web-ui.md`](./docs/web-ui.md).
 
-### Быстрый старт
+**Десктоп без терминала (опционально):**
 
-Два пути: взять **готовый бинарник** (быстро, Rust не нужен) или **собрать из исходников**.
+- **Windows** — тот же `cloudling.exe` живёт значком в трее (двойной клик → фоновый serve+UI без консоли; меню открыть/автозапуск/удалить), без Docker и WSL; проверено на Win11. В терминале `cloudling` остаётся CLI/REPL. См. [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+- **Linux** — пакет `.deb`: двойной клик → графический установщик → «Cloudling» в меню приложений → запуск кликом (фоновый serve+UI + значок в трее). Бинарник статический (musl) — на любом дистрибутиве. См. «Обновление и удаление» ниже.
+- **macOS (экспериментально)** — `.dmg`/`.app` (menu-bar-агент) + launchd-инсталлятор. Требуется **Apple Silicon и macOS 11+**. Собирается CI как **pre-release workflow-артефакт** (скачивается со страницы Actions для теста), но **в публичный Release пока не прикрепляется** — не проверено на живом железе и не подписано (Gatekeeper предупреждает). Поддерживаемый путь сейчас — **сборка из исходников**. См. [`docs/macos.md`](./docs/macos.md).
 
-**Готовый бинарник (без Rust).** Проще всего — установщик сам скачает нужный ассет из релиза:
+---
 
-```bash
-./install.sh --prebuilt              # нужен gh или curl
-# конкретная версия: ./install.sh --prebuilt-tag vX.Y.Z
-```
+## Установка (Linux)
 
-Или вручную: со страницы Releases скачай `cloudling-linux-x64`, сделай исполняемым и проверь запуск:
+**Самый быстрый путь — одной командой, без клонирования.** Скачивает готовый бинарник (репозиторий публичный — авторизация не нужна) и сразу поднимает сервис. Выбери один из двух вариантов.
+
+**Вариант 1 — со встроенным веб-UI.** Движок (модель и адрес) укажешь потом в браузере при первом запуске:
 
 ```bash
-chmod +x cloudling-linux-x64
-./cloudling-linux-x64 --version
+curl -fsSL https://raw.githubusercontent.com/striker9272/cloudling/main/install.sh \
+  | bash -s -- --prebuilt --repo striker9272/cloudling -- \
+      --ui --bind 0.0.0.0:4097 --enable --restart
 ```
 
-Бинарник статический (musl) — запускается на любом дистрибутиве, без подгонки под версию glibc. Для Windows — ассет `cloudling-windows-x64.exe` (см. [`docs/windows-install-release.md`](./docs/windows-install-release.md)); десктоп без терминала на Linux — `.deb` ниже. Дальше настрой сервис (раздел «Запуск как сервиса»).
+**Вариант 2 — классический API (без UI).** Движок задаёшь флагами сразу (что писать в `--base-url`/`--backend-model` — см. таблицу в разделе «Сервис»):
 
-**Сборка из исходников.** Установщик `install.sh` сам определит ОС, проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config), а если каких-то системных пакетов не хватает — покажет команду и предложит доустановить (`y/n`):
+```bash
+curl -fsSL https://raw.githubusercontent.com/striker9272/cloudling/main/install.sh \
+  | bash -s -- --prebuilt --repo striker9272/cloudling -- \
+      --base-url http://127.0.0.1:8000/v1 --backend-model <модель> \
+      --served-model-id cloudling --enable --restart
+```
+
+Ниже — то же по шагам и путь **из исходников** (для него нужен клон). Команды с `cd rust` выполняются **из корня склонированного репозитория**.
+
+### Шаг 1 — склонировать репозиторий
 
 ```bash
 git clone https://github.com/striker9272/cloudling
 cd cloudling
+```
+
+### Шаг 2 — поставить бинарник
+
+Выбери один путь.
+
+**A. Готовый бинарник (быстро, Rust не нужен).** Установщик сам скачает нужный ассет из релиза (репозиторий публичный — авторизация не нужна, качается через `curl`):
+
+```bash
+./install.sh --prebuilt                 # последняя версия
+./install.sh --prebuilt-tag vX.Y.Z      # или конкретная
+```
+
+Бинарник статический (musl) — запускается на любом дистрибутиве, без подгонки под glibc.
+
+**B. Сборка из исходников.** Установщик проверит Rust-тулчейн и системные зависимости (компилятор, OpenSSL, pkg-config) и, если чего-то не хватает, предложит доустановить:
+
+```bash
 ./install.sh --release
 ```
 
-Бинарник появится в `rust/target/release/cloudling` (`.exe` на Windows); установщик сам проверит `cloudling --version`. Дальше настрой сервис — раздел «Запуск как сервиса» ниже (бэкенд и ключ задаются там, в одном месте). CLI-команды (`cloudling doctor`, `cloudling prompt`), провайдеры, сессии и заметки по Windows/PowerShell — в [`USAGE.md`](./USAGE.md) и [`docs/`](./docs).
+Бинарник появится в `rust/target/release/cloudling`; установщик сам проверит `cloudling --version`.
 
-> Ручная сборка (`cd rust && cargo build --release -p cloudling-cli`) тоже работает, но **не проверяет зависимости** — используй её, только если окружение уже настроено.
+### Шаг 3 — поднять сервис
 
-> **Десктоп без терминала (Linux).** Скачай `cloudling_*_amd64.deb` из релиза и открой двойным кликом — установится через графический центр приложений (или, если предпочитаешь терминал, `sudo apt install ./cloudling_*_amd64.deb`). После установки запусти «Cloudling» из меню приложений: поднимется фоновый serve+UI, появится значок в трее (открыть / автозапуск / удалить), браузер откроется сам. Бэкенд задаётся в браузере при первом запуске.
+В конце обоих путей `install.sh` предложит поднять сервис — ответь `y`, и откроется мастер (раздел «Сервис» ниже; это путь «одной командой от нуля до работающего сервиса»). Мастер можно запустить и отдельно, позже — тоже ниже.
 
-### Запуск как сервиса
+> **Нужен ли Windows/macOS-путь?** Для Windows скачай ассет `cloudling-windows-x64.exe` (см. [`docs/windows-install-release.md`](./docs/windows-install-release.md)); для десктопа без терминала на Linux — `.deb` (см. «Обновление и удаление»); macOS ставится из исходников (`./install.sh --release`).
 
-Основной сценарий. Если ты ставил через `./install.sh --release`, он в конце сам предложит поднять сервис — ответь `y`, и установщик разложит бинарник и запустит мастер (путь «одной командой от нуля до сервиса»).
+---
+
+## Сервис
+
+Основной сценарий — Cloudling как systemd-сервис, отдающий OpenAI-эндпоинт.
 
 **Что нужно заранее:**
 
 - запущенный OpenAI-совместимый бэкенд с моделью (Ollama / llama.cpp / vLLM / облако), доступный по сети;
-- Open WebUI (или любой OpenAI-клиент), который будет ходить в cloudling.
+- Open WebUI (или любой OpenAI-клиент), который будет ходить в Cloudling.
 
-Мастер можно запустить и отдельно — `install-openai-service.sh` без флагов на терминале сам переходит в интерактивный режим (бинарник кладёт `install.sh`; при ручной сборке сначала положи его: `sudo install -D -m 755 rust/target/release/cloudling /opt/cloudling/bin/cloudling`):
+**Мастер (интерактивно).** Запускается сам в конце `install.sh`, либо отдельно из корня репозитория:
 
 ```bash
 cd rust
 bash scripts/install-openai-service.sh
 ```
 
-Либо одной командой, без вопросов:
+(при ручной сборке сначала положи бинарник: `sudo install -D -m 755 rust/target/release/cloudling /opt/cloudling/bin/cloudling`.)
+
+**Мастер спрашивает:**
+
+| Значение | Что это и где взять |
+|---|---|
+| **Backend URL** (`--base-url`) | Адрес твоего OpenAI-совместимого бэкенда. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, облако → URL провайдера. |
+| **Backend model** (`--backend-model`) | Имя модели у бэкенда: `ollama list`, имя загруженной модели в vLLM/llama.cpp, или id облачной модели (напр. `gpt-4o-mini`). |
+| **API key** (`--api-key`) | Ключ к бэкенду. Локальным (Ollama/llama.cpp) обычно не нужен — оставь пустым; облаку/удалённому — ключ провайдера. |
+| **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `cloudling`). |
+| **Permission mode** (`--permission-mode`) | Что агенту можно: `read-only` (по умолч.) — только чтение; `workspace-write` — правка/запуск в рабочей папке; `danger-full-access` — полный доступ ко всей ФС (опасно для сервиса, открытого в чат). |
+| **Web search URL** (`--websearch-url`) | Необязательно. Адрес JSON-бэкенда поиска (SearXNG): `http://<host>:8888/search?format=json`. Пусто → встроенный фолбэк на DuckDuckGo (менее надёжный). |
+
+**Или одной командой, без вопросов:**
 
 ```bash
 cd rust
@@ -126,28 +160,37 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(если бэкенду нужен ключ — добавь `--api-key sk-...`). Всё остальное (сервис `cloudling.service`, пользователь, пути `/opt/cloudling`, `/etc/cloudling`, `/var/lib/cloudling`, bind `127.0.0.1:4097`, permission mode `read-only`) подставляется по умолчанию и переопределяется флагами.
+Всё остальное подставляется по умолчанию и переопределяется флагами: сервис `cloudling.service`, пути `/opt/cloudling` (бинарник), `/etc/cloudling/openai.env` (настройки), `/var/lib/cloudling` (рабочие каталоги и UI-данные), bind `127.0.0.1:4097`, permission mode `read-only`.
 
-> **Повторный запуск безопасен.** Установщик можно перезапускать на уже настроенном сервисе: текущие значения из env-файла (движок, bind, served-id, permission mode, ключ, UI-токен) сохраняются — переопределяй флагом только то, что нужно поменять.
+> **Повторный запуск безопасен.** Мастер можно перезапускать на уже настроенном сервисе: текущие значения из env-файла (движок, bind, served-id, permission mode, ключ, UI-токен) сохраняются — переопределяй флагом только то, что меняешь.
 
-Мастер спрашивает:
+### Подключить Open WebUI
 
-| Значение | Что это и где взять |
-|---|---|
-| **Backend URL** (`--base-url`) | Адрес твоего OpenAI-совместимого бэкенда. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, облако → URL провайдера. |
-| **Backend model** (`--backend-model`) | Имя модели, под которым её знает бэкенд. Из его списка моделей: `ollama list`, имя загруженной модели в vLLM/llama.cpp, или id облачной модели (напр. `gpt-4o-mini`). |
-| **API key** (`--api-key`) | Ключ доступа к бэкенду. Локальным (Ollama/llama.cpp) обычно не нужен — оставь пустым; облаку/удалённому — ключ провайдера. |
-| **Served model id** (`--served-model-id`) | Имя, которое **придумываешь сам** — оно появится в списке моделей Open WebUI (напр. `cloudling`). |
-| **Permission mode** (`--permission-mode`) | Что агенту можно: `read-only` (по умолч.) — только чтение; `workspace-write` — правка/запуск в рабочей папке; `danger-full-access` — полный доступ ко всей ФС (опасно для сервиса, открытого в чат). |
-| **Web search URL** (`--websearch-url`) | Необязательно. Адрес JSON-бэкенда поиска (SearXNG): `http://<host>:8888/search?format=json`. Если пусто — `cloudling` использует встроенный фолбэк на DuckDuckGo (менее надёжный). |
+Добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `cloudling` (или свой `served-model-id`).
 
-**Веб-поиск (необязательно, но рекомендуется).** Без `CLAWD_WEB_SEARCH_BASE_URL` поиск идёт через скрейп DuckDuckGo — работает, но ненадёжно. Для нормального поиска подними self-hosted [SearXNG](https://github.com/searxng/searxng), включи у него JSON-формат (`search.formats: [html, json]` в `settings.yml`) и передай `--websearch-url http://<host>:8888/search?format=json` (или впиши `CLAWD_WEB_SEARCH_BASE_URL` в env-файл). Допишет `&q=<запрос>` `cloudling` сам.
+Permission mode позже меняется в `CLAW_PERMISSION_MODE` (`/etc/cloudling/openai.env`) + рестарт сервиса.
 
-**Подключение Open WebUI:** добавь OpenAI-соединение на `http://<host>:4097/v1` — обязательно со схемой `http://` и хвостом `/v1` (host — адрес из bind; ключ можно оставить пустым). Затем выбери модель `cloudling` (или свой `served-model-id`). Permission mode потом меняется в `CLAW_PERMISSION_MODE` (`/etc/cloudling/openai.env`) + рестарт сервиса.
+### Веб-поиск (необязательно, но рекомендуется)
 
-**Встроенный веб-интерфейс (необязательно).** Кроме API, `cloudling` умеет сам отдавать страницу чата. Самый простой путь: при установке мастер первым делом спрашивает — «с веб-интерфейсом или классический API». Если выбрать UI, мастер **не спрашивает про движок** (модель и адрес укажешь прямо в браузере), сам сгенерит токен доступа и в конце покажет адрес страницы. Открываешь его — попадаешь на экран первого запуска, указываешь движок, сохраняешь — ядро перезапускается, и всё готово. Неинтерактивно весь UI-режим ставится одной командой (всё после `--` уходит в установщик сервиса): `./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart`. Под капотом это флаг `cloudling openai-serve --ui` + переменные `CLOUDLING_UI_TOKEN` (Bearer-токен для служебных `/ui/*`; вне loopback без него они отключены), `CLOUDLING_UI_DATA_DIR` (диалоги/пресеты; дефолт `$HOME/.claw/ui`), `CLOUDLING_OPENAI_ENV_FILE` (чтобы UI мог сохранять «Основное» и перезапускать ядро). По умолчанию сервис headless (только API). Полная инструкция и модель доступа — [`docs/web-ui.md`](./docs/web-ui.md).
+Без веб-поиск-бэкенда поиск идёт скрейпом DuckDuckGo — работает, но ненадёжно. Для нормального поиска подними self-hosted [SearXNG](https://github.com/searxng/searxng), включи у него JSON (`search.formats: [html, json]` в `settings.yml`) и передай `--websearch-url http://<host>:8888/search?format=json` (или впиши `CLAWD_WEB_SEARCH_BASE_URL` в env-файл). `&q=<запрос>` Cloudling допишет сам.
 
-Когда нужно лишь пересобрать и заменить бинарник, используй хелпер деплоя — он делает поэтапные проверки, бэкап, атомарную установку, рестарт и печатает команду отката:
+### Встроенный веб-интерфейс (необязательно)
+
+Кроме API, Cloudling умеет сам отдавать страницу чата. При установке мастер первым делом спрашивает — «с веб-интерфейсом или классический API». Если выбрать UI, мастер **не спрашивает про движок** (модель и адрес укажешь в браузере), сам сгенерит токен доступа и в конце покажет адрес страницы. Открываешь → экран первого запуска → указываешь движок → сохраняешь → ядро перезапускается.
+
+Неинтерактивно весь UI-режим ставится одной командой (всё после `--` уходит в установщик сервиса):
+
+```bash
+./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart
+```
+
+Под капотом — флаг `cloudling openai-serve --ui` плюс переменные: `CLOUDLING_UI_TOKEN` (Bearer-токен для служебных `/ui/*`; вне loopback без него они отключены), `CLOUDLING_UI_DATA_DIR` (диалоги/пресеты; в сервисе по умолчанию `/var/lib/cloudling/ui`), `CLOUDLING_OPENAI_ENV_FILE` (чтобы UI мог сохранять «Основное» и перезапускать ядро). По умолчанию сервис headless. Полная инструкция и модель доступа — [`docs/web-ui.md`](./docs/web-ui.md).
+
+---
+
+## Обновление и удаление
+
+**Пересобрать и заменить бинарник** у уже работающего сервиса — хелпер деплоя (поэтапные проверки, бэкап, атомарная установка, рестарт, печать команды отката). Из корня репозитория:
 
 ```bash
 cd rust
@@ -157,19 +200,30 @@ scripts/deploy-openai-server.sh \
   --health-url http://127.0.0.1:4097/health
 ```
 
-Снести сервис целиком — парной командой `uninstall.sh` (убирает unit, wrapper, env, бинарник, а также рабочие каталоги, UI-данные (диалоги/пресеты) и бэкапы; `--keep-data` оставит данные, `--dry-run` покажет план, `--yes` без вопросов):
+**Снести сервис целиком** — парной командой из корня репозитория (убирает unit, wrapper, env, бинарник, рабочие каталоги, UI-данные и бэкапы; `--keep-data` оставит данные, `--dry-run` покажет план, `--yes` без вопросов):
 
 ```bash
 ./uninstall.sh
 ```
 
-**Какой скрипт когда:** `install.sh` — точка входа (собрать бинарник + при желании поднять сервис); `rust/scripts/install-openai-service.sh` — движок установки сервиса (интерактивный без флагов, неинтерактивный по флагам); `rust/scripts/deploy-openai-server.sh` — пересобрать и заменить бинарник у уже работающего сервиса; `uninstall.sh` — снести всё.
+**Десктоп-`.deb` (Linux)** ставится/сносится через центр приложений или `sudo apt install ./cloudling_*_amd64.deb` / `sudo apt remove cloudling`; пользовательские данные сносит `cloudling uninstall`.
+
+**Какой скрипт когда:**
+
+- `install.sh` — точка входа: собрать/скачать бинарник + при желании поднять сервис.
+- `rust/scripts/install-openai-service.sh` — мастер установки сервиса (интерактивный без флагов, неинтерактивный по флагам).
+- `rust/scripts/deploy-openai-server.sh` — пересобрать и заменить бинарник у работающего сервиса.
+- `uninstall.sh` — снести всё.
+
+> Ручная сборка (`cd rust && cargo build --release -p cloudling-cli`) тоже работает, но **не проверяет зависимости** — используй, только если окружение уже настроено.
+
+---
 
 ### Структура репозитория
 
-- **`rust/`** — Rust-воркспейс и бинарник `cloudling` (CLI + сервер); каноническая реализация
-- **`USAGE.md`** — сборка, авторизация, CLI, сессии, провайдеры
-- **`docs/`** — Windows, macOS, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI
+- **`rust/`** — Rust-воркспейс и бинарник `cloudling` (CLI + сервер); каноническая реализация.
+- **`USAGE.md`** — CLI-команды (`cloudling doctor`, `cloudling prompt`), провайдеры, сессии, заметки по Windows/PowerShell.
+- **`docs/`** — Windows, macOS, локальные OpenAI-совместимые провайдеры, файловый контекст, контейнеры, встроенный веб-UI.
 
 ### Благодарности
 
@@ -198,83 +252,117 @@ A local model in Open WebUI can basically only talk. Cloudling sits in the middl
 
 It differs from the original [Claw Code](#credits) (a terminal coding agent) in focus: the point here isn't the CLI, it's this "model → agent → chat" layer for self-hosting on a home server.
 
-### How it works
-
-By design you only need two things:
-
-1. **Where to reach the model** — the address and key of your OpenAI-compatible backend (local or remote).
-2. **Where to serve** — the address to expose an OpenAI-compatible endpoint your chat can see.
-
-Cloudling then serves `/v1/chat/completions` with streaming, which Open WebUI (or any client) sees as a single model. Everything else — tools, search, sessions — happens inside.
-
-> **Status:** experimental, built for a home server. **Linux is the primary server platform** (the service installs with a single command or an interactive wizard — see "Run it as a service" below). **Windows** has a native desktop build: the same `cloudling.exe` lives as a system-tray app (double-click → background serve+UI, no Docker or WSL), tested on Windows 11 — see [`docs/windows-install-release.md`](./docs/windows-install-release.md). **macOS** has an experimental desktop build (menu-bar app, `.dmg`/`.app`, launchd installer); it requires **Apple Silicon and macOS 11+**, is CI-built but not yet verified on real hardware, and ships as pre-release artifacts only — see [`docs/macos.md`](./docs/macos.md). Agentic quality depends on the model's tool-calling ability — open models vary; compatibility notes live in [`docs/MODEL_COMPATIBILITY.md`](./docs/MODEL_COMPATIBILITY.md). Built for a single user on a trusted (home) network: the `/v1` chat endpoint is unauthenticated — don't expose it to the internet without an external auth layer.
+> **Status:** experimental, built for a home server. Primary platform is **Linux**. Native desktop builds exist for Windows (tested on Win11) and macOS (experimental). Built for a **single user on a trusted network**: the `/v1` chat endpoint is **unauthenticated** — don't expose it to the internet without an external auth layer. Agentic quality depends on the model's tool-calling ability — open models vary ([`docs/MODEL_COMPATIBILITY.md`](./docs/MODEL_COMPATIBILITY.md)).
 
 ### What's inside
 
 - **Tools and an agent loop** — the model runs multi-step tasks via built-in tools instead of only replying.
-- **Built-in web search** — queries a configurable JSON backend (e.g. a self-hosted SearXNG) via `CLAWD_WEB_SEARCH_BASE_URL`; falls back to scraping DuckDuckGo/HTML when unset (less reliable).
-- **MCP servers** — external tool programs plug in with a couple of config lines (`mcpServers` in `settings.json`, or Settings → Tools in the built-in UI) and show up to the model as `mcp__<server>__<tool>`; connections are kept in a warm pool and config changes apply without a restart. See [`docs/web-ui.md`](./docs/web-ui.md).
-- **Context management** — the built-in UI detects the model's context window (llama.cpp/vLLM/Ollama), shows a "used / window (%)" gauge, and compacts long history into a model-written summary before it overflows; a server-side auto-compaction safety net covers external clients.
+- **MCP servers** — external tool programs plug in from the UI (Settings → Tools) or a couple of lines in `settings.json`; they show up as `mcp__<server>__<tool>`, live in a warm pool, and apply without a restart. Each server has an on/off toggle — a disabled one loads no tools into context.
+- **Built-in web search** — queries a configurable JSON backend (e.g. a self-hosted SearXNG); falls back to scraping DuckDuckGo when unset (less reliable).
+- **Context management** — the built-in UI detects the model's context window, shows a "used / window (%)" gauge, and compacts long history into a model-written summary before it overflows; a server-side safety net covers external clients.
 - **Clean tool calls in Open WebUI** — tool calls render as collapsible details, not raw text.
-- **Chat-friendly sessions** — ephemeral: the frontend owns history and resends it in full on every request (`messages[]`), and cloudling rebuilds the session per request. No history leaks between chats.
+- **Chat-friendly sessions** — ephemeral: the frontend owns history and resends it in full (`messages[]`), and Cloudling rebuilds the session per request. No history leaks between chats.
 - **Stable model name** — the frontend sees a constant id (e.g. `cloudling`) while the real provider model stays internal and swappable.
 - **Isolation** — the live service runs in a neutral workdir and won't pull `CLAUDE.md`, git status, or project settings into ordinary chats.
-- **Built-in web UI (optional)** — with the `--ui` flag the same binary serves a chat page on the same port: streaming, collapsible tool calls, markdown, image attachments, interactive model questions (the AskUserQuestion tool renders clickable options in the chat and the choice flows back to the model), and server-side storage of dialogs/presets/settings. Headless by default — the UI never gets in the API's way. See [`docs/web-ui.md`](./docs/web-ui.md).
-- **Native Windows desktop app (optional)** — the same `cloudling.exe` can run as a system-tray app: double-click → background serve+UI with no console window; tray menu to open it in the browser, toggle start-at-login, or uninstall; no Docker or WSL. In a terminal `cloudling` stays a normal CLI/REPL. See [`docs/windows-install-release.md`](./docs/windows-install-release.md).
-- **Linux desktop app (optional)** — a `.deb` package: double-click → graphical installer (App Center / gdebi, no terminal) → "Cloudling" appears in the apps menu → click to launch: background serve+UI and a tray icon (open in browser / start at login / uninstall). The binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching. Uninstall via the App Center or `apt remove`; `cloudling uninstall` (or the "Uninstall" menu item) removes user data. (The tray icon shows on KDE and on GNOME with the AppIndicator extension that Ubuntu ships by default.)
-- **macOS desktop app (experimental)** — the same `cloudling` runs as a menu-bar app via a `.dmg`/`.app` bundle (drag to Applications → menu-bar icon: open in browser / start at login / uninstall), with a launchd installer for the headless server. Requires **Apple Silicon and macOS 11.0 (Big Sur) or later** — the prebuilt build is arm64-only and the bundle declares `LSMinimumSystemVersion 11.0` (Intel / older macOS is build-from-source only). Built on Apple Silicon by CI but **not yet verified on real hardware**, so the macOS binary/`.dmg` are published as pre-release artifacts only. See [`docs/macos.md`](./docs/macos.md).
+- **Built-in web UI (optional)** — with `--ui` the same binary serves a chat page on the same port: streaming, tool calls, markdown, image attachments, interactive model questions, server-side storage of dialogs/presets/settings. Headless by default. See [`docs/web-ui.md`](./docs/web-ui.md).
 
-### Quick start
+**No-terminal desktop (optional):**
 
-Two paths: grab a **prebuilt binary** (fast, no Rust) or **build from source**.
+- **Windows** — the same `cloudling.exe` runs as a system-tray app (double-click → background serve+UI, no console; tray menu open/start-at-login/uninstall), no Docker or WSL; tested on Win11. In a terminal `cloudling` stays a CLI/REPL. See [`docs/windows-install-release.md`](./docs/windows-install-release.md).
+- **Linux** — a `.deb` package: double-click → graphical installer → "Cloudling" in the apps menu → click to launch (background serve+UI + tray icon). The binary is static (musl) — runs on any distro. See "Updating and uninstalling" below.
+- **macOS (experimental)** — a `.dmg`/`.app` (menu-bar agent) plus a launchd installer. Requires **Apple Silicon and macOS 11+**. Built by CI as a **pre-release workflow artifact** (downloadable from the Actions run for testing), but **not attached to the public release yet** — not verified on real hardware and unsigned (Gatekeeper warns). The supported path today is **build from source**. See [`docs/macos.md`](./docs/macos.md).
 
-**Prebuilt binary (no Rust).** Easiest — let the installer fetch the right release asset:
+---
 
-```bash
-./install.sh --prebuilt              # needs gh or curl
-# pin a version: ./install.sh --prebuilt-tag vX.Y.Z
-```
+## Install (Linux)
 
-Or manually: download `cloudling-linux-x64` from the Releases page, make it executable, and check it runs:
+**Fastest — one command, no clone.** Downloads the prebuilt binary (the repo is public — no auth) and sets up the service in one go. Pick one of the two.
+
+**Option 1 — with the built-in web UI.** Point it at your engine (model and URL) later, in the browser on first run:
 
 ```bash
-chmod +x cloudling-linux-x64
-./cloudling-linux-x64 --version
+curl -fsSL https://raw.githubusercontent.com/striker9272/cloudling/main/install.sh \
+  | bash -s -- --prebuilt --repo striker9272/cloudling -- \
+      --ui --bind 0.0.0.0:4097 --enable --restart
 ```
 
-The binary is statically linked (musl) — it runs on any distribution, with no glibc-version matching. For Windows, grab the `cloudling-windows-x64.exe` asset (see [`docs/windows-install-release.md`](./docs/windows-install-release.md)); for a no-terminal Linux desktop, the `.deb` below. Then set up the service ("Run it as a service").
+**Option 2 — classic API (no UI).** Set the engine via flags right away (see the table under "Service" for what goes in `--base-url`/`--backend-model`):
 
-**Build from source.** The `install.sh` installer detects your OS, checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config), and — if system packages are missing — shows the command and offers to install them (`y/n`):
+```bash
+curl -fsSL https://raw.githubusercontent.com/striker9272/cloudling/main/install.sh \
+  | bash -s -- --prebuilt --repo striker9272/cloudling -- \
+      --base-url http://127.0.0.1:8000/v1 --backend-model <model> \
+      --served-model-id cloudling --enable --restart
+```
+
+Below is the same thing step by step, plus the **build-from-source** path (which needs a clone). Commands with `cd rust` run **from the root of the cloned repository**.
+
+### Step 1 — clone the repo
 
 ```bash
 git clone https://github.com/striker9272/cloudling
 cd cloudling
+```
+
+### Step 2 — install the binary
+
+Pick one path.
+
+**A. Prebuilt binary (fast, no Rust).** The installer fetches the right release asset (the repo is public — no auth needed, it downloads via `curl`):
+
+```bash
+./install.sh --prebuilt                 # latest
+./install.sh --prebuilt-tag vX.Y.Z      # or a specific version
+```
+
+The binary is statically linked (musl) — it runs on any distribution, no glibc matching.
+
+**B. Build from source.** The installer checks the Rust toolchain and system dependencies (C compiler, OpenSSL, pkg-config) and offers to install anything missing:
+
+```bash
 ./install.sh --release
 ```
 
-The binary lands in `rust/target/release/cloudling` (`.exe` on Windows); the installer also runs `cloudling --version` for you. Next, set up the service — see "Run it as a service" below (backend and key are configured there, in one place). CLI commands (`cloudling doctor`, `cloudling prompt`), providers, sessions, and Windows/PowerShell notes are in [`USAGE.md`](./USAGE.md) and [`docs/`](./docs).
+The binary lands in `rust/target/release/cloudling`; the installer runs `cloudling --version` for you.
 
-> A manual build (`cd rust && cargo build --release -p cloudling-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
+### Step 3 — set up the service
 
-> **No-terminal desktop (Linux).** Download `cloudling_*_amd64.deb` from a release and open it with a double-click — it installs via the graphical App Center (or, if you prefer the terminal, `sudo apt install ./cloudling_*_amd64.deb`). Then launch "Cloudling" from the apps menu: it starts the background serve+UI, shows a tray icon (open / start at login / uninstall), and opens the browser for you. Configure the backend in the browser on first run.
+At the end of either path `install.sh` offers to set up the service — answer `y` and the wizard opens (see "Service" below; this is the "one command from nothing to a running service" path). You can also run the wizard separately later — also below.
 
-### Run it as a service
+> **Windows / macOS?** For Windows, grab the `cloudling-windows-x64.exe` asset (see [`docs/windows-install-release.md`](./docs/windows-install-release.md)); for a no-terminal Linux desktop, the `.deb` (see "Updating and uninstalling"); macOS is build-from-source (`./install.sh --release`).
 
-The main use case. If you installed via `./install.sh --release`, it offers to set up the service at the end — answer `y` and the installer places the binary and runs the wizard (one command from nothing to a running service).
+---
+
+## Service
+
+The main use case — Cloudling as a systemd service exposing an OpenAI endpoint.
 
 **Before you start, you need:**
 
 - a running OpenAI-compatible backend with a model (Ollama / llama.cpp / vLLM / cloud), reachable over the network;
-- Open WebUI (or any OpenAI client) to talk to cloudling.
+- Open WebUI (or any OpenAI client) to talk to Cloudling.
 
-You can also run the installer separately — `install-openai-service.sh` drops into its interactive wizard when run with no flags on a terminal (`install.sh` places the binary; for a manual build, place it first: `sudo install -D -m 755 rust/target/release/cloudling /opt/cloudling/bin/cloudling`):
+**Wizard (interactive).** Runs itself at the end of `install.sh`, or separately from the repo root:
 
 ```bash
 cd rust
 bash scripts/install-openai-service.sh
 ```
 
-Or in one non-interactive command:
+(for a manual build, place the binary first: `sudo install -D -m 755 rust/target/release/cloudling /opt/cloudling/bin/cloudling`.)
+
+**The wizard asks for:**
+
+| Value | What it is / where to get it |
+|---|---|
+| **Backend URL** (`--base-url`) | Your OpenAI-compatible backend's address. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, cloud → the provider's URL. |
+| **Backend model** (`--backend-model`) | The model id your backend knows it by: `ollama list`, the model you loaded in vLLM/llama.cpp, or a cloud model id (e.g. `gpt-4o-mini`). |
+| **API key** (`--api-key`) | Your backend's key. Local backends (Ollama/llama.cpp) usually need none — leave blank; cloud/remote needs the provider's key. |
+| **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `cloudling`). |
+| **Permission mode** (`--permission-mode`) | What the agent may do: `read-only` (default) — read only; `workspace-write` — edit/run inside the work dir; `danger-full-access` — full filesystem access (risky for a chat-exposed service). |
+| **Web search URL** (`--websearch-url`) | Optional. A JSON search backend (SearXNG) URL: `http://<host>:8888/search?format=json`. Empty → a built-in DuckDuckGo fallback (less reliable). |
+
+**Or one non-interactive command:**
 
 ```bash
 cd rust
@@ -285,28 +373,37 @@ scripts/install-openai-service.sh \
   --enable --restart
 ```
 
-(if your backend needs a key, add `--api-key sk-...`). Everything else (service `cloudling.service`, user, paths `/opt/cloudling`, `/etc/cloudling`, `/var/lib/cloudling`, bind `127.0.0.1:4097`, permission mode `read-only`) is defaulted and overridable via flags.
+Everything else is defaulted and overridable via flags: service `cloudling.service`, paths `/opt/cloudling` (binary), `/etc/cloudling/openai.env` (settings), `/var/lib/cloudling` (work dirs and UI data), bind `127.0.0.1:4097`, permission mode `read-only`.
 
-> **Re-running is safe.** You can re-run the installer on an already-configured service: the current values from the env file (engine, bind, served-id, permission mode, key, UI token) are preserved — pass a flag only for what you want to change.
+> **Re-running is safe.** You can re-run the wizard on an already-configured service: the current env-file values (engine, bind, served-id, permission mode, key, UI token) are preserved — pass a flag only for what you change.
 
-The wizard asks for:
+### Connect Open WebUI
 
-| Value | What it is / where to get it |
-|---|---|
-| **Backend URL** (`--base-url`) | Your OpenAI-compatible backend's address. Ollama → `http://localhost:11434/v1`, llama.cpp → `http://localhost:8080/v1`, vLLM → `http://localhost:8000/v1`, cloud → the provider's URL. |
-| **Backend model** (`--backend-model`) | The model id your backend knows it by. From its model list: `ollama list`, the model you loaded in vLLM/llama.cpp, or a cloud model id (e.g. `gpt-4o-mini`). |
-| **API key** (`--api-key`) | Your backend's access key. Local backends (Ollama/llama.cpp) usually need none — leave blank; cloud/remote needs the provider's key. |
-| **Served model id** (`--served-model-id`) | A name **you choose** — it shows up in Open WebUI's model list (e.g. `cloudling`). |
-| **Permission mode** (`--permission-mode`) | What the agent may do: `read-only` (default) — read only; `workspace-write` — edit/run inside the work dir; `danger-full-access` — full filesystem access (risky for a chat-exposed service). |
-| **Web search URL** (`--websearch-url`) | Optional. A JSON search backend (SearXNG) URL: `http://<host>:8888/search?format=json`. If empty, `cloudling` uses a built-in DuckDuckGo fallback (less reliable). |
+Add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `cloudling` model (or your `served-model-id`).
 
-**Web search (optional but recommended).** Without `CLAWD_WEB_SEARCH_BASE_URL`, search scrapes DuckDuckGo — it works but is unreliable. For real search, run a self-hosted [SearXNG](https://github.com/searxng/searxng), enable its JSON format (`search.formats: [html, json]` in `settings.yml`), and pass `--websearch-url http://<host>:8888/search?format=json` (or set `CLAWD_WEB_SEARCH_BASE_URL` in the env file). `cloudling` appends `&q=<query>` itself.
+Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/cloudling/openai.env`) followed by a service restart.
 
-**Connecting Open WebUI:** add an OpenAI connection pointing at `http://<host>:4097/v1` — include the `http://` scheme and the `/v1` suffix (host is your bind address; the key can be left blank). Then pick the `cloudling` model (or your `served-model-id`). Permission mode can later be changed in `CLAW_PERMISSION_MODE` (`/etc/cloudling/openai.env`) followed by a service restart.
+### Web search (optional but recommended)
 
-**Built-in web UI (optional).** Besides the API, `cloudling` can serve a chat page itself. The easiest path: during setup the wizard first asks — "built-in web UI or classic API". Pick the UI and it **skips the backend questions** (you set the model and URL in the browser), generates an access token, and prints the page address at the end. Open it, land on the first-run setup screen, point it at your engine, save — the core restarts and you're ready. To set up the whole UI mode non-interactively, everything after `--` is forwarded to the service installer: `./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart`. Under the hood this is `cloudling openai-serve --ui` plus `CLOUDLING_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints; off-loopback they are disabled without it), `CLOUDLING_UI_DATA_DIR` (dialog/preset storage; default `$HOME/.claw/ui`), `CLOUDLING_OPENAI_ENV_FILE` (so the UI can save "General" settings and restart the core). The service is headless (API only) by default. Full guide and auth model — [`docs/web-ui.md`](./docs/web-ui.md).
+Without a search backend, search scrapes DuckDuckGo — it works but is unreliable. For real search, run a self-hosted [SearXNG](https://github.com/searxng/searxng), enable its JSON format (`search.formats: [html, json]` in `settings.yml`), and pass `--websearch-url http://<host>:8888/search?format=json` (or set `CLAWD_WEB_SEARCH_BASE_URL` in the env file). Cloudling appends `&q=<query>` itself.
 
-When you only need to rebuild and swap the binary, use the deploy helper — it stages checks, backs up, installs atomically, restarts, and prints a rollback command:
+### Built-in web UI (optional)
+
+Besides the API, Cloudling can serve a chat page itself. During setup the wizard first asks — "built-in web UI or classic API". Pick the UI and it **skips the backend questions** (you set the model and URL in the browser), generates an access token, and prints the page address at the end. Open it, land on the first-run screen, point it at your engine, save — the core restarts.
+
+To set up the whole UI mode non-interactively (everything after `--` is forwarded to the service installer):
+
+```bash
+./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart
+```
+
+Under the hood this is `cloudling openai-serve --ui` plus `CLOUDLING_UI_TOKEN` (Bearer token for the `/ui/*` data endpoints; off-loopback they are disabled without it), `CLOUDLING_UI_DATA_DIR` (dialog/preset storage; `/var/lib/cloudling/ui` in the service), and `CLOUDLING_OPENAI_ENV_FILE` (so the UI can save "General" settings and restart the core). The service is headless by default. Full guide and auth model — [`docs/web-ui.md`](./docs/web-ui.md).
+
+---
+
+## Updating and uninstalling
+
+**Rebuild and swap the binary** on an already-running service — the deploy helper (staged checks, backup, atomic install, restart, prints a rollback command). From the repo root:
 
 ```bash
 cd rust
@@ -316,19 +413,30 @@ scripts/deploy-openai-server.sh \
   --health-url http://127.0.0.1:4097/health
 ```
 
-To remove the service, use the counterpart command `uninstall.sh` (removes the unit, wrapper, env, binary, plus the work/sandbox dirs, the UI data (dialogs/presets), and backups; `--keep-data` keeps the data, `--dry-run` shows the plan, `--yes` skips prompts):
+**Remove the service** — the counterpart command, from the repo root (removes the unit, wrapper, env, binary, work dirs, UI data, and backups; `--keep-data` keeps the data, `--dry-run` shows the plan, `--yes` skips prompts):
 
 ```bash
 ./uninstall.sh
 ```
 
-**Which script when:** `install.sh` — entry point (build the binary + optionally set up the service); `rust/scripts/install-openai-service.sh` — the service install engine (interactive with no flags, non-interactive with flags); `rust/scripts/deploy-openai-server.sh` — rebuild and swap the binary on an already-running service; `uninstall.sh` — remove everything.
+**Desktop `.deb` (Linux)** installs/removes via the App Center or `sudo apt install ./cloudling_*_amd64.deb` / `sudo apt remove cloudling`; `cloudling uninstall` removes user data.
+
+**Which script when:**
+
+- `install.sh` — entry point: build/download the binary + optionally set up the service.
+- `rust/scripts/install-openai-service.sh` — the service install wizard (interactive with no flags, non-interactive with flags).
+- `rust/scripts/deploy-openai-server.sh` — rebuild and swap the binary on a running service.
+- `uninstall.sh` — remove everything.
+
+> A manual build (`cd rust && cargo build --release -p cloudling-cli`) also works but **does not check dependencies** — use it only if your environment is already set up.
+
+---
 
 ### Repository layout
 
-- **`rust/`** — the Rust workspace and the `cloudling` CLI + server binary (the canonical implementation)
-- **`USAGE.md`** — build, auth, CLI, sessions, providers
-- **`docs/`** — Windows install, macOS install, local OpenAI-compatible providers, file-context, containers, the built-in web UI
+- **`rust/`** — the Rust workspace and the `cloudling` CLI + server binary (the canonical implementation).
+- **`USAGE.md`** — CLI commands (`cloudling doctor`, `cloudling prompt`), providers, sessions, Windows/PowerShell notes.
+- **`docs/`** — Windows, macOS, local OpenAI-compatible providers, file-context, containers, the built-in web UI.
 
 ### Credits
 

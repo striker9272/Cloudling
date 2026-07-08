@@ -41,17 +41,18 @@ jobs:
             bin: cloudling.exe
             artifact_name: cloudling-windows-x64.exe
             publish: true
-          # macos-arm64 is disabled until the macOS build is smoke-tested on real
-          # hardware. macOS is publish:false (no asset is attached to the release),
-          # so running the macOS runner — which bills ~10x — produces nothing useful
-          # yet. Re-enable this entry together with flipping publish:true once the
-          # live smoke passes (see BACKLOG / docs/macos.md).
-          # - name: macos-arm64
-          #   os: macos-latest
-          #   target: aarch64-apple-darwin
-          #   bin: cloudling
-          #   artifact_name: cloudling-macos-arm64
-          #   publish: false
+          # macOS (Apple Silicon) is built as a workflow *artifact only* (publish:
+          # false): the .dmg/binary is downloadable from the Actions run for testing,
+          # but is NOT attached to the public release — the tray/packaging are not yet
+          # verified on real hardware and the binary is unsigned (Gatekeeper warns).
+          # Flip publish:true once a live smoke passes and signing is in place
+          # (see BACKLOG / docs/macos.md).
+          - name: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            bin: cloudling
+            artifact_name: cloudling-macos-arm64
+            publish: false
     defaults:
       run:
         working-directory: rust

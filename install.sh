@@ -84,10 +84,18 @@ Options:
   --no-setup-service  Do not run the service wizard; build only.
   --prebuilt      Download a prebuilt release binary instead of building.
   --prebuilt-tag TAG  Release tag to download (default: latest).
+  --repo OWNER/NAME   GitHub repo to download from. Only needed for the no-clone
+                  bootstrap (curl | bash), where there is no git remote to read.
   --              Pass every following argument through to the service installer
                   (rust/scripts/install-openai-service.sh). Implies service setup.
                   Example: ./install.sh --release -- --ui --bind 0.0.0.0:4097 --enable --restart
   -h, --help      Show this help text and exit.
+
+No-clone bootstrap (prebuilt binary, no repository checkout):
+  curl -fsSL https://raw.githubusercontent.com/OWNER/NAME/main/install.sh \\
+    | bash -s -- --prebuilt --repo OWNER/NAME -- \\
+        --base-url http://127.0.0.1:8000/v1 --backend-model MODEL \\
+        --served-model-id cloudling --enable --restart
 
 Environment overrides:
   CLOUDLING_BUILD_PROFILE   debug | release
@@ -96,6 +104,7 @@ Environment overrides:
   CLOUDLING_SETUP_SERVICE   yes | no   (default: ask interactively, Linux only)
   CLOUDLING_PREBUILT        set to 1 to download a prebuilt binary
   CLOUDLING_PREBUILT_TAG    release tag to download (default: latest)
+  CLOUDLING_REPO            owner/name for the no-clone bootstrap (same as --repo)
 EOF
 }
 
@@ -109,6 +118,11 @@ INSTALL_DEPS="${CLOUDLING_INSTALL_DEPS:-ask}"
 SETUP_SERVICE="${CLOUDLING_SETUP_SERVICE:-ask}"
 PREBUILT="${CLOUDLING_PREBUILT:-0}"
 PREBUILT_TAG="${CLOUDLING_PREBUILT_TAG:-}"
+# owner/name of the GitHub repo. Normally derived from the checkout's git remote (so
+# forks work with no edits); needed explicitly only in the no-clone bootstrap path
+# (`curl … | bash`), where there is no git remote to read. Kept out of the script as a
+# constant on purpose — portability. Pass --repo owner/name or set CLOUDLING_REPO.
+REPO_SLUG="${CLOUDLING_REPO:-}"
 # Arguments after a literal `--` are forwarded verbatim to install-openai-service.sh.
 SERVICE_ARGS=()
 
@@ -144,6 +158,13 @@ while [ "$#" -gt 0 ]; do
             ;;
         --prebuilt-tag=*)
             PREBUILT_TAG="${1#*=}"
+            ;;
+        --repo)
+            shift
+            REPO_SLUG="${1:-}"
+            ;;
+        --repo=*)
+            REPO_SLUG="${1#*=}"
             ;;
         --)
             shift
@@ -259,8 +280,14 @@ prebuilt_artifact_name() {
     printf 'cloudling-%s-%s' "${os}" "${arch}"
 }
 
-# Derive owner/repo from the checkout's git remote so forks work without edits.
+# Resolve owner/repo. An explicit --repo / CLOUDLING_REPO wins (the no-clone bootstrap
+# has no git remote); otherwise derive it from the checkout's git remote so forks work
+# without edits.
 prebuilt_repo_slug() {
+    if [ -n "${REPO_SLUG}" ]; then
+        printf '%s' "${REPO_SLUG}" | sed -E 's#^.*github\.com[:/]##; s#\.git$##; s#/$##'
+        return 0
+    fi
     local url
     url="$(git -C "${SCRIPT_DIR}" config --get remote.origin.url 2>/dev/null)" || return 1
     [ -n "${url}" ] || return 1
@@ -292,7 +319,8 @@ download_prebuilt() {
         exit 1
     }
     slug="$(prebuilt_repo_slug)" || {
-        error "could not determine the GitHub repo from the git remote; use a source build"
+        error "could not determine the GitHub repo. In a checkout it is read from the git"
+        error "remote; in the no-clone bootstrap pass --repo owner/name (or set CLOUDLING_REPO)."
         exit 1
     }
     tmp="$(mktemp -d)"
@@ -388,21 +416,24 @@ esac
 
 step "Locating the Rust workspace"
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# When piped (curl | bash) $0 is not a real path; fall back to the current directory.
+SCRIPT_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" || SCRIPT_DIR="${PWD}"
 RUST_DIR="${SCRIPT_DIR}/rust"
+NO_WORKSPACE=0
 
-if [ ! -d "${RUST_DIR}" ]; then
-    error "Could not find rust/ workspace next to install.sh"
-    error "Expected: ${RUST_DIR}"
+if [ -f "${RUST_DIR}/Cargo.toml" ]; then
+    ok "workspace at ${RUST_DIR}"
+elif [ "${PREBUILT}" = "1" ]; then
+    # No checkout next to the script — the no-clone bootstrap. A prebuilt download
+    # needs no workspace; the service wizard is fetched from the repo over the network.
+    NO_WORKSPACE=1
+    info "no local workspace — bootstrap mode (downloading a prebuilt binary, no clone)"
+else
+    error "Could not find the rust/ workspace next to install.sh."
+    error "A source build needs the repository. Clone it first, or run with --prebuilt"
+    error "(optionally --repo owner/name) to download a binary without a clone."
     exit 1
 fi
-
-if [ ! -f "${RUST_DIR}/Cargo.toml" ]; then
-    error "Missing ${RUST_DIR}/Cargo.toml — repository layout looks unexpected."
-    exit 1
-fi
-
-ok "workspace at ${RUST_DIR}"
 
 # ---------------------------------------------------------------------------
 # Step 3: prerequisite checks
@@ -614,7 +645,14 @@ fi  # end prerequisite checks (source build)
 # Step 4: obtain the cloudling binary (build from source or download prebuilt)
 # ---------------------------------------------------------------------------
 
-CLOUDLING_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/cloudling"
+# In a checkout the binary lives under the workspace target dir; in the no-clone
+# bootstrap there is no workspace, so it lands next to the current directory (and is
+# then handed to the service wizard via CLOUDLING_RUNTIME_BIN_SRC).
+if [ "${NO_WORKSPACE}" = "1" ]; then
+    CLOUDLING_BIN="${PWD}/cloudling"
+else
+    CLOUDLING_BIN="${RUST_DIR}/target/${BUILD_PROFILE}/cloudling"
+fi
 
 if [ "${PREBUILT}" = "1" ]; then
     step "Downloading the prebuilt cloudling binary"
@@ -678,6 +716,22 @@ step "Setting up the OpenAI service (optional)"
 
 DO_SETUP=0
 SETUP_SCRIPT="${RUST_DIR}/scripts/install-openai-service.sh"
+
+# Bootstrap (no clone): the wizard isn't on disk, so fetch it from the repo over the
+# network. In a normal checkout the local script exists and this is skipped.
+if [ ! -f "${SETUP_SCRIPT}" ] && [ "${OS_FAMILY}" = "linux" ] && require_cmd curl; then
+    if _slug="$(prebuilt_repo_slug 2>/dev/null)" && [ -n "${_slug}" ]; then
+        _ref="${PREBUILT_TAG:-main}"
+        _wiz_tmp="$(mktemp)"
+        if curl -fsSL -o "${_wiz_tmp}" \
+            "https://raw.githubusercontent.com/${_slug}/${_ref}/rust/scripts/install-openai-service.sh"; then
+            SETUP_SCRIPT="${_wiz_tmp}"
+            info "fetched the service wizard from ${_slug}@${_ref}"
+        else
+            rm -f "${_wiz_tmp}"
+        fi
+    fi
+fi
 
 if [ "${OS_FAMILY}" != "linux" ]; then
     info "service setup is Linux/systemd only — skipping on ${OS_FAMILY}"
