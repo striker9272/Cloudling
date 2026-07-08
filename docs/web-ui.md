@@ -117,10 +117,14 @@ The right-hand drawer groups settings into:
   underlying axes (applied on the next message, no restart):
   - *Read-only* — read and search files anywhere on the machine; no writes or
     shell commands (`CLAW_PERMISSION_MODE=read-only`, `filesystemMode=off`).
-  - *Working folder* — read, write, and run commands confined to a working folder
-    you pick (`danger-full-access` + `filesystemMode=allow-list` with the folder
-    in the allowed roots). A **Browse** button opens a server-side folder picker
-    (lists directories and drives/mounts on the host).
+  - *Working folder* — the built-in file tools (read/write/edit/search) are
+    confined to a working folder you pick (`danger-full-access` + `filesystemMode=allow-list`
+    with the folder in the allowed roots). A **Browse** button opens a server-side folder
+    picker (lists directories and drives/mounts on the host). **Caveat:** shell commands
+    (`bash`) run as your OS user and are **not** OS-confined to the folder — a command can
+    still read/write outside it. Treat the folder as a guardrail for the file tools, not an
+    OS sandbox for the shell. Real command isolation needs Linux namespaces (see the sandbox
+    section) or a container.
   - *Full access* — unrestricted (`danger-full-access`, `filesystemMode=off`).
 
   The working folder is the `workspaceFolder` key in `settings.json`. The bash

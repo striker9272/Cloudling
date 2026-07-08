@@ -66,8 +66,12 @@ addresses are hardcoded.
 The image bakes `sandbox.namespaceRestrictions = false` (via a settings file at `CLAW_CONFIG_HOME=/etc/cloudling`).
 Inside a container the container itself is the isolation boundary, and unprivileged `unshare` user namespaces
 are typically blocked anyway (Docker seccomp; on hosts like Ubuntu 24.04 also AppArmor). Turning namespace
-isolation off makes `cloudling sandbox` report an honest **Active** state with filesystem `workspace-only`
-isolation still on, instead of a noisy fallback warning. The agent's tools run directly inside the container.
+isolation off makes `cloudling sandbox` report an honest **Active** state instead of a noisy fallback warning.
+The agent's tools run directly inside the container.
+
+> Note on the `filesystem` mode: it does **not** confine the agent's filesystem — it only redirects
+> `HOME`/`TMPDIR` into the workspace. Inside the image the real boundary is the container; on a bare host the
+> agent's reach is bounded by the working folder and the permission mode, not by the sandbox's filesystem mode.
 
 ### Published image (GHCR)
 

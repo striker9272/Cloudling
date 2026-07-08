@@ -53,17 +53,23 @@ pub(crate) struct OpenAiServerState {
 }
 
 impl OpenAiServerState {
+    // Lock accessors recover from poisoning (`unwrap_or_else(PoisonError::into_inner)`)
+    // rather than `.expect(...)`. This is a long-lived, unauthenticated serve process: a
+    // single panic elsewhere while holding one of these locks would otherwise poison it and
+    // make EVERY subsequent request panic (one-off fault → permanent outage). The guarded
+    // state is trivial (a model name, a served id, a permission enum, a map of answer
+    // channels), so continuing with the last value is safe and keeps the server serving.
     pub(crate) fn backend_model(&self) -> String {
         self.backend_model
             .read()
-            .expect("backend_model lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
     pub(crate) fn served_model_id(&self) -> String {
         self.served_model_id
             .read()
-            .expect("served_model_id lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
 
@@ -71,7 +77,7 @@ impl OpenAiServerState {
         *self
             .permission_mode
             .read()
-            .expect("permission_mode lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// Register an in-flight interactive question; the returned receiver yields the user's
@@ -83,7 +89,7 @@ impl OpenAiServerState {
         let (tx, rx) = std::sync::mpsc::channel();
         self.pending_questions
             .lock()
-            .expect("pending_questions lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .insert(id, tx);
         rx
     }
@@ -93,7 +99,7 @@ impl OpenAiServerState {
         let sender = self
             .pending_questions
             .lock()
-            .expect("pending_questions lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(id);
         match sender {
             Some(tx) => tx.send(answer).is_ok(),
@@ -105,7 +111,7 @@ impl OpenAiServerState {
     pub(crate) fn clear_pending_question(&self, id: &str) {
         self.pending_questions
             .lock()
-            .expect("pending_questions lock poisoned")
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(id);
     }
 
@@ -115,7 +121,10 @@ impl OpenAiServerState {
     /// model, served id, and permission mode are held here and updated in place.
     pub(crate) fn apply_settings(&self, updates: &std::collections::HashMap<String, String>) {
         if let Some(model) = updates.get("OPENAI_MODEL") {
-            *self.backend_model.write().expect("backend_model lock poisoned") = model.clone();
+            *self
+                .backend_model
+                .write()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = model.clone();
         }
         let backend = self.backend_model();
         let served =
@@ -123,7 +132,7 @@ impl OpenAiServerState {
         *self
             .served_model_id
             .write()
-            .expect("served_model_id lock poisoned") = served;
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = served;
         if let Some(label) = updates
             .get("CLAW_PERMISSION_MODE")
             .and_then(|value| crate::normalize_permission_mode(value))
@@ -131,7 +140,7 @@ impl OpenAiServerState {
             *self
                 .permission_mode
                 .write()
-                .expect("permission_mode lock poisoned") = crate::permission_mode_from_label(label);
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = crate::permission_mode_from_label(label);
         }
     }
 }

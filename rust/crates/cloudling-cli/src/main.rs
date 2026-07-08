@@ -3427,7 +3427,10 @@ fn check_sandbox_health(status: &runtime::SandboxStatus) -> DiagnosticCheck {
         format!("Active           {}", status.active),
         format!("Supported        {}", status.supported),
         format!("Filesystem mode  {}", status.filesystem_mode.as_str()),
-        format!("Filesystem live  {}", status.filesystem_active),
+        // NB: this flag only redirects HOME/TMPDIR into the workspace — it does NOT
+        // confine the filesystem. The agent's reach is bounded by the working folder
+        // and permission mode, not by the sandbox.
+        format!("HOME/TMP redirect {}", status.filesystem_active),
     ];
     if let Some(reason) = &status.fallback_reason {
         details.push(format!("Fallback reason  {reason}"));
@@ -3451,7 +3454,7 @@ fn check_sandbox_health(status: &runtime::SandboxStatus) -> DiagnosticCheck {
     .with_hint(
         // #778: stable remediation hint — sandbox degraded on non-Linux hosts is expected, not an error
         if degraded && !status.supported {
-            "Sandbox namespace isolation requires Linux with `unshare`. On macOS/non-Linux hosts this warning is expected and can be ignored. Filesystem isolation is still active."
+            "Sandbox namespace isolation requires Linux with `unshare`. On macOS/non-Linux hosts this warning is expected and can be ignored. Note: the sandbox does NOT confine the filesystem — it only redirects HOME/TMPDIR into the workspace. The agent's reach is bounded by the working folder and permission mode, not by the sandbox."
         } else if degraded {
             "Check that the `unshare` binary is available and the process has the required capabilities."
         } else {
@@ -8058,10 +8061,11 @@ fn format_sandbox_report(status: &runtime::SandboxStatus) -> String {
   Requested net     {}
   Active net        {}
   Filesystem mode   {}
-  Filesystem active {}
+  HOME/TMP redirect {}
   Allowed mounts    {}
   Markers           {}
-  Fallback reason   {}",
+  Fallback reason   {}
+  Note              filesystem is NOT confined by the sandbox (HOME/TMP redirect only); the agent is bounded by the working folder + permission mode. Network isolation (when active) is real.",
         status.enabled,
         status.active,
         status.supported,
@@ -8136,10 +8140,13 @@ fn sandbox_json_value(status: &runtime::SandboxStatus) -> serde_json::Value {
     // instead of combining enabled/active/supported booleans.
     // ok   = not enabled (not requested), OR enabled and active
     // warn = enabled and supported but not yet active (degraded),
-    //        OR enabled but unsupported on this platform AND filesystem sandbox is active
-    //        (#731: "not supported on macOS" is a degraded state, not a hard error;
-    //         filesystem_active:true means partial containment is working)
-    // error = enabled but unsupported AND no filesystem sandbox either (nothing active)
+    //        OR enabled but unsupported on this platform AND HOME/TMPDIR redirect applies
+    //        (#731: "not supported on macOS" is a degraded state, not a hard error).
+    //        NB: filesystem_active does NOT mean the filesystem is confined — it only
+    //        redirects HOME/TMPDIR into the workspace. Real confinement is the working
+    //        folder + permission mode; namespace/network isolation are the only OS-level
+    //        guarantees and require Linux `unshare`.
+    // error = enabled but unsupported AND not even HOME/TMPDIR redirect (nothing active)
     let top_status = if !status.enabled {
         "ok"
     } else if status.active {
@@ -8147,8 +8154,9 @@ fn sandbox_json_value(status: &runtime::SandboxStatus) -> serde_json::Value {
     } else if status.supported {
         "warn"
     } else if status.filesystem_active {
-        // Platform doesn't support namespace isolation but filesystem sandbox is active:
-        // this is a degraded/partial state, not a hard error.
+        // Platform doesn't support namespace isolation, but the sandbox is enabled and
+        // HOME/TMPDIR redirect still applies: degraded, not a hard error. (This is NOT
+        // filesystem confinement — see note above.)
         "warn"
     } else {
         "error"
