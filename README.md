@@ -72,7 +72,7 @@
 **Готовый бинарник (без Rust).** Проще всего — установщик сам скачает нужный ассет из релиза:
 
 ```bash
-./install.sh --prebuilt              # нужен gh или curl; для приватного репо — авторизованный gh
+./install.sh --prebuilt              # нужен gh или curl
 # конкретная версия: ./install.sh --prebuilt-tag vX.Y.Z
 ```
 
@@ -231,7 +231,7 @@ Two paths: grab a **prebuilt binary** (fast, no Rust) or **build from source**.
 **Prebuilt binary (no Rust).** Easiest — let the installer fetch the right release asset:
 
 ```bash
-./install.sh --prebuilt              # needs gh or curl; for a private repo, an authenticated gh
+./install.sh --prebuilt              # needs gh or curl
 # pin a version: ./install.sh --prebuilt-tag vX.Y.Z
 ```
 

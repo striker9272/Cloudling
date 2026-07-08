@@ -87,8 +87,8 @@ docker run -d -p 4098:4097 \
   ghcr.io/<owner>/<repo>:latest
 ```
 
-Package visibility (private vs public) is controlled in the repository's package settings; a private package
-requires `docker login ghcr.io` with a token that has `read:packages`.
+The published image is public, so `docker pull` needs no authentication. (Image visibility is controlled in the
+package settings; if you keep a package private, pulling requires `docker login ghcr.io` with a `read:packages` token.)
 
 ## Notes
 
