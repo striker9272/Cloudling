@@ -165,6 +165,13 @@ const TOP_LEVEL_FIELDS: &[FieldSpec] = &[
         name: "mcpServers",
         expected: FieldType::Object,
     },
+    // Fork-added (Cloudling): shelf of user-disabled MCP servers. Same shape as
+    // `mcpServers` but never launched — the UI toggle moves servers here so they keep
+    // their config without loading tools into context.
+    FieldSpec {
+        name: "mcpServersDisabled",
+        expected: FieldType::Object,
+    },
     FieldSpec {
         name: "oauth",
         expected: FieldType::Object,

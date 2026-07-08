@@ -536,8 +536,11 @@ fn merge_json_value(base: &mut Value, overlay: &Value) {
 /// `trustedRoots` list and is surfaced to the model as the folder "we work in".
 const UI_CONFIG_KEYS: &[&str] = &["sandbox", "trustedRoots", "permissions", "workspaceFolder"];
 /// Keys the UI owns wholesale: replaced, not merged, on save. `mcpServers` must be
-/// replaceable because a deep merge can never DELETE a server entry.
-const UI_CONFIG_REPLACE_KEYS: &[&str] = &["mcpServers"];
+/// replaceable because a deep merge can never DELETE a server entry. `mcpServersDisabled`
+/// is a fork-side shelf: servers the user turned off keep their full config here but are
+/// NOT under `mcpServers`, so the runtime never launches them and their tools never reach
+/// the model context (the upstream config loader ignores this unknown key).
+const UI_CONFIG_REPLACE_KEYS: &[&str] = &["mcpServers", "mcpServersDisabled"];
 
 pub(super) async fn ui_config_get() -> Response {
     let existing = read_settings_object(&config_settings_path());
@@ -579,6 +582,15 @@ pub(super) async fn ui_config_get() -> Response {
         "mcpServers".to_string(),
         existing
             .get("mcpServers")
+            .cloned()
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
+    );
+    // Fork-side shelf of turned-off servers (see UI_CONFIG_REPLACE_KEYS). Surfaced so the
+    // UI can render them as disabled cards without launching them.
+    out.insert(
+        "mcpServersDisabled".to_string(),
+        existing
+            .get("mcpServersDisabled")
             .cloned()
             .unwrap_or_else(|| Value::Object(serde_json::Map::new())),
     );

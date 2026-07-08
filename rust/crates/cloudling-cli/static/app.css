@@ -204,11 +204,39 @@ body.open-right .drawer.right{transform:translateX(0);}
 .acts button.primary:hover{filter:brightness(.93);}
 .fieldrow{position:relative;}
 .fieldrow input{padding-right:40px;}
-/* MCP server cards (settings → Инструменты) */
-.mcpsrv{border:1px solid var(--line); border-radius:12px; padding:4px 12px 12px; margin-top:10px; background:var(--card);}
-.mcpsrv .m-del{position:absolute; right:5px; top:4px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:var(--muted); cursor:pointer; border-radius:8px; font-size:15px; transition:background .12s,color .12s;}
-.mcpsrv .m-del:hover{background:#2c2129; color:#d97b7b;}
-.mcpempty{color:var(--faint); font-size:13px; padding:10px 2px 2px;}
+/* MCP server cards: connector-style row (icon tile + name + command subtitle + compact
+   toggle); edit/delete fade in on hover before a divider; fields expand inline under the row. */
+.mcpsrv{border:1px solid var(--line); border-radius:12px; margin-top:10px; background:var(--card); transition:border-color .12s, background .12s;}
+.mcpsrv.off{background:var(--s-raise);}
+.mcphd{display:flex; align-items:center; gap:11px; padding:10px 12px; cursor:pointer; user-select:none;}
+.mcptile{flex:none; width:34px; height:34px; border-radius:9px; background:var(--s-hover); border:1px solid var(--line); display:flex; align-items:center; justify-content:center; color:var(--muted);}
+.mcpsrv.off .mcptile{color:var(--env);}
+.mcptile svg{width:17px; height:17px;}
+.mcpmeta{flex:1; min-width:0;}
+/* two lines: name + toggle on top, command + (hover) delete below — the name gets the full width */
+.mcptop{display:flex; align-items:center; gap:8px;}
+.mcpbot{display:flex; align-items:center; gap:8px; margin-top:3px;}
+.mcpname{flex:1; min-width:0; font-size:13.5px; font-weight:500; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.mcpname.ph{color:var(--faint); font-weight:400;}
+.mcpsrv.off .mcpname{color:var(--muted);}
+.mcpsub{flex:1; min-width:0; font-size:11px; color:var(--faint); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-family:var(--mono);}
+.mcpsrv.off .mcpsub{color:var(--env);}
+/* row action buttons — hidden until hover / while the card is open (mirrors preset .pm) */
+.mcm{flex:none; width:26px; height:26px; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:none; border:none; cursor:pointer; opacity:0; transition:opacity .12s, background .12s, color .12s;}
+.mcphd:hover .mcm, .mcpsrv.open .mcm{opacity:1;}
+.mcm:hover{background:var(--s-ctrl); color:var(--text);}
+.mcm.mcdel:hover{background:rgba(224,138,138,.12); color:#e08a8a;}
+.mcm svg{width:16px; height:16px;}
+.mcpbody{display:none; padding:2px 12px 13px; border-top:1px solid var(--line);}
+.mcpsrv.open .mcpbody{display:block;}
+.mcpsrv.off .mcpbody{opacity:.72;}
+.mcpempty{color:var(--faint); font-size:13px; padding:12px 2px 2px;}
+/* shared row bits: compact switch variant + hover-reveal vertical divider (preset & MCP rows) */
+.switch.sm{width:32px; height:18px;}
+.switch.sm .track::after{width:12px; height:12px;}
+.switch.sm input:checked + .track::after{transform:translateX(14px);}
+.rowdiv{flex:none; width:1px; height:18px; background:var(--line2); margin:0 3px 0 6px; opacity:0; transition:opacity .12s;}
+.prow:hover .rowdiv{opacity:1;}
 .verify{position:absolute; right:5px; top:4px; width:30px; height:30px; display:flex; align-items:center; justify-content:center; background:none; border:none; color:var(--muted); cursor:pointer; border-radius:8px; transition:background .12s,color .12s;}
 .verify:hover{background:var(--s-hover); color:var(--text);}
 .verify.spin svg{animation:spin360 .9s linear infinite;}
@@ -305,6 +333,8 @@ body.open-right .drawer.right{transform:translateX(0);}
 .prow .pm{width:24px; height:24px; border-radius:7px; display:flex; align-items:center; justify-content:center; color:var(--muted); background:none; border:none; cursor:pointer; opacity:0; transition:opacity .12s,background .12s;}
 .prow:hover .pm{opacity:1;}
 .prow .pm:hover{background:var(--s-ctrl); color:var(--text);}
+.prow .pdel:hover{background:rgba(224,138,138,.12); color:#e08a8a;}
+.prow .switch{flex:none;}
 .padd{font-size:12.5px; color:var(--muted); border:1px dashed #34343c; border-radius:10px; padding:9px; text-align:center; cursor:pointer; margin-top:8px; transition:background .12s,color .12s;}
 .padd:hover{background:var(--s-low); color:var(--text);}
 

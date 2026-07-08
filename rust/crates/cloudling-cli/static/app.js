@@ -51,6 +51,7 @@
       'setup.openSettings':'Open settings','setup.hint':'These live under “General” (the gear on the right).',
       'preset.namePh':'Preset name','preset.promptPh':'Describe how cloudling should behave in this preset…',
       'preset.none':'No preset','preset.new':'+ New preset','preset.unnamed':'Unnamed',
+      'preset.applyTitle':'Apply this preset — off means no system prompt is sent',
       'confirm.delTitle':'Delete chat?','confirm.delBody':'“{title}” will be deleted permanently.',
       'token.title':'Access token required',
       'token.text':'The server protects the interface’s service functions with a token. Enter the CLOUDLING_UI_TOKEN value from the service settings file — the browser will remember it.',
@@ -82,6 +83,7 @@
       'size.b':'B','size.kb':'KB','size.mb':'MB',
       'menu.pin':'Pin','menu.unpin':'Unpin','edit.saveSend':'Save & send',
       'mcp.name':'Server name','mcp.namePh':'e.g. filesystem','mcp.delServer':'Delete server',
+      'mcp.newServer':'New server','mcp.enabledTitle':'Enabled — off means the server is not launched and its tools are not loaded into context',
       'mcp.command':'Command','mcp.args':'Arguments — one per line','mcp.framing':'Framing',
       'mcp.framingNewline':'standard MCP (newline)','mcp.framingLegacy':'legacy (content-length)',
       'mcp.timeout':'Call timeout, ms','mcp.empty':'No servers configured.',
@@ -135,6 +137,7 @@
       'setup.openSettings':'Открыть настройки','setup.hint':'Эти настройки — в разделе «Основное» (шестерёнка справа).',
       'preset.namePh':'Имя пресета','preset.promptPh':'Опиши, как cloudling должен себя вести в этом пресете…',
       'preset.none':'Без пресета','preset.new':'+ Новый пресет','preset.unnamed':'Без имени',
+      'preset.applyTitle':'Применить этот пресет — «выкл» значит система идёт без системного промпта',
       'confirm.delTitle':'Удалить диалог?','confirm.delBody':'«{title}» будет удалён без возможности восстановления.',
       'token.title':'Нужен токен доступа',
       'token.text':'Сервер защищает служебные функции интерфейса токеном. Введи значение CLOUDLING_UI_TOKEN из файла настроек сервиса — браузер запомнит его.',
@@ -166,6 +169,7 @@
       'size.b':'Б','size.kb':'КБ','size.mb':'МБ',
       'menu.pin':'Закрепить','menu.unpin':'Открепить','edit.saveSend':'Сохранить и отправить',
       'mcp.name':'Имя сервера','mcp.namePh':'например, filesystem','mcp.delServer':'Удалить сервер',
+      'mcp.newServer':'Новый сервер','mcp.enabledTitle':'Включён — «выкл» значит сервер не запускается и его инструменты не грузятся в контекст',
       'mcp.command':'Команда','mcp.args':'Аргументы — по одному на строку','mcp.framing':'Фрейминг',
       'mcp.framingNewline':'стандартный MCP (newline)','mcp.framingLegacy':'legacy (content-length)',
       'mcp.timeout':'Таймаут вызова, мс','mcp.empty':'Серверы не настроены.',
@@ -1406,21 +1410,57 @@
   });
 
   /* ---------- tools section: MCP servers (settings.json mcpServers, no restart) ---------- */
-  var mcpServers=[]; /* [{name, command, args[], framing, timeout}] — DOM is source of truth after render */
+  var mcpServers=[]; /* [{name, command, args[], framing, timeout, enabled, expanded}] — DOM is source of truth after render */
+  var MCP_TILE_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg>';
   function mcpRow(s){
-    var d=document.createElement('div'); d.className='mcpsrv';
+    var enabled=s.enabled!==false;
+    var d=document.createElement('div'); d.className='mcpsrv'+(enabled?'':' off')+(s.expanded?' open':'');
     d.innerHTML=
-      '<div class="fld fieldrow" style="margin-top:8px;"><div class="lab">'+t('mcp.name')+'</div><input class="m-name" placeholder="'+escAttr(t('mcp.namePh'))+'" /><button class="m-del" type="button" title="'+escAttr(t('mcp.delServer'))+'" aria-label="'+escAttr(t('mcp.delServer'))+'">✕</button></div>'+
-      '<div class="fld"><div class="lab">'+t('mcp.command')+'</div><input class="m-cmd" placeholder="python3" /></div>'+
-      '<div class="fld"><div class="lab">'+t('mcp.args')+'</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
-      '<div class="fld"><div class="lab">'+t('mcp.framing')+' <span class="env">framing</span></div><select class="m-framing"><option value="newline">'+t('mcp.framingNewline')+'</option><option value="content-length">'+t('mcp.framingLegacy')+'</option></select></div>'+
-      '<div class="fld"><div class="lab">'+t('mcp.timeout')+' <span class="env">toolCallTimeoutMs</span></div><input class="m-timeout" type="number" min="1" placeholder="60000" /></div>';
-    d.querySelector('.m-name').value=s.name||'';
-    d.querySelector('.m-cmd').value=s.command||'';
-    d.querySelector('.m-args').value=(s.args||[]).join('\n');
+      '<div class="mcphd">'+
+        '<span class="mcptile" aria-hidden="true">'+MCP_TILE_ICON+'</span>'+
+        '<div class="mcpmeta">'+
+          '<div class="mcptop">'+
+            '<div class="mcpname"></div>'+
+            '<label class="switch sm" title="'+escAttr(t('mcp.enabledTitle'))+'"><input type="checkbox" class="m-enabled"'+(enabled?' checked':'')+' aria-label="'+escAttr(t('mcp.enabledTitle'))+'" /><span class="track"></span></label>'+
+          '</div>'+
+          '<div class="mcpbot">'+
+            '<div class="mcpsub"></div>'+
+            '<button class="mcm mcdel" type="button" title="'+escAttr(t('mcp.delServer'))+'" aria-label="'+escAttr(t('mcp.delServer'))+'">'+IC.trash+'</button>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="mcpbody">'+
+        '<div class="fld"><div class="lab">'+t('mcp.name')+'</div><input class="m-name" placeholder="'+escAttr(t('mcp.namePh'))+'" /></div>'+
+        '<div class="fld"><div class="lab">'+t('mcp.command')+'</div><input class="m-cmd" placeholder="python3" /></div>'+
+        '<div class="fld"><div class="lab">'+t('mcp.args')+'</div><textarea class="cfgta m-args" placeholder="/path/to/server.py"></textarea></div>'+
+        '<div class="fld"><div class="lab">'+t('mcp.framing')+' <span class="env">framing</span></div><select class="m-framing"><option value="newline">'+t('mcp.framingNewline')+'</option><option value="content-length">'+t('mcp.framingLegacy')+'</option></select></div>'+
+        '<div class="fld"><div class="lab">'+t('mcp.timeout')+' <span class="env">toolCallTimeoutMs</span></div><input class="m-timeout" type="number" min="1" placeholder="60000" /></div>'+
+      '</div>';
+    var nameInp=d.querySelector('.m-name');
+    var cmdInp=d.querySelector('.m-cmd');
+    var argsTa=d.querySelector('.m-args');
+    nameInp.value=s.name||'';
+    cmdInp.value=s.command||'';
+    argsTa.value=(s.args||[]).join('\n');
     d.querySelector('.m-framing').value=(s.framing==='content-length')?'content-length':'newline';
     if(s.timeout) d.querySelector('.m-timeout').value=s.timeout;
-    d.querySelector('.m-del').addEventListener('click', function(){ d.remove(); mcpToggleEmpty(); });
+    var nameLbl=d.querySelector('.mcpname'), subLbl=d.querySelector('.mcpsub');
+    function syncMeta(){
+      var v=(nameInp.value||'').trim();
+      if(v){ nameLbl.textContent=v; nameLbl.classList.remove('ph'); } else { nameLbl.textContent=t('mcp.newServer'); nameLbl.classList.add('ph'); }
+      var cmd=(cmdInp.value||'').trim(), args=linesToArray(argsTa.value);
+      subLbl.textContent = cmd ? (cmd + (args.length ? ' · '+args.join(' ') : '')) : '';
+    }
+    syncMeta();
+    nameInp.addEventListener('input', syncMeta);
+    cmdInp.addEventListener('input', syncMeta);
+    argsTa.addEventListener('input', syncMeta);
+    function toggleOpen(){ d.classList.toggle('open'); }
+    /* row click expands the fields — except on the switch or an action button */
+    d.querySelector('.mcphd').addEventListener('click', function(ev){ if(ev.target.closest('.switch')||ev.target.closest('.mcm')) return; toggleOpen(); });
+    d.querySelector('.mcdel').addEventListener('click', function(ev){ ev.stopPropagation(); d.remove(); mcpToggleEmpty(); });
+    var chk=d.querySelector('.m-enabled');
+    chk.addEventListener('change', function(){ d.classList.toggle('off', !chk.checked); });
     return d;
   }
   function mcpToggleEmpty(){
@@ -1436,14 +1476,16 @@
     mcpToggleEmpty();
   }
   function mcpStatus(ok,text){ var m=document.getElementById('mcpMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2400); }
-  document.getElementById('mcpAdd').addEventListener('click', function(){
+  function mcpAddServer(){
     var list=document.getElementById('mcpList');
-    list.appendChild(mcpRow({name:'', command:'', args:[], framing:'newline'}));
+    list.appendChild(mcpRow({name:'', command:'', args:[], framing:'newline', enabled:true, expanded:true}));
     mcpToggleEmpty();
-  });
+  }
+  document.getElementById('mcpAdd').addEventListener('click', mcpAddServer);
+  document.getElementById('mcpAdd').addEventListener('keydown', function(ev){ if(ev.key==='Enter'||ev.key===' '){ ev.preventDefault(); mcpAddServer(); } });
   document.getElementById('mcpSave').addEventListener('click', function(){
     var btn=this; document.getElementById('mcpMsg').hidden=true;
-    var out={}, err=null;
+    var out={}, outDisabled={}, err=null;
     document.querySelectorAll('#mcpList .mcpsrv').forEach(function(d){
       if(err) return;
       var name=(d.querySelector('.m-name').value||'').trim();
@@ -1451,16 +1493,18 @@
       if(!name && !cmd) return; /* пустая карточка — игнорируем */
       if(!name || !cmd){ err=t('mcp.errNameCmd'); return; }
       if(!/^[A-Za-z0-9_-]+$/.test(name)){ err=t('mcp.errNameChars',{name:name}); return; }
-      if(out[name]){ err=t('mcp.errNameUniq',{name:name}); return; }
+      if(out[name]||outDisabled[name]){ err=t('mcp.errNameUniq',{name:name}); return; }
       var entry={ command: cmd };
       var args=linesToArray(d.querySelector('.m-args').value); if(args.length) entry.args=args;
       if(d.querySelector('.m-framing').value==='content-length') entry.framing='content-length';
       var to=parseInt(d.querySelector('.m-timeout').value,10); if(to>0) entry.toolCallTimeoutMs=to;
-      out[name]=entry;
+      /* enabled → mcpServers (runtime loads it); disabled → mcpServersDisabled shelf
+         (kept in settings.json but never launched, so zero tools/tokens in context) */
+      if(d.querySelector('.m-enabled').checked) out[name]=entry; else outDisabled[name]=entry;
     });
     if(err){ mcpStatus(false, err); return; }
     btn.disabled=true;
-    uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mcpServers:out})})
+    uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mcpServers:out, mcpServersDisabled:outDisabled})})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ btn.disabled=false; mcpStatus(true,t('settings.savedNextMsg')); })
       .catch(function(e){ btn.disabled=false; mcpStatus(false,t('settings.saveErr',{msg:((e&&e.message)||'')})); });
@@ -1506,9 +1550,10 @@
       var perms=c.permissions||{};
       document.getElementById('cfgAllow').value=(perms.allow||[]).join('\n');
       document.getElementById('cfgDeny').value=(perms.deny||[]).join('\n');
-      var ms=c.mcpServers||{};
-      mcpServers=Object.keys(ms).map(function(n){ var e=ms[n]||{};
-        return { name:n, command:e.command||'', args:e.args||[], framing:e.framing||'newline', timeout:e.toolCallTimeoutMs }; });
+      var ms=c.mcpServers||{}, md=c.mcpServersDisabled||{};
+      function toRow(map,on){ return Object.keys(map).map(function(n){ var e=map[n]||{};
+        return { name:n, command:e.command||'', args:e.args||[], framing:e.framing||'newline', timeout:e.toolCallTimeoutMs, enabled:on, expanded:false }; }); }
+      mcpServers=toRow(ms,true).concat(toRow(md,false));
       renderMcp();
       updateAccessNote();
     }).catch(function(){});
@@ -1701,18 +1746,30 @@
     for(var i=0;i<presets.length;i++){ if(presets[i].id===activePresetId){ nm=presets[i].name; break; } }
     document.querySelectorAll('.entry .model').forEach(function(m){ m.innerHTML='<span class="dot"></span>'+esc(nm); }); }
 
+  /* Toggling a preset's switch: turn it on → it becomes the active system prompt (others off);
+     turn the active one off → no system prompt is applied, but the choice is remembered so you
+     can flip it back on without recreating an empty preset. */
+  function togglePreset(id){
+    var next=(activePresetId===id)?null:id;
+    setActivePreset(next).then(function(){ renderPresetList(); updateChip(); });
+  }
   function renderPresetList(){
     presetList.innerHTML='';
     presets.forEach(function(p){
-      var row=document.createElement('div'); row.className='prow'+(p.id===activePresetId?' active':'');
-      row.innerHTML='<span class="pdot"></span><span class="pn">'+esc(p.name)+'</span>'+
+      var isActive=p.id===activePresetId;
+      var row=document.createElement('div'); row.className='prow'+(isActive?' active':'');
+      row.innerHTML='<span class="pn">'+esc(p.name)+'</span>'+
         '<button class="pm pedit" title="'+escAttr(t('common.edit'))+'" aria-label="'+escAttr(t('common.edit'))+'">'+IC.edit+'</button>'+
-        '<button class="pm pdel" title="'+escAttr(t('common.delete'))+'" aria-label="'+escAttr(t('common.delete'))+'">'+IC.trash+'</button>';
+        '<button class="pm pdel" title="'+escAttr(t('common.delete'))+'" aria-label="'+escAttr(t('common.delete'))+'">'+IC.trash+'</button>'+
+        '<span class="rowdiv" aria-hidden="true"></span>'+
+        '<label class="switch sm" title="'+escAttr(t('preset.applyTitle'))+'"><input type="checkbox" class="psw"'+(isActive?' checked':'')+' aria-label="'+escAttr(t('preset.applyTitle'))+'" /><span class="track"></span></label>';
       row.addEventListener('click', function(e){
         if(e.target.closest('.pedit')){ openPresetEditor(p.id); return; }
         if(e.target.closest('.pdel')){ deletePresetReq(p.id).then(loadPresets); return; }
-        setActivePreset(p.id).then(function(){ renderPresetList(); updateChip(); });
+        if(e.target.closest('.switch')) return; /* handled by the switch's change event */
+        togglePreset(p.id);
       });
+      row.querySelector('.psw').addEventListener('change', function(){ togglePreset(p.id); });
       presetList.appendChild(row);
     });
     var add=document.createElement('div'); add.className='padd'; add.textContent=t('preset.new');
@@ -1744,7 +1801,10 @@
       return list;
     }).then(function(list){ presets=Array.isArray(list)?list:[];
       return pFetchJSON('/ui/kv/active_preset');
-    }).then(function(kv){ activePresetId=(kv&&kv.value)?kv.value:(presets[0]?presets[0].id:null);
+    }).then(function(kv){
+      /* Distinguish "explicitly turned off" (kv exists with empty value → no active preset)
+         from "never chosen" (no kv yet → default to the first preset on first run). */
+      activePresetId=(kv&&('value' in kv))?(kv.value||null):(presets[0]?presets[0].id:null);
       renderPresetList(); updateChip();
     });
   }
