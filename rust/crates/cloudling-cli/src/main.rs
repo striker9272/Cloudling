@@ -6148,12 +6148,9 @@ impl LiveCli {
                 // ============================================================================
 
                 let error_str = error.to_string();
-                // Detect context window overflow. Some providers (e.g. OpenAI-compat backends)
-                // return 400 with "no parseable body" instead of a proper context_length_exceeded
-                // error when the request is too large to even parse — treat that as context overflow too.
-                let is_context_window = error_str.contains("context_window")
-                    || error_str.contains("Context window")
-                    || error_str.contains("no parseable body");
+                // Detect context window overflow (shared helper: also covers OpenAI-compat
+                // backends that answer an oversized request with 400 + "no parseable body").
+                let is_context_window = crate::engine::is_context_window_error(&error_str);
 
                 if is_context_window {
                     // A single compaction pass may not free enough context space.
@@ -6235,9 +6232,8 @@ impl LiveCli {
                             }
                             Err(retry_error) => {
                                 let retry_str = retry_error.to_string();
-                                let still_context_window = retry_str.contains("context_window")
-                                    || retry_str.contains("Context window")
-                                    || retry_str.contains("no parseable body");
+                                let still_context_window =
+                                    crate::engine::is_context_window_error(&retry_str);
 
                                 if still_context_window && round + 1 < max_compact_rounds {
                                     // The compacted session was still too large for the model's context.

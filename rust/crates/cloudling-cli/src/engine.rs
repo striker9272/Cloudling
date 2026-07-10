@@ -21,6 +21,12 @@ pub struct ClawEngineUsage {
 pub struct ClawEngineAutoCompaction {
     pub removed_messages: usize,
     pub notice: String,
+    /// True when the compaction was *reactive*: the backend rejected the request as over
+    /// its context window and the turn was retried after folding older messages (as opposed
+    /// to the proactive in-turn threshold compaction). Additive field — absent in older
+    /// JSON output, so it defaults to false on deserialize.
+    #[serde(default)]
+    pub reactive: bool,
 }
 
 /// Non-streaming engine response.
@@ -53,6 +59,7 @@ impl ClawEngineResponse {
                 .map(|event| ClawEngineAutoCompaction {
                     removed_messages: event.removed_message_count,
                     notice: format_auto_compaction_notice(event.removed_message_count),
+                    reactive: false,
                 }),
             tool_uses: collect_tool_uses(summary),
             tool_results: collect_tool_results(summary),
@@ -97,6 +104,12 @@ trait EngineHost {
     fn workspace_root(&self) -> Option<&Path> {
         None
     }
+    /// The host's stored (pre-turn) session — the state a retry would rebuild from.
+    /// Used by the reactive compact-and-retry below.
+    fn engine_session(&self) -> &runtime::Session;
+    /// Replace the host's stored session (with a compacted copy) so the next
+    /// `prepare_engine_runtime` builds from the smaller history.
+    fn adopt_engine_session(&mut self, session: runtime::Session);
 }
 
 impl EngineHost for crate::LiveCli {
@@ -125,6 +138,46 @@ impl EngineHost for crate::LiveCli {
     fn persist_engine_session(&self) -> Result<(), Box<dyn std::error::Error>> {
         self.persist_session()
     }
+
+    fn engine_session(&self) -> &runtime::Session {
+        self.runtime.session()
+    }
+
+    fn adopt_engine_session(&mut self, session: runtime::Session) {
+        *self.runtime.session_mut() = session;
+    }
+}
+
+/// Backend "context window exceeded" detection shared by the reactive compact-and-retry
+/// paths (the interactive REPL in `main.rs` and the engine hosts here). String-level on
+/// purpose: by the time errors leave the runtime they are boxed and stringified. The
+/// "no parseable body" marker covers OpenAI-compat backends that answer an oversized
+/// request with a 400 and an unparseable body instead of a proper context-length error.
+///
+/// The marker list is a deliberately NARROWER cousin of `CONTEXT_WINDOW_ERROR_MARKERS`
+/// in `api/src/error.rs`: there the broad markers ("prompt tokens", "configured limit",
+/// "messages resulted in", …) are safe because they are gated on HTTP 400/413/422; here
+/// we only have a flat string, so we keep the phrasings that unambiguously mean overflow
+/// (OpenAI/vLLM "maximum context length", Anthropic "prompt is too long", llama.cpp
+/// "exceeds the available context size", …). A false positive costs a wasted compaction
+/// round and a degraded-history retry, so precision beats recall.
+pub(crate) fn is_context_window_error(message: &str) -> bool {
+    if message.contains("context_window") || message.contains("no parseable body") {
+        return true;
+    }
+    const MARKERS: &[&str] = &[
+        "maximum context length",
+        "context window",
+        "context length",
+        "too many tokens",
+        "prompt is too long",
+        "input is too long",
+        "input tokens exceed",
+        "request is too large",
+        "exceeds the available context size",
+    ];
+    let lower = message.to_lowercase();
+    MARKERS.iter().any(|marker| lower.contains(marker))
 }
 
 fn run_prompt_with_host<H: EngineHost>(
@@ -137,10 +190,18 @@ fn run_prompt_with_host<H: EngineHost>(
 fn run_prompt_with_host_and_event_sink<H: EngineHost>(
     host: &mut H,
     blocks: Vec<ContentBlock>,
-    event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
+    mut event_sink: Option<&mut dyn FnMut(&AssistantEvent)>,
 ) -> Result<ClawEngineResponse, Box<dyn std::error::Error>> {
-    let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
-    let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
+    // Reactive compact-and-retry (window-agnostic safety net, mirrors the interactive
+    // REPL recovery in `main.rs`): when the backend rejects the request as over its
+    // context window, fold older messages out of the host's stored session and retry
+    // the same turn. Progressive rounds preserve fewer recent messages each time
+    // (4 → 2 → 1 → 0), trading continuity for a smaller payload until it fits.
+    // Works without knowing the window size — the backend's own rejection is the signal.
+    const PRESERVE_SCHEDULE: [usize; 4] = [4, 2, 1, 0];
+    let mut schedule_pos = 0usize;
+    // Total messages folded by reactive rounds, reported to the caller on success.
+    let mut reactive_removed = 0usize;
 
     let workspace_root = host.workspace_root().map(Path::to_path_buf);
     let _workspace_guard = runtime::scoped_workspace_root(workspace_root.clone());
@@ -150,31 +211,92 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
         runtime::load_filesystem_policy_for(workspace_root.as_deref()),
     ));
 
-    // The current turn is carried as content blocks (text + any image attachments) so a
-    // vision backend receives the images; the text-only callers wrap input in one Text block.
-    let result =
-        runtime.run_turn_blocks_with_event_sink(blocks, Some(&mut permission_prompter), event_sink);
+    loop {
+        let (mut runtime, hook_abort_monitor) = host.prepare_engine_runtime(false)?;
+        let mut permission_prompter = crate::CliPermissionPrompter::new(host.permission_mode());
 
-    hook_abort_monitor.stop();
+        // The current turn is carried as content blocks (text + any image attachments) so a
+        // vision backend receives the images; the text-only callers wrap input in one Text
+        // block. Cloned because a compact-and-retry round re-sends the same turn. The event
+        // sink is manually reborrowed per iteration (a plain move would end the loop at one pass).
+        let sink: Option<&mut dyn FnMut(&AssistantEvent)> = match event_sink.as_mut() {
+            Some(sink) => Some(&mut **sink),
+            None => None,
+        };
+        let result = runtime.run_turn_blocks_with_event_sink(
+            blocks.clone(),
+            Some(&mut permission_prompter),
+            sink,
+        );
 
-    let summary = match result {
-        Ok(summary) => summary,
-        Err(error) => {
-            // On the success path `replace_engine_runtime` shuts down the OLD runtime's
-            // plugins; on an errored turn that swap never happens and this freshly built
-            // runtime is dropped instead. Shut its plugins down here so a failed turn
-            // doesn't leak plugin processes (one per failed request otherwise).
-            let _ = runtime.shutdown_plugins();
+        hook_abort_monitor.stop();
+
+        let error = match result {
+            Ok(summary) => {
+                host.replace_engine_runtime(runtime)?;
+                host.persist_engine_session()?;
+                let mut response =
+                    ClawEngineResponse::from_turn_summary(host.model(), &summary);
+                if reactive_removed > 0 {
+                    // Fold the reactive rounds into the compaction report (the proactive
+                    // in-turn compaction may have fired on the retry as well — sum both).
+                    let removed = reactive_removed
+                        + response
+                            .auto_compaction
+                            .as_ref()
+                            .map_or(0, |c| c.removed_messages);
+                    response.auto_compaction = Some(ClawEngineAutoCompaction {
+                        removed_messages: removed,
+                        notice: format_reactive_compaction_notice(removed),
+                        reactive: true,
+                    });
+                }
+                return Ok(response);
+            }
+            Err(error) => {
+                // On the success path `replace_engine_runtime` shuts down the OLD runtime's
+                // plugins; on an errored turn that swap never happens and this freshly built
+                // runtime is dropped instead. Shut its plugins down here so a failed turn
+                // doesn't leak plugin processes (one per failed request otherwise).
+                let _ = runtime.shutdown_plugins();
+                error
+            }
+        };
+
+        if !is_context_window_error(&error.to_string()) {
             return Err(error.into());
         }
-    };
-    host.replace_engine_runtime(runtime)?;
-    host.persist_engine_session()?;
 
-    Ok(ClawEngineResponse::from_turn_summary(
-        host.model(),
-        &summary,
-    ))
+        // Compact the host's stored (pre-turn) session. Walk the schedule until a round
+        // actually removes messages — retrying an identical request is pointless.
+        let mut compaction = None;
+        while schedule_pos < PRESERVE_SCHEDULE.len() {
+            let preserve = PRESERVE_SCHEDULE[schedule_pos];
+            schedule_pos += 1;
+            let result = runtime::trident::trident_compact_session(
+                host.engine_session(),
+                runtime::CompactionConfig {
+                    preserve_recent_messages: preserve,
+                    max_estimated_tokens: 0,
+                },
+                &runtime::trident::TridentConfig::default(),
+            );
+            if result.removed_message_count > 0 {
+                compaction = Some(result);
+                break;
+            }
+        }
+        let Some(compaction) = compaction else {
+            // Schedule exhausted or nothing left to fold — surface the original error.
+            return Err(error.into());
+        };
+        eprintln!(
+            "cloudling engine: context window exceeded; reactive compaction folded {} messages, retrying",
+            compaction.removed_message_count
+        );
+        reactive_removed += compaction.removed_message_count;
+        host.adopt_engine_session(compaction.compacted_session);
+    }
 }
 
 /// Standalone engine host for non-REPL callers.
@@ -350,6 +472,14 @@ impl EngineHost for ClawEngineSession {
     fn workspace_root(&self) -> Option<&Path> {
         Some(&self.working_dir)
     }
+
+    fn engine_session(&self) -> &runtime::Session {
+        self.runtime.session()
+    }
+
+    fn adopt_engine_session(&mut self, session: runtime::Session) {
+        *self.runtime.session_mut() = session;
+    }
 }
 
 /// Execute one prompt through the existing CLI runtime state and return the
@@ -448,6 +578,15 @@ pub fn format_auto_compaction_notice(removed_message_count: usize) -> String {
     )
 }
 
+/// Notice for the *reactive* recovery: the backend rejected the request as over its
+/// context window, older messages were folded, and the turn was retried successfully.
+#[must_use]
+pub fn format_reactive_compaction_notice(removed_message_count: usize) -> String {
+    format!(
+        "Context exceeded the model window; auto-compacted {removed_message_count} older messages and retried."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,6 +598,29 @@ mod tests {
             output_tokens: 5,
             cache_creation_input_tokens: 0,
             cache_read_input_tokens: 0,
+        }
+    }
+
+    #[test]
+    fn context_window_error_detection_covers_real_backend_phrasings() {
+        // Real-world rejections that MUST trigger the reactive compact-and-retry.
+        for message in [
+            "api returned 400 Bad Request: This model's maximum context length is 200000 tokens, but your request used 230000 tokens.", // OpenAI/vLLM
+            "api returned 400 Bad Request: the request exceeds the available context size, try increasing it", // llama.cpp
+            "api returned 400 Bad Request: prompt is too long: 210000 tokens > 200000 maximum", // Anthropic-style
+            "Context window blocked: estimated 230000 tokens over the 200000 limit",  // CLI preflight
+            "context_window_blocked",
+            "api returned 400 Bad Request ...: no parseable body",
+        ] {
+            assert!(is_context_window_error(message), "missed: {message}");
+        }
+        // Ordinary failures that must NOT trigger a pointless compaction round.
+        for message in [
+            "api failed after 4 attempts: api returned 429 Too Many Requests: provider rate-limited the request",
+            "api returned 500 Internal Server Error: something went wrong",
+            "connection refused",
+        ] {
+            assert!(!is_context_window_error(message), "false positive: {message}");
         }
     }
 

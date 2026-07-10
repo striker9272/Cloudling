@@ -405,16 +405,30 @@ fn stream_chat_completions(
                 // invisible event shows up in both the chat and the service logs.
                 if let Some(compaction) = &response.auto_compaction {
                     eprintln!(
-                        "cloudling openai-serve: auto-compaction fired (removed {} messages)",
-                        compaction.removed_messages
+                        "cloudling openai-serve: auto-compaction fired (removed {} messages, reactive: {})",
+                        compaction.removed_messages, compaction.reactive
                     );
-                    let _ = sender.send(openai_sse_chunk(
-                        &id,
-                        created,
-                        &response_model,
-                        Some(format!("\n\n> {}", compaction.notice)),
-                        None,
-                    ));
+                    if interactive_ui && compaction.reactive {
+                        // Built-in UI + reactive recovery: send a structured marker instead
+                        // of notice text. The client reacts by folding its stored history
+                        // (its own persistent compaction + banner), so the rescue doesn't
+                        // have to repeat on every following turn — serve is stateless and
+                        // cannot shorten the client's transcript itself.
+                        let _ = sender.send(openai_sse_reactive_compaction_chunk(
+                            &id,
+                            created,
+                            &response_model,
+                            compaction.removed_messages,
+                        ));
+                    } else {
+                        let _ = sender.send(openai_sse_chunk(
+                            &id,
+                            created,
+                            &response_model,
+                            Some(format!("\n\n> {}", compaction.notice)),
+                            None,
+                        ));
+                    }
                 }
                 // prompt_tokens = context size = the LAST model call's prompt (evaluated input +
                 // cache-created + cache-read), captured from the final Usage event. `response.usage`
@@ -906,6 +920,28 @@ fn openai_sse_chunk_with_delta(
         usage: None,
         error: None,
     })
+}
+
+/// Out-of-band marker for the built-in UI: a *reactive* server-side compaction fired
+/// (the backend rejected the request as over its context window; the turn was retried
+/// after folding older messages). Shaped as a normal `chat.completion.chunk` with an
+/// empty delta plus a `cloudling` extension field: OpenAI clients ignore unknown
+/// top-level fields, while the built-in UI folds its stored history in response
+/// (see `maybeAutoCompact`/`compactNow` in `static/app.js`).
+fn openai_sse_reactive_compaction_chunk(
+    id: &str,
+    created: u64,
+    model: &str,
+    removed_messages: usize,
+) -> Result<Event, Infallible> {
+    sse_json_event(&serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": null}],
+        "cloudling": {"reactive_compaction": {"removed_messages": removed_messages}}
+    }))
 }
 
 /// Final stream chunk carrying token usage (OpenAI `include_usage` shape). `prompt_tokens`

@@ -482,6 +482,7 @@ The HTTP client that talks to your model backend has a tunable connect timeout a
 | `CLOUDLING_BACKEND_MAX_RETRIES` | `3` | Retries on a retryable failure (connection refused, timeout, 429, 5xx). |
 | `CLOUDLING_BACKEND_INITIAL_BACKOFF_SECS` | `1` | Starting backoff, doubled up to the cap. |
 | `CLOUDLING_BACKEND_MAX_BACKOFF_SECS` | `8` | Backoff ceiling. |
+| `CLOUDLING_BACKEND_MAX_RETRY_AFTER_SECS` | `30` | On a rate-limited (429/503) response the client honors the provider's `Retry-After` wait between attempts when it exceeds the backoff. A requested wait longer than this cap stops retrying immediately with a clear "provider asks to retry in ~Ns" error instead of stalling the request. |
 
 No overall request timeout is set on purpose: a single call may stream for a long time and the agent loop makes many calls, so a wall-clock cap would cut off legitimate long replies.
 

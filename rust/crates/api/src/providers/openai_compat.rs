@@ -103,6 +103,7 @@ pub struct OpenAiCompatClient {
     max_retries: u32,
     initial_backoff: Duration,
     max_backoff: Duration,
+    max_retry_after: Duration,
 }
 
 impl OpenAiCompatClient {
@@ -125,6 +126,7 @@ impl OpenAiCompatClient {
             max_retries: retry.max_retries,
             initial_backoff: retry.initial_backoff,
             max_backoff: retry.max_backoff,
+            max_retry_after: retry.max_retry_after,
         }
     }
 
@@ -260,39 +262,67 @@ impl OpenAiCompatClient {
         // degradation: replace images with a note, retry, let the text answer come back.
         let mut working = request.clone();
         let mut stripped_images = false;
+        // The provider's `Retry-After` hint from the LAST failed attempt (429/503 only).
+        // Honored between attempts when longer than our own backoff; a hint beyond
+        // `max_retry_after` stops the loop early with a clear message instead of stalling.
+        // (No initializer: every loop path that survives to a read assigns it first.)
+        let mut retry_after_hint: Option<Duration>;
 
         let last_error = loop {
             attempts += 1;
             let retryable_error = match self.send_raw_request(&working).await {
-                Ok(response) => match expect_success(response).await {
-                    Ok(response) => return Ok(response),
-                    Err(error) => {
-                        if !stripped_images
-                            && apierror_is_unsupported_media(&error)
-                            && strip_images_from_request(&mut working)
-                        {
-                            // Retry immediately with a text-only request (no backoff, no budget
-                            // consumed): this attempt only discovered the backend lacks vision.
-                            stripped_images = true;
-                            attempts -= 1;
-                            continue;
-                        }
-                        if error.is_retryable() && attempts <= self.max_retries + 1 {
-                            error
-                        } else {
-                            return Err(error);
+                Ok(response) => {
+                    let hint = if matches!(response.status().as_u16(), 429 | 503) {
+                        retry_after_hint_from_headers(response.headers())
+                    } else {
+                        None
+                    };
+                    match expect_success(response).await {
+                        Ok(response) => return Ok(response),
+                        Err(error) => {
+                            retry_after_hint = hint;
+                            if !stripped_images
+                                && apierror_is_unsupported_media(&error)
+                                && strip_images_from_request(&mut working)
+                            {
+                                // Retry immediately with a text-only request (no backoff, no budget
+                                // consumed): this attempt only discovered the backend lacks vision.
+                                stripped_images = true;
+                                attempts -= 1;
+                                continue;
+                            }
+                            if error.is_retryable() && attempts <= self.max_retries + 1 {
+                                error
+                            } else {
+                                return Err(error);
+                            }
                         }
                     }
-                },
-                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => error,
+                }
+                Err(error) if error.is_retryable() && attempts <= self.max_retries + 1 => {
+                    retry_after_hint = None;
+                    error
+                }
                 Err(error) => return Err(error),
             };
 
             if attempts > self.max_retries {
-                break retryable_error;
+                // Out of budget: fold the provider's wait hint (if any) into the message
+                // so the user learns WHEN a retry makes sense, not just that we failed.
+                break annotate_with_retry_after(retryable_error, retry_after_hint.take());
             }
 
-            tokio::time::sleep(self.jittered_backoff_for_attempt(attempts)?).await;
+            let backoff = self.jittered_backoff_for_attempt(attempts)?;
+            let delay = match retry_after_hint.take() {
+                Some(hint) if hint > self.max_retry_after => {
+                    // The provider asks to wait longer than we are willing to stall a
+                    // request: stop hammering and surface a clear message right away.
+                    break annotate_with_retry_after(retryable_error, Some(hint));
+                }
+                Some(hint) if hint > backoff => hint,
+                _ => backoff,
+            };
+            tokio::time::sleep(delay).await;
         };
 
         Err(ApiError::RetriesExhausted {
@@ -340,6 +370,51 @@ impl OpenAiCompatClient {
         let base = self.backoff_for_attempt(attempt)?;
         Ok(base + jitter_for_base(base))
     }
+}
+
+/// Parse the provider's retry-wait hint from a 429/503 response: the standard
+/// `Retry-After` header in its delta-seconds form, or the non-standard
+/// `retry-after-ms` (sent by some providers, milliseconds, more precise — checked
+/// first). The HTTP-date form of `Retry-After` is rare on API rate limits and is
+/// deliberately not parsed; absent or unparseable values just mean "no hint" and
+/// the caller falls back to its own exponential backoff.
+fn retry_after_hint_from_headers(headers: &reqwest::header::HeaderMap) -> Option<Duration> {
+    if let Some(ms) = headers
+        .get("retry-after-ms")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+    {
+        return Some(Duration::from_millis(ms));
+    }
+    headers
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+}
+
+/// Fold the provider's `Retry-After` hint into the error message, so the user-visible
+/// error says WHEN a retry makes sense ("provider rate-limited the request; it asks to
+/// retry in ~65s") instead of a bare status line. Only `Api` errors carry a message to
+/// annotate; other variants (and a `None` hint) pass through unchanged.
+fn annotate_with_retry_after(mut error: ApiError, hint: Option<Duration>) -> ApiError {
+    let Some(hint) = hint else { return error };
+    if let ApiError::Api {
+        status, message, ..
+    } = &mut error
+    {
+        let secs = hint.as_secs().max(1);
+        let note = if status.as_u16() == 429 {
+            format!("provider rate-limited the request; it asks to retry in ~{secs}s")
+        } else {
+            format!("provider is temporarily unavailable; it asks to retry in ~{secs}s")
+        };
+        *message = Some(match message.take() {
+            Some(prior) if !prior.trim().is_empty() => format!("{note} ({prior})"),
+            _ => note,
+        });
+    }
+    error
 }
 
 /// Process-wide counter that guarantees distinct jitter samples even when
@@ -1962,6 +2037,75 @@ mod tests {
         ));
         assert!(is_unsupported_media_error("you may need to provide the MMPROJ"));
         assert!(!is_unsupported_media_error("internal server error"));
+    }
+
+    #[test]
+    fn retry_after_header_parses_delta_seconds_and_ms() {
+        use super::retry_after_hint_from_headers;
+        use std::time::Duration;
+
+        let mut headers = reqwest::header::HeaderMap::new();
+        assert_eq!(retry_after_hint_from_headers(&headers), None);
+
+        headers.insert(reqwest::header::RETRY_AFTER, "17".parse().unwrap());
+        assert_eq!(
+            retry_after_hint_from_headers(&headers),
+            Some(Duration::from_secs(17))
+        );
+
+        // The non-standard ms header is more precise and wins over the seconds form.
+        headers.insert("retry-after-ms", "2500".parse().unwrap());
+        assert_eq!(
+            retry_after_hint_from_headers(&headers),
+            Some(Duration::from_millis(2500))
+        );
+
+        // HTTP-date form is deliberately not parsed → no hint, caller uses its own backoff.
+        let mut date_headers = reqwest::header::HeaderMap::new();
+        date_headers.insert(
+            reqwest::header::RETRY_AFTER,
+            "Fri, 10 Jul 2026 12:00:00 GMT".parse().unwrap(),
+        );
+        assert_eq!(retry_after_hint_from_headers(&date_headers), None);
+    }
+
+    #[test]
+    fn retry_after_hint_is_folded_into_the_error_message() {
+        use super::annotate_with_retry_after;
+        use std::time::Duration;
+
+        let error = ApiError::Api {
+            status: reqwest::StatusCode::TOO_MANY_REQUESTS,
+            error_type: Some("rate_limit_exceeded".to_string()),
+            message: Some("Rate limit reached".to_string()),
+            request_id: None,
+            body: String::new(),
+            retryable: true,
+            suggested_action: None,
+        };
+        let annotated = annotate_with_retry_after(error, Some(Duration::from_secs(65)));
+        let text = annotated.to_string();
+        assert!(
+            text.contains("asks to retry in ~65s"),
+            "hint missing from: {text}"
+        );
+        assert!(
+            text.contains("Rate limit reached"),
+            "original message lost: {text}"
+        );
+
+        // No hint → error passes through untouched.
+        let error = ApiError::Api {
+            status: reqwest::StatusCode::TOO_MANY_REQUESTS,
+            error_type: None,
+            message: Some("Rate limit reached".to_string()),
+            request_id: None,
+            body: String::new(),
+            retryable: true,
+            suggested_action: None,
+        };
+        let before = error.to_string();
+        assert_eq!(annotate_with_retry_after(error, None).to_string(), before);
     }
 
     #[test]

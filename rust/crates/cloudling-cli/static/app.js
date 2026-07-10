@@ -68,6 +68,7 @@
       'ctx.plainTitle':'Context tokens in the last request to the model',
       'compact.header':'[Summary of the earlier conversation · folded {n}, ≈{est} tok.]',
       'compact.banner':'Context compacted · freed ≈{est} tok.','compact.markFallback':'Context folded',
+      'compact.reactiveBanner':'Context exceeded the model window — older turns folded · freed ≈{est} tok.',
       'err.noResponseHead':'Couldn’t get a response',
       'err.noEngine':'The engine didn’t respond. Check that the backend is running and the URL is correct.',
       'err.emptyHead':'The model returned no answer',
@@ -154,6 +155,7 @@
       'ctx.plainTitle':'Токенов контекста в последнем запросе к модели',
       'compact.header':'[Сводка предыдущей части диалога · свёрнуто {n}, ≈{est} ток.]',
       'compact.banner':'Контекст сжат · освобождено ≈{est} ток.','compact.markFallback':'Контекст свёрнут',
+      'compact.reactiveBanner':'Контекст переполнил окно модели — старые ходы свёрнуты · освобождено ≈{est} ток.',
       'err.noResponseHead':'Не удалось получить ответ',
       'err.noEngine':'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.',
       'err.emptyHead':'Модель не вернула ответ',
@@ -529,8 +531,16 @@
   var COMPACT_AT=0.80, COMPACT_KEEP=6, compacting=false;
   var COMPACT_RE=/^\[(Сводка предыдущей части диалога|Summary of the earlier conversation)[^\]]*\]\n?/;
   function maybeAutoCompact(pt){
-    if(compacting || !ctxWindow || typeof pt!=='number') return;
+    if(!ctxWindow || typeof pt!=='number') return;
     if(pt < Math.round(ctxWindow*COMPACT_AT)) return;
+    compactNow(false);
+  }
+  /* Fold the older turns now, unconditionally (no window/threshold gate). `reactive` marks
+     a server-initiated rescue: the backend rejected the context as too large, the server
+     compacted-and-retried this turn, and signalled us to shorten the STORED history too —
+     otherwise every following turn would overflow and be rescued again (serve is stateless). */
+  function compactNow(reactive){
+    if(compacting) return;
     if(convo.length <= COMPACT_KEEP+2) return;
     var older=convo.slice(0, convo.length-COMPACT_KEEP);
     var tail=convo.slice(convo.length-COMPACT_KEEP);
@@ -548,7 +558,7 @@
         var header=t('compact.header',{n:older.length, est:est.toLocaleString(LOCALE)});
         convo=[{role:'assistant', content:header+'\n'+summary}].concat(tail);
         renderConvo(convo); saveActive();
-        showCompactBanner(t('compact.banner',{est:est.toLocaleString(LOCALE)}));
+        showCompactBanner(t(reactive?'compact.reactiveBanner':'compact.banner',{est:est.toLocaleString(LOCALE)}));
       })
       .catch(function(){ compacting=false; });
   }
@@ -945,6 +955,7 @@
     thread.appendChild(turn); stick=true; maybeScroll();
     var ac=new AbortController(); currentAbort=ac;
     var acc='', committed=0, liveBox=null, caretEl=null, thinkingShown=true, errored=false, lastFinish=null, reasonLiveEl=null;
+    var serverCompacted=false; /* server had to reactive-compact (context overflow) → fold our stored history after the turn */
     liveAcc=''; /* mirror of acc for stopGen (partial answer must reach convo on stop) */
     /* Coalesce the progressive markdown re-render to one per animation frame. md() reparses
        the whole uncommitted tail, so calling it on every token is O(n^2) on long answers;
@@ -1059,7 +1070,8 @@
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
       if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
-      maybeAutoCompact(dlgToks[activeId]); /* fold older turns if context crossed the window threshold */
+      if(serverCompacted){ compactNow(true); } /* server rescued an overflowing context — shorten our stored history too */
+      else { maybeAutoCompact(dlgToks[activeId]); } /* fold older turns if context crossed the window threshold */
     }
     fetch('/v1/chat/completions', {
       method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, /* marker: enable interactive AskUserQuestion widget */
@@ -1084,6 +1096,7 @@
               var delta=ch0 && ch0.delta;
               if(delta && delta.content){ onContent(delta.content); }
               if(ch0 && ch0.finish_reason){ lastFinish=ch0.finish_reason; } /* 'length' = backend truncated the answer */
+              if(chunk.cloudling && chunk.cloudling.reactive_compaction){ serverCompacted=true; } /* server folded the overflowing context and retried */
               if(chunk.usage){ var pt=chunk.usage.prompt_tokens; if(activeId){ dlgToks[activeId]=pt; saveDlgToks(); } setCtxToks(pt); }
             }catch(e){ /* ignore keep-alives / partial chunks */ }
           });

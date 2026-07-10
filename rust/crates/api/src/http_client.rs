@@ -91,6 +91,11 @@ const MAX_RETRIES_ENV: &str = "CLOUDLING_BACKEND_MAX_RETRIES";
 const INITIAL_BACKOFF_ENV: &str = "CLOUDLING_BACKEND_INITIAL_BACKOFF_SECS";
 /// Env var: maximum backoff cap in whole seconds. Unset → [`DEFAULT_MAX_BACKOFF`].
 const MAX_BACKOFF_ENV: &str = "CLOUDLING_BACKEND_MAX_BACKOFF_SECS";
+/// Env var: the longest provider-requested `Retry-After` wait (whole seconds) we are
+/// willing to honor on a rate-limited (429/503) response. A hint longer than this stops
+/// the retry loop immediately with a clear "provider asks to retry in ~Ns" error instead
+/// of stalling the request. Unset → [`DEFAULT_MAX_RETRY_AFTER`].
+const MAX_RETRY_AFTER_ENV: &str = "CLOUDLING_BACKEND_MAX_RETRY_AFTER_SECS";
 
 /// Retry budget defaults tuned so a *down* backend surfaces an error to the
 /// user in seconds, not minutes: 3 retries with a 1s→8s capped backoff means a
@@ -100,6 +105,9 @@ const MAX_BACKOFF_ENV: &str = "CLOUDLING_BACKEND_MAX_BACKOFF_SECS";
 const DEFAULT_MAX_RETRIES: u32 = 3;
 const DEFAULT_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(8);
+/// 30s keeps short provider-requested waits useful (typical 429 hints are a few
+/// seconds) while refusing to silently stall a chat turn for minutes.
+const DEFAULT_MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
 /// Retry/backoff policy for backend calls, resolved from the environment.
 /// Shared so the parsing is unit-testable without the process environment.
@@ -108,6 +116,8 @@ pub struct RetryPolicy {
     pub max_retries: u32,
     pub initial_backoff: Duration,
     pub max_backoff: Duration,
+    /// Longest provider-requested `Retry-After` wait honored before bailing out early.
+    pub max_retry_after: Duration,
 }
 
 impl Default for RetryPolicy {
@@ -116,6 +126,7 @@ impl Default for RetryPolicy {
             max_retries: DEFAULT_MAX_RETRIES,
             initial_backoff: DEFAULT_INITIAL_BACKOFF,
             max_backoff: DEFAULT_MAX_BACKOFF,
+            max_retry_after: DEFAULT_MAX_RETRY_AFTER,
         }
     }
 }
@@ -141,6 +152,10 @@ impl RetryPolicy {
                 DEFAULT_INITIAL_BACKOFF,
             ),
             max_backoff: parse_secs_or(lookup(MAX_BACKOFF_ENV).as_deref(), DEFAULT_MAX_BACKOFF),
+            max_retry_after: parse_secs_or(
+                lookup(MAX_RETRY_AFTER_ENV).as_deref(),
+                DEFAULT_MAX_RETRY_AFTER,
+            ),
         }
     }
 }
