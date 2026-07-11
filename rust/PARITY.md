@@ -84,12 +84,12 @@ Hashes below come from `git log --oneline`. Merge line counts come from `git sho
 | **StructuredOutput** | `tools` | passthrough JSON — **good parity** |
 | **REPL** | `tools` | subprocess code execution — **moderate parity** |
 | **PowerShell** | `tools` | Windows PowerShell execution — **moderate parity** |
+| **AskUserQuestion** | `tools` | interactive widget in the built-in web UI (question batches answered as one form); terminal prompt in the CLI; honest `unavailable` elsewhere (e.g. Open WebUI) |
 
 ### Stubs Only (surface parity, no behavior)
 
 | Tool | Status | Notes |
 |------|--------|-------|
-| **AskUserQuestion** | stub | needs live user I/O integration |
 | **McpAuth** | stub | needs full auth UX beyond the MCP lifecycle bridge |
 | **RemoteTrigger** | stub | needs HTTP client |
 | **TestingPermission** | stub | test-only, low priority |

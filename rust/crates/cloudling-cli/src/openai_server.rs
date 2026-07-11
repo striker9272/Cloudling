@@ -46,10 +46,11 @@ pub(crate) struct OpenAiServerState {
     /// localhost (dev convenience), disabled anywhere else (fail closed).
     bind_is_loopback: bool,
     /// In-flight interactive `AskUserQuestion` prompts awaiting a UI answer, keyed by a
-    /// per-question correlation id. The streaming chat thread registers a sender and blocks
-    /// on its receiver; `POST /ui/answer` looks the id up and delivers the user's choice.
+    /// per-call correlation id (one id per tool call — a call may carry several questions
+    /// answered together). The streaming chat thread registers a sender and blocks on its
+    /// receiver; `POST /ui/answer` looks the id up and delivers the user's index-aligned choices.
     pending_questions:
-        std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<String>>>,
+        std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<Vec<String>>>>,
 }
 
 impl OpenAiServerState {
@@ -80,12 +81,12 @@ impl OpenAiServerState {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Register an in-flight interactive question; the returned receiver yields the user's
-    /// answer once `POST /ui/answer` delivers it for this `id`.
+    /// Register an in-flight interactive question batch; the returned receiver yields the
+    /// user's answers once `POST /ui/answer` delivers them for this `id`.
     pub(crate) fn register_pending_question(
         &self,
         id: String,
-    ) -> std::sync::mpsc::Receiver<String> {
+    ) -> std::sync::mpsc::Receiver<Vec<String>> {
         let (tx, rx) = std::sync::mpsc::channel();
         self.pending_questions
             .lock()
@@ -94,15 +95,15 @@ impl OpenAiServerState {
         rx
     }
 
-    /// Deliver an answer to a pending question. Returns `true` if a waiter was found.
-    pub(crate) fn resolve_pending_question(&self, id: &str, answer: String) -> bool {
+    /// Deliver the answers to a pending question batch. Returns `true` if a waiter was found.
+    pub(crate) fn resolve_pending_question(&self, id: &str, answers: Vec<String>) -> bool {
         let sender = self
             .pending_questions
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(id);
         match sender {
-            Some(tx) => tx.send(answer).is_ok(),
+            Some(tx) => tx.send(answers).is_ok(),
             None => false,
         }
     }

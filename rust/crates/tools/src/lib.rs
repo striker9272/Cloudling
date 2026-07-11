@@ -740,7 +740,11 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
         },
         ToolSpec {
             name: "AskUserQuestion",
-            description: "Ask the user a question and wait for their response.",
+            description: "Ask the user one or more questions and wait for the answers. \
+                Prefer ONE call with the `questions` array (each item has its own `options`) \
+                over several separate calls: related questions are then shown to the user \
+                together as a single form. The legacy single `question` + `options` shape is \
+                also accepted.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -748,9 +752,24 @@ pub fn mvp_tool_specs() -> Vec<ToolSpec> {
                     "options": {
                         "type": "array",
                         "items": { "type": "string" }
+                    },
+                    "questions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "question": { "type": "string" },
+                                "options": {
+                                    "type": "array",
+                                    "items": { "type": "string" }
+                                }
+                            },
+                            "required": ["question"],
+                            "additionalProperties": false
+                        }
                     }
                 },
-                "required": ["question"],
+                "required": [],
                 "additionalProperties": false
             }),
             required_permission: PermissionMode::ReadOnly,
@@ -1380,7 +1399,16 @@ fn maybe_enforce_permission_check_with_mode(
 /// Asks the user `question` (with optional `options`) and returns their answer, or `None`
 /// if no answer could be obtained (timeout, client navigated away) — in which case the tool
 /// reports the usual "unavailable" result so the model proceeds.
-pub type UserPromptProvider = Box<dyn Fn(&str, Option<&[String]>) -> Option<String>>;
+/// One question of an interactive `AskUserQuestion` batch (question text + offered options).
+#[derive(Debug, Clone)]
+pub struct UserQuestion {
+    pub question: String,
+    pub options: Vec<String>,
+}
+
+/// Interactive prompt provider: receives the whole batch (one form), returns the answers
+/// aligned by index, or `None` when the user did not answer (cancel / unavailable).
+pub type UserPromptProvider = Box<dyn Fn(&[UserQuestion]) -> Option<Vec<String>>>;
 
 thread_local! {
     static ACTIVE_PROMPT_PROVIDER: std::cell::RefCell<Option<UserPromptProvider>> =
@@ -1412,37 +1440,91 @@ pub fn scoped_user_prompt_provider(
     UserPromptProviderGuard { previous }
 }
 
-/// Invoke the ambient provider if one is installed. `Some(answer_opt)` means a provider ran
-/// (`answer_opt` = the user's answer, or `None` if unanswered); the outer `None` means no
-/// provider is installed and the caller should fall back to the stdin path.
-fn invoke_prompt_provider(question: &str, options: Option<&[String]>) -> Option<Option<String>> {
+/// Invoke the ambient provider if one is installed. `Some(answers_opt)` means a provider ran
+/// (`answers_opt` = the user's answers aligned with the batch, or `None` if unanswered); the
+/// outer `None` means no provider is installed and the caller falls back to the stdin path.
+fn invoke_prompt_provider(questions: &[UserQuestion]) -> Option<Option<Vec<String>>> {
     ACTIVE_PROMPT_PROVIDER.with(|cell| {
         cell.borrow()
             .as_ref()
-            .map(|provider| provider(question, options))
+            .map(|provider| provider(questions))
     })
+}
+
+/// Result for an answered batch. A single question keeps the historical flat shape
+/// (`{question, answer, status}`) so existing prompts/models see no change; a multi-question
+/// batch reports the aligned pairs under `answers`.
+fn ask_answered_json(batch: &[UserQuestion], answers: &[String]) -> Result<String, String> {
+    if batch.len() == 1 {
+        return to_pretty_json(json!({
+            "question": batch[0].question,
+            "answer": answers.first().cloned().unwrap_or_default(),
+            "status": "answered"
+        }));
+    }
+    let pairs: Vec<Value> = batch
+        .iter()
+        .zip(answers.iter())
+        .map(|(item, answer)| json!({ "question": item.question, "answer": answer }))
+        .collect();
+    to_pretty_json(json!({ "status": "answered", "answers": pairs }))
+}
+
+/// Result for an unanswered/unavailable batch (single question keeps the historical shape).
+fn ask_unavailable_json(batch: &[UserQuestion], message: &str) -> Result<String, String> {
+    if batch.len() == 1 {
+        return to_pretty_json(json!({
+            "question": batch[0].question,
+            "answer": Value::Null,
+            "status": "unavailable",
+            "message": message
+        }));
+    }
+    let questions: Vec<&str> = batch.iter().map(|item| item.question.as_str()).collect();
+    to_pretty_json(json!({
+        "questions": questions,
+        "answer": Value::Null,
+        "status": "unavailable",
+        "message": message
+    }))
 }
 
 #[allow(clippy::needless_pass_by_value)]
 fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> {
     use std::io::{self, BufRead, IsTerminal, Write};
 
+    // Normalize both accepted shapes into one batch: the preferred `questions` array, or
+    // the legacy single `question` + `options`.
+    let batch: Vec<UserQuestion> = match &input.questions {
+        Some(items) if !items.is_empty() => items
+            .iter()
+            .map(|item| UserQuestion {
+                question: item.question.clone(),
+                options: item.options.clone().unwrap_or_default(),
+            })
+            .collect(),
+        _ => match &input.question {
+            Some(question) if !question.trim().is_empty() => vec![UserQuestion {
+                question: question.clone(),
+                options: input.options.clone().unwrap_or_default(),
+            }],
+            _ => {
+                return Err(
+                    "AskUserQuestion needs either `question` or a non-empty `questions` array"
+                        .to_string(),
+                )
+            }
+        },
+    };
+
     // Interactive built-in-UI path: if serve installed a provider on this thread, route the
-    // question through it (widget + click) instead of stdin. No provider → fall through to the
-    // original terminal / "unavailable" behavior below, so OWUI and the CLI are unchanged.
-    if let Some(result) = invoke_prompt_provider(&input.question, input.options.as_deref()) {
+    // whole batch through it (one widget, one submit) instead of stdin. No provider → fall
+    // through to the original terminal / "unavailable" behavior below, so OWUI and the CLI
+    // are unchanged.
+    if let Some(result) = invoke_prompt_provider(&batch) {
         return match result {
-            Some(answer) => to_pretty_json(json!({
-                "question": input.question,
-                "answer": answer,
-                "status": "answered"
-            })),
-            None => to_pretty_json(json!({
-                "question": input.question,
-                "answer": Value::Null,
-                "status": "unavailable",
-                "message": "The user did not answer the question."
-            })),
+            Some(answers) => ask_answered_json(&batch, &answers),
+            None => ask_unavailable_json(&batch, "The user did not answer the question."),
         };
     }
 
@@ -1451,60 +1533,50 @@ fn run_ask_user_question(input: AskUserQuestionInput) -> Result<String, String> 
     // `status: "answered"` with an empty answer — misleading the model. Return an
     // honest "unavailable" so the model asks in the chat instead.
     if !io::stdin().is_terminal() {
-        return to_pretty_json(json!({
-            "question": input.question,
-            "answer": Value::Null,
-            "status": "unavailable",
-            "message": "Interactive input is not available in this environment \
-                        (stdin is not a terminal). Ask the user directly in the chat."
-        }));
+        return ask_unavailable_json(
+            &batch,
+            "Interactive input is not available in this environment \
+             (stdin is not a terminal). Ask the user directly in the chat.",
+        );
     }
 
-    // Display the question to the user via stdout
+    // Terminal path: walk the batch question by question via stdout/stdin.
     let stdout = io::stdout();
     let stdin = io::stdin();
     let mut out = stdout.lock();
+    let mut answers = Vec::with_capacity(batch.len());
 
-    writeln!(out, "\n[Question] {}", input.question).map_err(|e| e.to_string())?;
+    for item in &batch {
+        writeln!(out, "\n[Question] {}", item.question).map_err(|e| e.to_string())?;
 
-    if let Some(ref options) = input.options {
-        for (i, option) in options.iter().enumerate() {
-            writeln!(out, "  {}. {}", i + 1, option).map_err(|e| e.to_string())?;
-        }
-        write!(out, "Enter choice (1-{}): ", options.len()).map_err(|e| e.to_string())?;
-    } else {
-        write!(out, "Your answer: ").map_err(|e| e.to_string())?;
-    }
-    out.flush().map_err(|e| e.to_string())?;
-
-    // Read user response from stdin
-    let mut response = String::new();
-    stdin
-        .lock()
-        .read_line(&mut response)
-        .map_err(|e| e.to_string())?;
-    let response = response.trim().to_string();
-
-    // If options were provided, resolve the numeric choice
-    let answer = if let Some(ref options) = input.options {
-        if let Ok(idx) = response.parse::<usize>() {
-            if idx >= 1 && idx <= options.len() {
-                options[idx - 1].clone()
-            } else {
-                response.clone()
-            }
+        if item.options.is_empty() {
+            write!(out, "Your answer: ").map_err(|e| e.to_string())?;
         } else {
-            response.clone()
+            for (i, option) in item.options.iter().enumerate() {
+                writeln!(out, "  {}. {}", i + 1, option).map_err(|e| e.to_string())?;
+            }
+            write!(out, "Enter choice (1-{}): ", item.options.len()).map_err(|e| e.to_string())?;
         }
-    } else {
-        response.clone()
-    };
+        out.flush().map_err(|e| e.to_string())?;
 
-    to_pretty_json(json!({
-        "question": input.question,
-        "answer": answer,
-        "status": "answered"
-    }))
+        let mut response = String::new();
+        stdin
+            .lock()
+            .read_line(&mut response)
+            .map_err(|e| e.to_string())?;
+        let response = response.trim().to_string();
+
+        // If options were provided, resolve the numeric choice
+        let answer = match response.parse::<usize>() {
+            Ok(idx) if !item.options.is_empty() && idx >= 1 && idx <= item.options.len() => {
+                item.options[idx - 1].clone()
+            }
+            _ => response,
+        };
+        answers.push(answer);
+    }
+
+    ask_answered_json(&batch, &answers)
 }
 
 #[allow(clippy::needless_pass_by_value)]
@@ -2752,10 +2824,22 @@ struct PowerShellInput {
 }
 
 #[derive(Debug, Deserialize)]
-struct AskUserQuestionInput {
+struct AskUserQuestionItem {
     question: String,
     #[serde(default)]
     options: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AskUserQuestionInput {
+    /// Legacy single-question shape (kept for weaker tool-calling models and old prompts).
+    #[serde(default)]
+    question: Option<String>,
+    #[serde(default)]
+    options: Option<Vec<String>>,
+    /// Preferred shape: several related questions asked together as one form.
+    #[serde(default)]
+    questions: Option<Vec<AskUserQuestionItem>>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -338,10 +338,15 @@ pub(super) async fn ui_kv_put(
 #[derive(Debug, Deserialize)]
 pub(super) struct AnswerRequest {
     id: String,
-    answer: String,
+    /// Legacy single-question shape.
+    #[serde(default)]
+    answer: Option<String>,
+    /// Batch shape: one answer per question of the widget, index-aligned.
+    #[serde(default)]
+    answers: Option<Vec<String>>,
 }
 
-/// Deliver a user's answer to an in-flight interactive `AskUserQuestion` (built-in UI). The
+/// Deliver a user's answers to an in-flight interactive `AskUserQuestion` (built-in UI). The
 /// streaming chat thread is blocked waiting on this `id`; resolving it unblocks the tool so
 /// the agent loop continues. Returns 404 when no question is waiting (already answered or it
 /// timed out). Gated by `ui_auth_middleware` like every `/ui/*` endpoint.
@@ -349,7 +354,12 @@ pub(super) async fn ui_answer(
     State(state): State<Arc<OpenAiServerState>>,
     Json(body): Json<AnswerRequest>,
 ) -> Response {
-    if state.resolve_pending_question(&body.id, body.answer) {
+    let answers = match (body.answers, body.answer) {
+        (Some(answers), _) if !answers.is_empty() => answers,
+        (_, Some(answer)) => vec![answer],
+        _ => return (StatusCode::BAD_REQUEST, "need `answer` or `answers`").into_response(),
+    };
+    if state.resolve_pending_question(&body.id, answers) {
         StatusCode::NO_CONTENT.into_response()
     } else {
         (StatusCode::NOT_FOUND, "no pending question for that id").into_response()

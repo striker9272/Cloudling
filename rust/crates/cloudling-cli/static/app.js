@@ -70,6 +70,8 @@
       'compact.banner':'Context compacted · freed ≈{est} tok.','compact.markFallback':'Context folded',
       'compact.reactiveBanner':'Context exceeded the model window — older turns folded · freed ≈{est} tok.',
       'err.noResponseHead':'Couldn’t get a response',
+      'err.unreachableHead':'Backend is unreachable','err.authHead':'Backend authentication failed',
+      'err.rateHead':'Provider rate limit',
       'err.noEngine':'The engine didn’t respond. Check that the backend is running and the URL is correct.',
       'err.emptyHead':'The model returned no answer',
       'err.emptyBody':'The turn finished with no answer text. Try regenerating.',
@@ -157,6 +159,8 @@
       'compact.banner':'Контекст сжат · освобождено ≈{est} ток.','compact.markFallback':'Контекст свёрнут',
       'compact.reactiveBanner':'Контекст переполнил окно модели — старые ходы свёрнуты · освобождено ≈{est} ток.',
       'err.noResponseHead':'Не удалось получить ответ',
+      'err.unreachableHead':'Бэкенд недоступен','err.authHead':'Бэкенд отверг авторизацию',
+      'err.rateHead':'Провайдер ограничил запросы (rate limit)',
       'err.noEngine':'Движок не ответил. Проверь, что бэкенд запущен и адрес указан верно.',
       'err.emptyHead':'Модель не вернула ответ',
       'err.emptyBody':'Ход завершился без текста ответа. Попробуйте перегенерировать.',
@@ -689,7 +693,10 @@
 
   function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); if(pendingLiveCancel){ pendingLiveCancel(); pendingLiveCancel=null; } }
 
-  function errboxHTML(msg){ var detail = msg ? esc(String(msg)) : t('err.noEngine'); return '<div class="errbox"><div class="ehead">'+IC.warn+t('err.noResponseHead')+'</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+t('common.retry')+'</button></div>'; }
+  /* Error-box headline is localized by the server's machine `kind` (error.kind in the SSE
+     error chunk — see classify_engine_error in chat.rs); the raw message stays as the detail. */
+  var ERR_HEADS={backend_unreachable:'err.unreachableHead', provider_auth:'err.authHead', rate_limited:'err.rateHead'};
+  function errboxHTML(msg, kind){ var detail = msg ? esc(String(msg)) : t('err.noEngine'); return '<div class="errbox"><div class="ehead">'+IC.warn+t(ERR_HEADS[kind]||'err.noResponseHead')+'</div><div class="emsg">'+detail+'</div><button class="retry" type="button">'+IC.regen+t('common.retry')+'</button></div>'; }
 
   /* ---------- real chat ----------
      The page is the client: it holds the dialog history and re-sends it every turn
@@ -737,78 +744,137 @@
     var args=(attrs.match(/\barguments="([^"]*)"/)||[])[1]||'';
     return buildToolEl(name, inner, args);
   }
-  /* Interactive AskUserQuestion widget. The server emits a closed `<details type="ask"
-     id=… question=… options=…>` block when the model calls the tool and then BLOCKS the turn
-     waiting for the answer. `live` (the actively streaming turn) renders clickable options +
-     a free-text field; a click POSTs to /ui/answer, which unblocks the server. Re-renders
-     (finalize / reloaded dialogs) pass live=false → a static, disabled view; `askAnswered`
-     keeps the chosen value across the in-session re-render so the choice stays highlighted. */
-  var askAnswered={}; /* qid -> chosen answer (in-memory; baked into saved markup on finalize) */
+  /* Interactive AskUserQuestion widget. The server emits ONE closed `<details type="ask"
+     id=… questions=…>` block per tool call — `questions` is a JSON array of {question,
+     options}, so several related questions render as a single form with one submit (the
+     Claude-style batch). The turn BLOCKS until the answers are POSTed to /ui/answer.
+     A single question keeps the historical UX: clicking an option answers immediately.
+     Old saved dialogs still carry the legacy `question=`/`options=`/`answer=` attributes —
+     both shapes are parsed. `live` (the actively streaming turn) renders the interactive
+     form; re-renders (finalize / reloaded dialogs) pass live=false → a static view;
+     `askAnswered` keeps the chosen values across the in-session re-render. */
+  var askAnswered={}; /* qid -> array of answers (in-memory; baked into saved markup on finalize) */
   function attrVal(attrs, key){ var m=attrs.match(new RegExp('\\b'+key+'="([^"]*)"')); return m?decodeEntities(m[1]):''; }
   function escAttr(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   /* Persist chosen answers into the ask-block markup so a reload keeps the selection
      highlighted (the in-memory map is wiped on refresh; the saved dialog content survives). */
   function bakeAskAnswers(text){
     return text.replace(/<details type="ask"([^>]*)>/g, function(m, a){
-      if(/\banswer=/.test(a)) return m;
+      if(/\banswers?=/.test(a)) return m;
       var idm=a.match(/\bid="([^"]+)"/); if(!idm) return m;
       var qid=decodeEntities(idm[1]);
       if(!Object.prototype.hasOwnProperty.call(askAnswered, qid)) return m;
-      return '<details type="ask"'+a+' answer="'+escAttr(askAnswered[qid])+'">';
+      return '<details type="ask"'+a+' answers="'+escAttr(JSON.stringify(askAnswered[qid]))+'">';
     });
   }
   var ASKCHECK='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
   function buildAskEl(attrs, live){
-    var qid=attrVal(attrs,'id'), question=attrVal(attrs,'question');
-    var options=[]; try{ options=JSON.parse(attrVal(attrs,'options'))||[]; }catch(e){}
-    var fromAttr=attrVal(attrs,'answer');
-    var chosen=fromAttr!==''?fromAttr:(Object.prototype.hasOwnProperty.call(askAnswered,qid)?askAnswered[qid]:null);
+    var qid=attrVal(attrs,'id');
+    /* question batch: preferred `questions` attr, else the legacy single-question attrs */
+    var qs=[]; try{ qs=JSON.parse(attrVal(attrs,'questions'))||[]; }catch(e){}
+    if(!qs.length){
+      var lq=attrVal(attrs,'question');
+      var lo=[]; try{ lo=JSON.parse(attrVal(attrs,'options'))||[]; }catch(e){}
+      qs=[{question:lq, options:lo}];
+    }
+    qs=qs.map(function(q){ return {question:(q&&q.question)||'', options:(q&&q.options)||[]}; });
+    var single = qs.length===1;
+    /* already answered? `answers` attr (JSON array), legacy `answer` attr, or in-memory */
+    var baked=null;
+    var fa=attrVal(attrs,'answers'); if(fa){ try{ baked=JSON.parse(fa); }catch(e){} }
+    if(!baked){ var one=attrVal(attrs,'answer'); if(one!=='') baked=[one]; }
+    if(!baked && Object.prototype.hasOwnProperty.call(askAnswered,qid)) baked=askAnswered[qid];
     var box=document.createElement('div'); box.className='askw';
-    var q=document.createElement('div'); q.className='askq'; q.textContent=question||t('ask.questionFallback'); box.appendChild(q);
-    /* once answered, the widget collapses to a compact question→answer view (chat-style):
-       the chosen value with a check, options/input removed. */
-    function answerRow(val){
+    /* collapsed (answered) view: one “✓ answer” row per question; the multi form keeps the
+       question text as a muted label so the pairs stay readable. */
+    function answerRow(qtext, val){
       var a=document.createElement('div'); a.className='askans';
       var c=document.createElement('span'); c.className='askck'; c.innerHTML=ASKCHECK;
+      a.appendChild(c);
+      if(!single){ var qt=document.createElement('span'); qt.className='askqt'; qt.textContent=qtext; a.appendChild(qt); }
       var v=document.createElement('span'); v.textContent=val;
-      a.appendChild(c); a.appendChild(v); return a;
+      a.appendChild(v); return a;
     }
-    function collapse(val){
+    function answeredView(vals){
       box.classList.add('answered');
-      while(box.children.length>1) box.removeChild(box.lastChild);
-      box.appendChild(answerRow(val));
+      while(box.firstChild) box.removeChild(box.firstChild);
+      if(single){
+        var q=document.createElement('div'); q.className='askq'; q.textContent=qs[0].question||t('ask.questionFallback'); box.appendChild(q);
+      }
+      qs.forEach(function(item,i){ box.appendChild(answerRow(item.question, vals[i]!=null?vals[i]:'')); });
     }
-    if(chosen!=null){ box.classList.add('answered'); box.appendChild(answerRow(chosen)); return box; }
-    /* interactive (unanswered): large full-width option rows + free-text (design variant 1) */
-    var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder=t('ask.ownPh');
-    var go=document.createElement('button'); go.type='button'; go.className='askgo'; go.textContent=t('ask.answer');
-    function choose(val){
+    if(baked){ answeredView(baked); return box; }
+    function submit(vals){
       if(Object.prototype.hasOwnProperty.call(askAnswered, qid)) return;
-      askAnswered[qid]=val;
-      uiFetch('/ui/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:qid,answer:val})}).catch(function(){});
-      collapse(val);
+      askAnswered[qid]=vals;
+      uiFetch('/ui/answer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:qid,answers:vals})}).catch(function(){});
+      answeredView(vals);
     }
-    options.forEach(function(o){
-      var r=document.createElement('button'); r.type='button'; r.className='askrow'; r.setAttribute('data-v', o);
-      var dot=document.createElement('span'); dot.className='askradio';
-      var lab=document.createElement('span'); lab.textContent=o;
-      r.appendChild(dot); r.appendChild(lab);
-      if(live){ r.addEventListener('click', function(){ choose(o); }); } else { r.disabled=true; }
-      box.appendChild(r);
+    /* interactive form: per question — option rows + a free-text field. Single question:
+       clicking an option submits immediately (historical UX). Multi: clicks select (filled
+       radio), typing clears the selection, one Answer button submits when every question
+       has a value. */
+    var sel=qs.map(function(){ return null; });
+    var inputs=[];
+    var goAll=null;
+    function value(i){ var tv=inputs[i]?inputs[i].value.trim():''; return tv||sel[i]; }
+    function refreshGo(){ if(goAll) goAll.disabled=!qs.every(function(_,i){ return !!value(i); }); }
+    qs.forEach(function(item, i){
+      var group=document.createElement('div'); group.className='askgroup';
+      var q=document.createElement('div'); q.className='askq'; q.textContent=item.question||t('ask.questionFallback'); group.appendChild(q);
+      var rows=[];
+      item.options.forEach(function(o){
+        var r=document.createElement('button'); r.type='button'; r.className='askrow'; r.setAttribute('data-v', o);
+        var dot=document.createElement('span'); dot.className='askradio';
+        var lab=document.createElement('span'); lab.textContent=o;
+        r.appendChild(dot); r.appendChild(lab);
+        if(live){
+          r.addEventListener('click', function(){
+            if(single){ submit([o]); return; }
+            sel[i]=o; if(inputs[i]) inputs[i].value='';
+            rows.forEach(function(x){ x.classList.remove('sel'); }); r.classList.add('sel');
+            refreshGo();
+          });
+        } else { r.disabled=true; }
+        rows.push(r); group.appendChild(r);
+      });
+      if(item.options.length){
+        var or=document.createElement('div'); or.className='askor';
+        var l1=document.createElement('span'); l1.className='askln';
+        var l2=document.createElement('span'); l2.className='askln';
+        var orSpan=document.createElement('span'); orSpan.textContent=t('ask.orOwn');
+        or.appendChild(l1); or.appendChild(orSpan); or.appendChild(l2); group.appendChild(or);
+      }
+      var inp=document.createElement('input'); inp.type='text'; inp.className='askinp'; inp.placeholder=t('ask.ownPh');
+      inputs[i]=inp;
+      if(single){
+        /* historical single-question layout: text field + its own Answer button */
+        var go=document.createElement('button'); go.type='button'; go.className='askgo'; go.textContent=t('ask.answer');
+        function submitOther(){ var v=inp.value.trim(); if(v) submit([v]); }
+        go.addEventListener('click', submitOther);
+        inp.addEventListener('keydown', function(e){ if(e.key==='Enter') submitOther(); });
+        if(!live){ inp.disabled=true; go.disabled=true; }
+        var row=document.createElement('div'); row.className='askother';
+        row.appendChild(inp); row.appendChild(go); group.appendChild(row);
+      } else {
+        inp.addEventListener('input', function(){
+          if(inp.value.trim()){ sel[i]=null; rows.forEach(function(x){ x.classList.remove('sel'); }); }
+          refreshGo();
+        });
+        if(!live) inp.disabled=true;
+        var row2=document.createElement('div'); row2.className='askother';
+        row2.appendChild(inp); group.appendChild(row2);
+      }
+      box.appendChild(group);
     });
-    if(options.length){
-      var or=document.createElement('div'); or.className='askor';
-      var l1=document.createElement('span'); l1.className='askln';
-      var l2=document.createElement('span'); l2.className='askln';
-      var orSpan=document.createElement('span'); orSpan.textContent=t('ask.orOwn');
-      or.appendChild(l1); or.appendChild(orSpan); or.appendChild(l2); box.appendChild(or);
+    if(!single){
+      var foot=document.createElement('div'); foot.className='asksubmit';
+      goAll=document.createElement('button'); goAll.type='button'; goAll.className='askgo'; goAll.textContent=t('ask.answer');
+      goAll.disabled=true;
+      goAll.addEventListener('click', function(){ if(!goAll.disabled) submit(qs.map(function(_,i){ return value(i); })); });
+      if(!live) goAll.disabled=true;
+      foot.appendChild(goAll); box.appendChild(foot);
     }
-    var row=document.createElement('div'); row.className='askother';
-    function submitOther(){ var v=inp.value.trim(); if(v) choose(v); }
-    go.addEventListener('click', submitOther);
-    inp.addEventListener('keydown', function(e){ if(e.key==='Enter') submitOther(); });
-    if(!live){ inp.disabled=true; go.disabled=true; }
-    row.appendChild(inp); row.appendChild(go); box.appendChild(row);
     return box;
   }
   /* The tool invocation lives in the block's arguments="…" attr (HTML-escaped JSON). Show it
@@ -1000,7 +1066,7 @@
     pendingLiveCancel=function(){ if(liveRaf){ (window.cancelAnimationFrame||clearTimeout)(liveRaf); liveRaf=0; } };
     /* Backend error mid-stream (engine down / token limit): cloudling sends a chunk with an
        `error` field. Show the error box with the reason instead of a blank turn. */
-    function showError(msg){
+    function showError(msg, kind){
       errored=true; liveAcc='';
       setDlgErr(msg); /* persist so the box survives reload (stored outside convo) */
       turn.classList.add('noconv'); /* error box has no convo entry — exclude from index math */
@@ -1008,8 +1074,8 @@
          backend error (e.g. 429 between tool steps) must not wipe completed work. Re-render the
          accumulated content cleanly, then append the error box below it. If nothing was rendered
          yet (still "thinking"), just show the error box. */
-      if(thinkingShown){ turn.innerHTML=errboxHTML(msg); }
-      else { paintTurn(turn, acc, false); turn.insertAdjacentHTML('beforeend', errboxHTML(msg)); }
+      if(thinkingShown){ turn.innerHTML=errboxHTML(msg, kind); }
+      else { paintTurn(turn, acc, false); turn.insertAdjacentHTML('beforeend', errboxHTML(msg, kind)); }
       attachRetry(turn, btn);
       finishGen(btn); maybeScroll();
     }
@@ -1091,7 +1157,7 @@
             var payload=line.slice(5).trim();
             if(payload==='' || payload==='[DONE]') return;
             try{ var chunk=JSON.parse(payload);
-              if(chunk.error){ showError((chunk.error&&chunk.error.message)||chunk.error); return; }
+              if(chunk.error){ showError((chunk.error&&chunk.error.message)||chunk.error, chunk.error&&chunk.error.type); return; }
               var ch0=chunk.choices && chunk.choices[0];
               var delta=ch0 && ch0.delta;
               if(delta && delta.content){ onContent(delta.content); }

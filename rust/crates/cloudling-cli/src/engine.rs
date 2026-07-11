@@ -290,11 +290,19 @@ fn run_prompt_with_host_and_event_sink<H: EngineHost>(
             // Schedule exhausted or nothing left to fold — surface the original error.
             return Err(error.into());
         };
+        // Report the honest session-size delta: trident's `removed_message_count` counts
+        // its own fold operations, not messages (a 10-message history folded into one
+        // summary reported "1"), which understates the user-facing notice.
+        let removed = host
+            .engine_session()
+            .messages
+            .len()
+            .saturating_sub(compaction.compacted_session.messages.len())
+            .max(compaction.removed_message_count);
         eprintln!(
-            "cloudling engine: context window exceeded; reactive compaction folded {} messages, retrying",
-            compaction.removed_message_count
+            "cloudling engine: context window exceeded; reactive compaction folded {removed} messages, retrying"
         );
-        reactive_removed += compaction.removed_message_count;
+        reactive_removed += removed;
         host.adopt_engine_session(compaction.compacted_session);
     }
 }

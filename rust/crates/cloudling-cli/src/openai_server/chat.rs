@@ -180,7 +180,11 @@ pub(super) async fn chat_completions(
         Ok(Ok(pair)) => pair,
         Ok(Err(error)) => {
             eprintln!("cloudling openai-serve: engine error: {error}");
-            return error_response(StatusCode::INTERNAL_SERVER_ERROR, &error, "engine_error");
+            return error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &error,
+                classify_engine_error(&error),
+            );
         }
         Err(error) => {
             eprintln!("cloudling openai-serve: task error: {error}");
@@ -378,9 +382,9 @@ fn stream_chat_completions(
                 let pid = id.clone();
                 let pmodel = response_model.clone();
                 tools::scoped_user_prompt_provider(Some(Box::new(
-                    move |question: &str, options: Option<&[String]>| {
+                    move |questions: &[tools::UserQuestion]| {
                         ask_via_ui(
-                            &psender, &pstate, &pabort, &pid, created, &pmodel, question, options,
+                            &psender, &pstate, &pabort, &pid, created, &pmodel, questions,
                         )
                     },
                 )))
@@ -564,10 +568,11 @@ fn relay_reasoning_event(
     false
 }
 
-/// Drive one interactive `AskUserQuestion` round-trip for the built-in UI: emit a question
-/// widget into the SSE stream, then block this `spawn_blocking` thread until the browser POSTs
-/// an answer to `/ui/answer`, the turn is aborted (Stop / tab closed), or a safety cap
-/// elapses. Returns the chosen answer, or `None` to fall back to the "unavailable" result.
+/// Drive one interactive `AskUserQuestion` round-trip for the built-in UI: emit ONE widget
+/// carrying the whole question batch into the SSE stream, then block this `spawn_blocking`
+/// thread until the browser POSTs the answers to `/ui/answer`, the turn is aborted (Stop /
+/// tab closed), or a safety cap elapses. Returns the index-aligned answers, or `None` to
+/// fall back to the "unavailable" result.
 #[allow(clippy::too_many_arguments)]
 fn ask_via_ui(
     sender: &mpsc::UnboundedSender<Result<Event, Infallible>>,
@@ -576,9 +581,8 @@ fn ask_via_ui(
     id: &str,
     created: u64,
     model: &str,
-    question: &str,
-    options: Option<&[String]>,
-) -> Option<String> {
+    questions: &[tools::UserQuestion],
+) -> Option<Vec<String>> {
     static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let q_id = format!(
         "{id}:{}",
@@ -587,7 +591,7 @@ fn ask_via_ui(
     let rx = state.register_pending_question(q_id.clone());
     // Emit the widget. If the client is already gone, the send fails — bail to the fallback.
     if sender
-        .send(ask_widget_chunk(id, created, model, &q_id, question, options))
+        .send(ask_widget_chunk(id, created, model, &q_id, questions))
         .is_err()
     {
         state.clear_pending_question(&q_id);
@@ -628,24 +632,32 @@ fn ask_via_ui(
     }
 }
 
-/// Build the SSE content chunk the built-in UI renders as an interactive question widget
-/// (clickable option buttons). Mirrors `openwebui_tool_details`' attribute escaping; the
-/// client matches `type="ask"` and reads `id` / `question` / `options` (a JSON array).
+/// Build the SSE content chunk the built-in UI renders as an interactive question widget:
+/// ONE widget for the whole batch (several related questions answered together with a
+/// single submit — the Claude-style form). Mirrors `openwebui_tool_details`' attribute
+/// escaping; the client matches `type="ask"` and reads `id` / `questions` (a JSON array of
+/// `{question, options}`). Old saved dialogs still carry the legacy single-question
+/// `question`/`options` attributes — the client keeps reading those too.
 fn ask_widget_chunk(
     id: &str,
     created: u64,
     model: &str,
     q_id: &str,
-    question: &str,
-    options: Option<&[String]>,
+    questions: &[tools::UserQuestion],
 ) -> Result<Event, Infallible> {
-    let options_json =
-        serde_json::to_string(options.unwrap_or(&[])).unwrap_or_else(|_| "[]".to_string());
+    let questions_json = serde_json::to_string(
+        &questions
+            .iter()
+            .map(|item| {
+                serde_json::json!({ "question": item.question, "options": item.options })
+            })
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or_else(|_| "[]".to_string());
     let markup = format!(
-        "\n<details type=\"ask\" done=\"false\" id=\"{}\" question=\"{}\" options=\"{}\">\n</details>\n",
+        "\n<details type=\"ask\" done=\"false\" id=\"{}\" questions=\"{}\">\n</details>\n",
         escape_html_attr(q_id),
-        escape_html_attr(question),
-        escape_html_attr(&options_json),
+        escape_html_attr(&questions_json),
     );
     openai_sse_chunk(id, created, model, Some(markup), None)
 }
@@ -972,17 +984,73 @@ fn openai_sse_usage_chunk(
     })
 }
 
+/// Map a stringified engine error onto a stable machine `kind` for clients. String-level
+/// on purpose — errors reach serve already boxed and stringified (the same constraint as
+/// `engine::is_context_window_error`). The built-in UI localizes its error-box headline by
+/// this kind (see `errboxHTML` in `static/app.js`); the raw message stays as the detail.
+/// Markers are deliberately narrow: an unknown failure must stay "engine_error", a wrong
+/// class is worse than no class.
+fn classify_engine_error(message: &str) -> &'static str {
+    let lower = message.to_lowercase();
+    const UNREACHABLE: &[&str] = &[
+        "connection refused",
+        "error trying to connect",
+        // reqwest's Display at this level hides the cause chain: a refused/unreachable
+        // backend stringifies as just "http error: error sending request for url (…)".
+        "error sending request",
+        "connect timeout",
+        "connection reset",
+        "dns error",
+        "failed to lookup",
+    ];
+    const AUTH: &[&str] = &[
+        "api returned 401",
+        "api returned 403",
+        "invalid api key",
+        "unauthorized",
+        "authentication",
+    ];
+    const RATE: &[&str] = &["asks to retry in", "api returned 429", "rate limit"];
+    if UNREACHABLE.iter().any(|marker| lower.contains(marker)) {
+        "backend_unreachable"
+    } else if AUTH.iter().any(|marker| lower.contains(marker)) {
+        "provider_auth"
+    } else if RATE.iter().any(|marker| lower.contains(marker)) {
+        "rate_limited"
+    } else {
+        "engine_error"
+    }
+}
+
+/// Short English label prepended to the plain-text error content for OpenAI clients
+/// (Open WebUI and the like) that can't localize by `kind`.
+fn friendly_error_label(kind: &str) -> Option<&'static str> {
+    match kind {
+        "backend_unreachable" => Some("Backend unreachable"),
+        "provider_auth" => Some("Backend authentication failed"),
+        "rate_limited" => Some("Provider rate limit"),
+        _ => None,
+    }
+}
+
 /// Error chunk for the streaming path. Shaped as a normal `chat.completion.chunk` so no
 /// client drops it: the message rides in `delta.content` (visible in Open WebUI and any
 /// OpenAI client) and in the `error` field (the built-in UI renders its error box). This
 /// replaces an off-shape `{error:{…}}` envelope that the UI silently ignored, which left a
-/// blank turn whenever the backend was down or a token limit was hit.
+/// blank turn whenever the backend was down or a token limit was hit. The error is
+/// classified (`classify_engine_error`) so the UI shows a human headline and OWUI gets a
+/// readable English label instead of a bare stringified error.
 fn openai_sse_error_chunk(
     id: &str,
     created: u64,
     model: &str,
     message: &str,
 ) -> Result<Event, Infallible> {
+    let kind = classify_engine_error(message);
+    let content = match friendly_error_label(kind) {
+        Some(label) => format!("\u{26a0} {label} — {message}"),
+        None => format!("\u{26a0} {message}"),
+    };
     sse_json_event(&ChatCompletionChunk {
         id: id.to_string(),
         object: "chat.completion.chunk",
@@ -992,14 +1060,14 @@ fn openai_sse_error_chunk(
             index: 0,
             delta: ChatCompletionDelta {
                 role: None,
-                content: Some(format!("\u{26a0} {message}")),
+                content: Some(content),
             },
             finish_reason: Some("stop"),
         }],
         usage: None,
         error: Some(ErrorBody {
             message: message.to_string(),
-            kind: "engine_error",
+            kind,
         }),
     })
 }
@@ -1211,6 +1279,31 @@ fn next_completion_id(created: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn engine_errors_classify_into_stable_kinds() {
+        // Real stringified failures → the machine kind the UI localizes by.
+        for (message, expected) in [
+            (
+                // reqwest hides the cause chain in Display — this is the REAL serve-path
+                // string for a refused/unreachable backend (verified live on the stand).
+                "api failed after 4 attempts: http error: error sending request for url (http://127.0.0.1:9/v1/chat/completions)",
+                "backend_unreachable",
+            ),
+            (
+                "engine error: api failed after 4 attempts: http error: error trying to connect: tcp connect error: Connection refused (os error 111)",
+                "backend_unreachable",
+            ),
+            ("api returned 401 Unauthorized: invalid api key", "provider_auth"),
+            (
+                "api failed after 1 attempts: api returned 429 Too Many Requests: provider rate-limited the request; it asks to retry in ~120s",
+                "rate_limited",
+            ),
+            ("something odd happened", "engine_error"),
+        ] {
+            assert_eq!(classify_engine_error(message), expected, "for: {message}");
+        }
+    }
 
     fn sample_messages() -> Vec<ChatMessage> {
         vec![
