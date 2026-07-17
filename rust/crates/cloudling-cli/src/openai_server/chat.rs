@@ -1194,9 +1194,13 @@ fn content_to_text(content: &Value) -> Result<String, String> {
                             parts.push(text.to_string());
                         }
                     }
-                    "image_url" => {
-                        parts.push("[image omitted: text-only cloudling openai-serve]".to_string());
-                    }
+                    // Image parts are extracted separately by `content_image_urls` and
+                    // forwarded as image blocks, so they must NOT leave a textual trace
+                    // here: a "[image omitted]" note next to a delivered image makes
+                    // vision models distrust their own eyes and refuse to describe it.
+                    // A genuinely text-only backend gets its own honest note from the
+                    // api layer when it rejects the image (`strip_images_from_request`).
+                    "image_url" => {}
                     _ => {}
                 }
             }
