@@ -22,6 +22,10 @@
       'settings.applyImmediate':'Changes apply immediately — no restart needed.',
       'settings.systemPrompt':'System prompt','settings.chat':'Chat','settings.reasoning':'Model reasoning',
       'settings.reasoningNote':'A collapsible block with the reasoning model’s thinking. Applies from the next message; if the model has no such mode, the block simply won’t appear.',
+      'settings.voice':'Voice','settings.ttsUrl':'Speech server URL','settings.ttsKey':'API key','settings.ttsModel':'Model','settings.ttsVoice':'Voice',
+      'settings.ttsExtra':'Extra request fields',
+      'settings.voiceNote':'Any OpenAI-compatible text-to-speech server (<b>/audio/speech</b>). Empty URL — voice output is off. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b>; if the server rejects them, the request is repeated without them.',
+      'common.speak':'Speak','common.stopSpeak':'Stop speaking',
       'settings.tools':'Tools','settings.mcpServers':'MCP servers',
       'settings.mcpNote':'An MCP server is an external program that gives the model new tools (they appear in chat as <b>mcp__name__*</b>). The stdio transport is supported: the given command runs for the duration of each reply.',
       'settings.mcpAdd':'+ Add server','settings.applyNextMsg':'Applies from the next message — no restart needed.',
@@ -111,6 +115,10 @@
       'settings.applyImmediate':'Изменения применяются сразу — перезапуск не нужен.',
       'settings.systemPrompt':'Системный промпт','settings.chat':'Чат','settings.reasoning':'Размышления модели',
       'settings.reasoningNote':'Сворачиваемый блок с рассуждениями reasoning-модели. Применяется со следующего сообщения; если у модели нет этого режима — блока просто не будет.',
+      'settings.voice':'Голос','settings.ttsUrl':'Адрес сервера речи','settings.ttsKey':'Ключ API','settings.ttsModel':'Модель','settings.ttsVoice':'Голос',
+      'settings.ttsExtra':'Доп. поля запроса',
+      'settings.voiceNote':'Любой OpenAI-совместимый сервер синтеза речи (<b>/audio/speech</b>). Пустой адрес — озвучка выключена. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b>; если сервер их не принимает, запрос повторяется без них.',
+      'common.speak':'Озвучить','common.stopSpeak':'Остановить озвучку',
       'settings.tools':'Инструменты','settings.mcpServers':'Серверы MCP',
       'settings.mcpNote':'MCP-сервер — внешняя программа, которая добавляет модели новые инструменты (в чате они видны как <b>mcp__имя__*</b>). Поддерживается транспорт stdio: указанная команда запускается на время каждого ответа.',
       'settings.mcpAdd':'+ Добавить сервер','settings.applyNextMsg':'Применяется со следующего сообщения — перезапуск не нужен.',
@@ -234,6 +242,8 @@
     trash:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M7 7l1 13h8l1-13"/><path d="M9 7V4h6v3"/></svg>',
     check:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>',
     send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 6.4 L19.2 15.2 L12 13.9 L4.8 15.2 Z"/><path fill="none" stroke="#16161a" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="M10 19.6 H14"/></svg>',
+    speak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>',
+    stopSpeak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
@@ -457,7 +467,7 @@
   function assistantTurnEl(content){
     var el=document.createElement('div'); el.className='turn a';
     paintTurn(el, content||'', false);
-    el.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('regen',t('common.regen'))+'</div>');
+    el.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('speak',t('common.speak'))+actBtn('regen',t('common.regen'))+'</div>');
     return el;
   }
   /* context-token counter: prompt_tokens from the final usage chunk = size of the context
@@ -585,7 +595,7 @@
     d.innerHTML='<details><summary>'+ic+'<span>'+esc(head)+'</span></summary><div class="cm-body">'+esc(body)+'</div></details>';
     return d;
   }
-  function renderConvo(messages){ thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return m.atts ? {role:m.role, content:m.content, atts:m.atts} : {role:m.role, content:m.content}; });
+  function renderConvo(messages){ stopSpeech(); thread.innerHTML=''; setCtxToks(dlgToks[activeId]); convo=(messages||[]).map(function(m){ return m.atts ? {role:m.role, content:m.content, atts:m.atts} : {role:m.role, content:m.content}; });
     convo.forEach(function(m){
       if(m.role==='assistant' && COMPACT_RE.test(m.content||'')){ thread.appendChild(compactMark(m.content)); return; }
       thread.appendChild(m.role==='user' ? userTurn(m) : assistantTurnEl(m.content));
@@ -1012,6 +1022,7 @@
 
   /* Tasks #7–#8: stream the answer and render inline tool-call blocks. */
   function generate(btn){
+    stopSpeech(); /* a new answer supersedes whatever is being read aloud */
     /* a fresh attempt (retry or a new message) supersedes any stored error for this dialog,
        and any stale error boxes left in the thread are dropped so they don't pile up */
     clearDlgErr();
@@ -1131,7 +1142,7 @@
       if(lastFinish==='length'){ /* backend hit its output/context limit — answer is cut off, not complete */
         turn.insertAdjacentHTML('beforeend','<div class="note trunc">'+IC.warn+t('err.truncated')+'</div>');
       }
-      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('regen',t('common.regen'))+'</div>');
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+actBtn('copy',t('common.copy'))+actBtn('speak',t('common.speak'))+actBtn('regen',t('common.regen'))+'</div>');
       convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
@@ -1255,7 +1266,7 @@
     /* regen on a stopped turn that produced answer text OR only reasoning (stopping a
        reasoning model mid-think leaves a reasoning block but no .md text — still regen-able) */
     if((hasText || turn.querySelector('.tool.reason, [type="reasoning"]')) && !turn.querySelector('.row-acts')){
-      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+(hasText?actBtn('copy',t('common.copy')):'')+actBtn('regen',t('common.regen'))+'</div>');
+      turn.insertAdjacentHTML('beforeend','<div class="row-acts">'+(hasText?actBtn('copy',t('common.copy'))+actBtn('speak',t('common.speak')):'')+actBtn('regen',t('common.regen'))+'</div>');
     }
     refreshTaskbar();
   }
@@ -1446,9 +1457,70 @@
         copyText((turn.querySelector('.bubble')||{textContent:''}).textContent, a);
       }
     }
+    else if(act==='speak'){ speakTurn(turn, a); }
     else if(act==='regen'){ regenTurn(turn); }
     else if(act==='edit'){ editUserTurn(turn); }
   });
+
+  /* ---------- voice output: «Озвучить» under an answer ----------
+     POST /ui/speak streams raw 16-bit mono PCM (rate in the Content-Type) while the server
+     cuts the message into pieces and the TTS backend synthesises them; each arriving chunk is
+     scheduled right after the previous one, so playback starts on the first chunk. One message
+     speaks at a time: another «Озвучить», a new question or switching the dialog stops it. */
+  var speech=null; /* {ctrl, ctx, btn, turn} of the message being spoken */
+  function setSpeakBtn(btn, on){
+    btn.innerHTML=on?IC.stopSpeak:IC.speak; var l=t(on?'common.stopSpeak':'common.speak');
+    btn.title=l; btn.setAttribute('aria-label', l); btn.classList.toggle('on', on);
+  }
+  function stopSpeech(){
+    if(!speech) return; var s=speech; speech=null;
+    try{ s.ctrl.abort(); }catch(_){} try{ s.ctx.close(); }catch(_){}
+    setSpeakBtn(s.btn, false); s.turn.classList.remove('speaking');
+  }
+  function speakErr(turn, msg){
+    var old=turn.querySelector('.note.speakerr'); if(old) old.remove();
+    var acts=turn.querySelector('.row-acts'); if(!acts) return;
+    acts.insertAdjacentHTML('afterend','<div class="note trunc speakerr">'+IC.warn+esc(String(msg||''))+'</div>');
+  }
+  function speakTurn(turn, btn){
+    if(speech && speech.btn===btn){ stopSpeech(); return; }
+    stopSpeech();
+    var idx=turnIndex(turn), raw=(idx>=0 && convo[idx] && typeof convo[idx].content==='string')?convo[idx].content:'';
+    var Ctx=window.AudioContext||window.webkitAudioContext; if(!raw || !Ctx) return;
+    var old=turn.querySelector('.note.speakerr'); if(old) old.remove();
+    var s={ctrl:new AbortController(), ctx:new Ctx(), btn:btn, turn:turn}; /* created on the click: autoplay policy */
+    speech=s; setSpeakBtn(btn, true); turn.classList.add('speaking');
+    uiFetch('/ui/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:raw}),signal:s.ctrl.signal})
+      .then(function(r){
+        if(!r.ok || !r.body){ return r.text().then(function(m){ throw new Error(m||('HTTP '+r.status)); }); }
+        var m=(r.headers.get('content-type')||'').match(/rate=(\d+)/), rate=m?parseInt(m[1],10):24000;
+        var reader=r.body.getReader(), next=0, carry=null;
+        function pump(){
+          return reader.read().then(function(res){
+            if(speech!==s) return; /* stopped meanwhile */
+            if(res.done){ /* all audio is scheduled — release the button when it has played out */
+              setTimeout(function(){ if(speech===s) stopSpeech(); }, Math.max(0, next-s.ctx.currentTime)*1000+150); return; }
+            var bytes=res.value;
+            if(carry){ var j=new Uint8Array(carry.length+bytes.length); j.set(carry); j.set(bytes, carry.length); bytes=j; carry=null; }
+            if(bytes.length%2){ carry=bytes.slice(bytes.length-1); bytes=bytes.subarray(0, bytes.length-1); } /* 16-bit samples may straddle chunks */
+            if(bytes.length){
+              var i16=new Int16Array(bytes.slice().buffer), f32=new Float32Array(i16.length);
+              for(var i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
+              var buf=s.ctx.createBuffer(1, f32.length, rate); buf.copyToChannel(f32, 0);
+              var src=s.ctx.createBufferSource(); src.buffer=buf; src.connect(s.ctx.destination);
+              var now=s.ctx.currentTime; if(next<now+0.05) next=now+0.05;
+              src.start(next); next+=buf.duration;
+            }
+            return pump();
+          });
+        }
+        return pump();
+      })
+      .catch(function(err){
+        if(err && err.name==='AbortError') return;
+        if(speech===s){ stopSpeech(); speakErr(turn, (err&&err.message)||err); }
+      });
+  }
 
   /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
   function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
@@ -1456,6 +1528,7 @@
     return uiFetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
       if(!s) return;
       settingsFields().forEach(function(el){ var k=el.getAttribute('data-key'); if(k in s) el.value=s[k]||''; });
+      document.body.classList.toggle('tts-on', !!(s.CLOUDLING_TTS_BASE_URL||'').trim()); /* «Озвучить» shows only with a TTS server */
       var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
     }).catch(function(){});
   }
@@ -1486,6 +1559,16 @@
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ btn.innerHTML=IC.check+' '+t('common.done'); loadSettings(); loadModelInfo(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
       .catch(function(err){ btn.innerHTML=o; btn.disabled=false; saveError(t('settings.saveErr',{msg:((err&&err.message)||'')})); });
+  });
+
+  /* «Голос» section: the TTS keys live in the same env file as «Основное» — save the whole set, applied live */
+  document.getElementById('voiceSave').addEventListener('click', function(){
+    var btn=this, o=btn.innerHTML, msg=document.getElementById('voiceMsg'); msg.hidden=true; btn.disabled=true;
+    var body={}; settingsFields().forEach(function(el){ body[el.getAttribute('data-key')]=el.value||''; });
+    uiFetch('/ui/settings/save-restart',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
+      .then(function(){ btn.innerHTML=IC.check+' '+t('common.done'); loadSettings(); setTimeout(function(){ btn.innerHTML=o; btn.disabled=false; }, 1200); })
+      .catch(function(err){ btn.innerHTML=o; btn.disabled=false; msg.hidden=false; msg.className='savemsg err'; msg.textContent=t('settings.saveErr',{msg:((err&&err.message)||'')}); });
   });
 
   /* ---------- tools section: MCP servers (settings.json mcpServers, no restart) ---------- */

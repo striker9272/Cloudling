@@ -2,12 +2,13 @@
 //!
 //! This root module owns the shared server state, the listener/router wiring, and the
 //! small always-on endpoints (`/health`, `/v1/models`). The request-heavy surfaces live
-//! in child modules — `chat` (`/v1/chat/completions` + SSE) and `ui` (the `--ui` web UI
-//! and its `/ui/*` data endpoints) — which resolve shared types and `create_engine_session`
-//! from this parent. Splitting is for navigation only; behavior is unchanged.
+//! in child modules — `chat` (`/v1/chat/completions` + SSE), `ui` (the `--ui` web UI
+//! and its `/ui/*` data endpoints) and `voice` (`/ui/speak`, speech through a TTS backend) —
+//! which resolve shared types and `create_engine_session` from this parent. Splitting is for navigation only; behavior is unchanged.
 
 mod chat;
 mod ui;
+mod voice;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use ui::{
     ui_kv_get, ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list,
     ui_settings_get, ui_settings_save_restart, ui_summarize, ui_title,
 };
+use voice::ui_speak;
 
 pub(crate) struct OpenAiServerState {
     // Engine model, served id, and permission mode are mutable behind locks so the UI
@@ -344,6 +346,7 @@ async fn serve(
             .route("/ui/answer", post(ui_answer))
             .route("/ui/title", post(ui_title))
             .route("/ui/summarize", post(ui_summarize))
+            .route("/ui/speak", post(ui_speak))
             .route_layer(middleware::from_fn_with_state(
                 state.clone(),
                 ui_auth_middleware,

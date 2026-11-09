@@ -68,6 +68,19 @@
     </div>
   </details>
   <details class="acc">
+    <summary><span data-i18n="settings.voice">Voice</span> <span class="chev">▾</span></summary>
+    <div class="body">
+      <div class="fld" style="margin-top:10px;"><div class="lab"><span data-i18n="settings.ttsUrl">Speech server URL</span> <span class="env">CLOUDLING_TTS_BASE_URL</span></div><input data-key="CLOUDLING_TTS_BASE_URL" value="" placeholder="http://host:port/v1" /></div>
+      <div class="fld"><div class="lab"><span data-i18n="settings.ttsKey">API key</span> <span class="env">CLOUDLING_TTS_API_KEY</span></div><input data-key="CLOUDLING_TTS_API_KEY" type="password" value="" /></div>
+      <div class="fld"><div class="lab"><span data-i18n="settings.ttsModel">Model</span> <span class="env">CLOUDLING_TTS_MODEL</span></div><input data-key="CLOUDLING_TTS_MODEL" value="" /></div>
+      <div class="fld"><div class="lab"><span data-i18n="settings.ttsVoice">Voice</span> <span class="env">CLOUDLING_TTS_VOICE</span></div><input data-key="CLOUDLING_TTS_VOICE" value="" /></div>
+      <div class="fld"><div class="lab"><span data-i18n="settings.ttsExtra">Extra request fields</span> <span class="env">CLOUDLING_TTS_EXTRA</span></div><input data-key="CLOUDLING_TTS_EXTRA" value="" placeholder="stream=true, sample_rate=48000" /></div>
+      <div class="note" data-i18n-html="settings.voiceNote">Any OpenAI-compatible text-to-speech server.</div>
+      <div class="acts"><button class="primary" id="voiceSave" data-i18n="common.save">Save</button></div>
+      <div class="savemsg" id="voiceMsg" hidden></div>
+    </div>
+  </details>
+  <details class="acc">
     <summary><span data-i18n="settings.tools">Tools</span> <span class="chev">▾</span></summary>
     <div class="body">
       <div class="subhead" style="margin-top:10px;"><span data-i18n="settings.mcpServers">MCP servers</span> <span class="env">mcpServers</span></div>

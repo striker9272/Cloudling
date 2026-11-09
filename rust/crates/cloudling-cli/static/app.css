@@ -402,6 +402,9 @@ body.open-right .drawer.right{transform:translateX(0);}
 .act{display:inline-flex; align-items:center; justify-content:center; gap:6px; background:none; border:none; color:var(--muted); cursor:pointer; padding:5px; border-radius:8px; transition:background .12s, color .12s;}
 .act:hover{background:var(--s-hover); color:var(--text);}
 .act.on{color:var(--accent);}
+/* voice output: «Озвучить» only when a TTS server is configured; the row stays visible while speaking */
+body:not(.tts-on) .act[data-act="speak"]{display:none;}
+.turn.speaking .row-acts{opacity:1;}
 
 /* tool-call block: flat with a thin left accent rail (green ok / red fail / gray reasoning),
    neutral tool name — replaces the old blue-tag card so it sits in the black-gray theme */

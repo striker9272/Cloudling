@@ -111,6 +111,8 @@ The right-hand drawer groups settings into:
   URL. Saving applies live and persists to the env file (`CLOUDLING_OPENAI_ENV_FILE`).
 - **System prompt** — manage presets.
 - **Chat** — toggle whether the model's reasoning block is shown.
+- **Voice** — the text-to-speech server behind the **Speak** button (see
+  [Voice output](#voice-output)); saved to the env file, applied live.
 - **Tools** — configure MCP servers (`mcpServers` in `settings.json`); applied on
   the next message, no restart. See [MCP servers](#mcp-servers) below.
 - **Security** — a single **Access level** preset that the UI maps onto the
@@ -192,6 +194,32 @@ returns an "image input is not supported" error — the server strips the images
 replaces them with a short text note, and retries once, so the conversation is
 not blocked. The image stays in the UI history, so switching to a vision-capable
 backend lets it through again.
+
+## Voice output
+
+With a text-to-speech server configured, every answer gets a **Speak** button next to
+**Copy**. The server reads the saved message aloud: reasoning, tool-call and question
+blocks and code are skipped, markdown is stripped, and text the agent wrote between tool
+calls is kept. The message is cut into sentence groups (a short first piece so the voice
+starts early, then up to ~400 characters, never splitting a sentence or a paragraph), sent
+one after another to the TTS server, and the audio is streamed to the browser as raw 16-bit
+mono PCM (`POST /ui/speak`, `audio/L16; rate=…`) as soon as it arrives. Another **Speak**, a
+new question or switching the dialog stops playback; the open TTS request is closed too.
+
+Any OpenAI-compatible TTS server works — only `POST {base}/audio/speech` is required:
+
+| Variable | What it does |
+|---|---|
+| `CLOUDLING_TTS_BASE_URL` | TTS base URL including `/v1`, e.g. `http://host:8020/v1`. Empty — voice output is off and the button is hidden. |
+| `CLOUDLING_TTS_API_KEY` | Bearer key, if the server needs one. |
+| `CLOUDLING_TTS_MODEL` | `model` field (required by OpenAI itself, e.g. `gpt-4o-mini-tts`); omitted when empty. |
+| `CLOUDLING_TTS_VOICE` | `voice` field; omitted when empty (server default). |
+| `CLOUDLING_TTS_EXTRA` | Extra request fields for options a particular server understands, as `key=value` pairs separated by commas, e.g. `stream=true, sample_rate=48000` (`true`/`false` and numbers are typed). Not JSON on purpose: systemd strips double quotes from `EnvironmentFile` values. If the server answers 400/422, the request is repeated without these fields. |
+
+Cloudling asks for `pcm` (OpenAI's contract: 24 kHz unless the response states its rate in
+`Content-Type`) and falls back to `wav` if the server rejects `pcm`. A server that streams its
+audio is relayed chunk by chunk; one that returns a whole file per request still works — each
+sentence group then arrives whole.
 
 ## First-run / onboarding
 

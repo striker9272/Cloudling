@@ -377,6 +377,12 @@ const SETTINGS_KEYS: &[&str] = &[
     "CLOUDLING_SERVED_MODEL_ID",
     "CLAW_PERMISSION_MODE",
     "CLAWD_WEB_SEARCH_BASE_URL",
+    // Voice output (`/ui/speak`): any OpenAI-compatible TTS backend; empty base URL = off.
+    "CLOUDLING_TTS_BASE_URL",
+    "CLOUDLING_TTS_API_KEY",
+    "CLOUDLING_TTS_MODEL",
+    "CLOUDLING_TTS_VOICE",
+    "CLOUDLING_TTS_EXTRA",
 ];
 
 pub(super) async fn ui_settings_get() -> Response {
