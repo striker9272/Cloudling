@@ -260,24 +260,34 @@ answer, and so does your voice (talk over it — what you are saying becomes the
 utterance). **End** leaves the dialog; an answer still being written finishes as text. What
 was said and answered are ordinary messages of the chat.
 
+The dialog opens on a screen of its own: the cloud in the middle (it moves with your voice
+while listening and with the answer's voice while speaking), the current state, the last thing
+you said, and — while an answer calls tools — the list of what the agent has done. **Show chat**
+folds the screen into a small card over the ordinary chat, where you can read along and also
+type (a typed message is answered aloud too); the card's arrows button unfolds it again.
+
 - The end of an utterance is found from the loudness of the microphone alone, so any STT
   server works; one utterance goes through the same `POST /ui/transcribe` as dictation.
 - The answer is spoken through `POST /ui/speak/live {id}` (the audio stream, as for **Speak**)
   fed by `POST /ui/speak/push {id, text, done}` — the answer text so far, the whole text every
   time. The server cleans it up, cuts it into sentences and starts speaking with the first one.
 - Each spoken message carries a short note asking the model for a conversational answer (brief,
-  no lists or markup). The note is added to the outgoing copy only, not to the stored chat.
+  no lists or markup, plain text rather than a tool to deliver it). The note is added to the outgoing copy only, not to the stored chat.
 - The chat title is generated after the dialog ends, not after the first exchange: the title
   is a separate model request, and on a backend with a single prompt-cache slot it would make
   the next answer start several seconds later.
 
-Two switches in **Settings → Voice** (stored with the UI data, both on by default):
+Three switches in **Settings → Voice** (stored with the UI data, all on by default):
 **Model reasoning in a dialog** — off sends the standard `reasoning_effort: "none"` with the
 dialog's requests (the model server must understand it; answers start sooner but are simpler —
 though a backend that caches one prompt re-reads the whole prompt once when a chat switches
 between reasoning on and off, i.e. on the first spoken message and the first typed one after);
 **Interrupt by voice** — off leaves only the button (useful with loudspeakers, where the model
-may hear itself). `POST /v1/chat/completions` passes a client's `reasoning_effort` on to the
+may hear itself); **Text while you speak** — the words appear on the dialog screen as you say
+them: the unfinished recording is sent to the same `POST /ui/transcribe` again and again (a
+recording cut short is still a valid one, so no streaming protocol is needed and any STT
+server will do; it costs that server more work, so switch it off on a weak one).
+`POST /v1/chat/completions` passes a client's `reasoning_effort` on to the
 backend for any client, not only the built-in UI.
 
 ## First-run / onboarding

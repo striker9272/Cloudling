@@ -25,8 +25,8 @@
       'settings.voice':'Voice','settings.ttsUrl':'Speech server URL','settings.ttsKey':'API key','settings.ttsModel':'Model','settings.ttsVoice':'Voice',
       'settings.ttsExtra':'Extra request fields',
       'settings.voiceOut':'Speech output','settings.voiceIn':'Speech input','settings.sttUrl':'Recognition server URL',
-      'settings.voiceCall':'Voice dialog','settings.callReasoning':'Model reasoning in a dialog','settings.callBarge':'Interrupt by voice',
-      'settings.callNote':'The voice dialog starts from the cloud button at an empty message field (both servers above are needed). <b>Reasoning</b> off — answers start sooner, but are simpler; it is switched off with the standard <b>reasoning_effort: none</b>, which the model server must understand. <b>Interrupt by voice</b> — start talking and the answer stops; with loudspeakers the model may hear itself, then switch this off and use the button.',
+      'settings.voiceCall':'Voice dialog','settings.callReasoning':'Model reasoning in a dialog','settings.callBarge':'Interrupt by voice','settings.callLive':'Text while you speak',
+      'settings.callNote':'The voice dialog starts from the cloud button at an empty message field (both servers above are needed). <b>Reasoning</b> off — answers start sooner, but are simpler; it is switched off with the standard <b>reasoning_effort: none</b>, which the model server must understand. <b>Interrupt by voice</b> — start talking and the answer stops; with loudspeakers the model may hear itself, then switch this off and use the button. <b>Text while you speak</b> — the phrase is recognised again and again as it grows and shown on the dialog screen; this loads the speech-recognition server more, so switch it off on a weak one.',
       'settings.voiceNote':'Any OpenAI-compatible servers: text-to-speech (<b>/audio/speech</b>) and speech-to-text (<b>/audio/transcriptions</b>). An empty URL turns that side off: no “Speak” under answers, no microphone at the message field. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b> or <b>language=ru</b>; if the server rejects them, the request is repeated without them. Browsers give the microphone only over HTTPS or on localhost.',
       'common.speak':'Speak','common.stopSpeak':'Stop speaking',
       'settings.tools':'Tools','settings.mcpServers':'MCP servers',
@@ -127,8 +127,8 @@
       'settings.voice':'Голос','settings.ttsUrl':'Адрес сервера речи','settings.ttsKey':'Ключ API','settings.ttsModel':'Модель','settings.ttsVoice':'Голос',
       'settings.ttsExtra':'Доп. поля запроса',
       'settings.voiceOut':'Озвучка','settings.voiceIn':'Распознавание речи','settings.sttUrl':'Адрес сервера распознавания',
-      'settings.voiceCall':'Голосовой диалог','settings.callReasoning':'Размышления модели в диалоге','settings.callBarge':'Перебивание голосом',
-      'settings.callNote':'Голосовой диалог запускается кнопкой-облаком при пустом поле ввода (нужны оба сервера выше). <b>Размышления</b> выключены — ответ начинается быстрее, но он проще; выключаются стандартным <b>reasoning_effort: none</b>, сервер модели должен его понимать. <b>Перебивание голосом</b> — заговорили, и ответ обрывается; с колонками модель может услышать саму себя, тогда выключите и перебивайте кнопкой.',
+      'settings.voiceCall':'Голосовой диалог','settings.callReasoning':'Размышления модели в диалоге','settings.callBarge':'Перебивание голосом','settings.callLive':'Текст, пока вы говорите',
+      'settings.callNote':'Голосовой диалог запускается кнопкой-облаком при пустом поле ввода (нужны оба сервера выше). <b>Размышления</b> выключены — ответ начинается быстрее, но он проще; выключаются стандартным <b>reasoning_effort: none</b>, сервер модели должен его понимать. <b>Перебивание голосом</b> — заговорили, и ответ обрывается; с колонками модель может услышать саму себя, тогда выключите и перебивайте кнопкой. <b>Текст, пока вы говорите</b> — фраза распознаётся снова и снова по мере роста и показывается на экране диалога; сервер распознавания при этом нагружается сильнее, на слабом — выключите.',
       'settings.voiceNote':'Любые OpenAI-совместимые серверы: синтеза речи (<b>/audio/speech</b>) и распознавания (<b>/audio/transcriptions</b>). Пустой адрес выключает свою половину: нет «Озвучить» под ответами, нет микрофона у поля ввода. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b> или <b>language=ru</b>; если сервер их не принимает, запрос повторяется без них. Браузеры дают микрофон только по HTTPS или на localhost.',
       'common.speak':'Озвучить','common.stopSpeak':'Остановить озвучку',
       'settings.tools':'Инструменты','settings.mcpServers':'Серверы MCP',
@@ -1711,12 +1711,16 @@
       CALL_OVER_NOISE=2.5,   /* speech must be this many times louder than the room */
       CALL_PUSH_MS=120,      /* how often the growing answer is passed on to the speaker */
       CALL_BARGE_MS=250,     /* this much unbroken speech over the answer interrupts it */
-      CALL_BARGE_OVER=2;     /* ...and it must be this many times louder than what starts an utterance */
+      CALL_BARGE_OVER=2,     /* ...and it must be this many times louder than what starts an utterance */
+      CALL_LIVE_CHUNK_MS=300, /* the recorder hands its data over this often, so an unfinished utterance can be recognised */
+      CALL_LIVE_MS=600,      /* pause between two recognitions of an unfinished utterance */
+      CALL_LIVE_QUIET_MS=350, /* none once the speaker has been quiet this long: the final one is about to start */
+      CALL_LIVE_MAX_MS=45000; /* ...and none for an utterance longer than this (each pass re-reads all of it) */
   var CALL_STYLE_NOTE='[Voice conversation: this message was dictated, and your reply text will be read aloud by a speech synthesizer. Just answer in plain text as usual - no tool is needed to deliver the reply. Answer the way people talk: short and to the point, usually one to three sentences, in the user\'s language. No lists, headings, tables, code or other markup; write numbers and units out in words. Give details only when asked.]';
-  /* dialog preferences (ui_kv, both default ON): let the model reason before answering; let the
-     user's voice interrupt the answer */
-  var callPrefs={reasoning:true, barge:true};
-  [['callReason','call_reasoning','reasoning'],['callBarge','call_barge','barge']].forEach(function(p){
+  /* dialog preferences (ui_kv, all default ON): let the model reason before answering; let the
+     user's voice interrupt the answer; show the words while they are being said */
+  var callPrefs={reasoning:true, barge:true, live:true};
+  [['callReason','call_reasoning','reasoning'],['callBarge','call_barge','barge'],['callLive','call_live','live']].forEach(function(p){
     var sel=document.getElementById(p[0]); if(!sel) return;
     uiFetch('/ui/kv/'+p[1]).then(function(r){ return r.ok?r.json():null; }).then(function(d){
       if(d && d.value==='false'){ sel.checked=false; callPrefs[p[2]]=false; }
@@ -1742,10 +1746,36 @@
     var r=new MediaRecorder(c.stream, opts);
     r.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
     r.onstop=function(){ if(r.keep && call===c) callHeard(c, new Blob(chunks, {type:r.mimeType||''})); };
-    r.start(); c.rec=r; c.recAt=performance.now(); c.speech=false; c.loudMs=0; c.quietMs=0;
+    r.parts=chunks; if(callPrefs.live) r.start(CALL_LIVE_CHUNK_MS); else r.start();
+    c.rec=r; c.recAt=performance.now(); c.speech=false; c.loudMs=0; c.quietMs=0;
   }
   function callRecStop(c, keep){ var r=c.rec; c.rec=null; if(r && r.state!=='inactive'){ r.keep=!!keep; try{ r.stop(); }catch(_){} } }
   function callListen(c){ if(call!==c) return; callSetState(c, 'listening'); callRecStart(c); }
+  /* what the user said — or, live, is saying right now — on the dialog screen (the end of a long text stays in view) */
+  function callHeardText(text, live){
+    callEach('.cs-heard', function(el){ el.textContent=text; el.classList.toggle('live', !!live); el.scrollTop=el.scrollHeight; });
+  }
+  /* Words while you speak: during an utterance the recording so far is recognised again and
+     again through the same /ui/transcribe (a recording cut short is still a recording, so any
+     STT server will do), and the text is shown on the dialog screen. One request at a time,
+     and none once the speaker has paused — the final recognition is about to start and should
+     not queue behind a partial one. A failed pass is simply skipped. */
+  function callLive(c, ts){
+    var r=c.rec;
+    if(!callPrefs.live || !r || !r.parts || !c.speech || c.liveBusy || c.quietMs>CALL_LIVE_QUIET_MS) return;
+    if(ts-(c.liveAt||0)<CALL_LIVE_MS || ts-c.recAt>CALL_LIVE_MAX_MS) return;
+    var n=r.parts.length; if(!n || n===r.liveN) return;
+    r.liveN=n; c.liveBusy=true;
+    var blob=new Blob(r.parts.slice(0, n), {type:r.mimeType||''});
+    uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob})
+      .then(function(resp){ return resp.ok?resp.json():null; })
+      .then(function(j){
+        var said=((j && j.text)||'').trim();
+        if(said && call===c && c.rec===r && c.state==='listening') callHeardText(said, true);
+      })
+      .catch(function(){})
+      .then(function(){ c.liveBusy=false; c.liveAt=performance.now(); });
+  }
   function callUtterance(c){ if(call!==c || c.state!=='listening' || !c.speech) return; callSetState(c, 'transcribing'); callRecStop(c, true); }
   /* The living cloud of the dialog: the drops of the «thinking» cloud, moved by script so that
      they can follow a voice. Quiet — gathered and slow; the louder the voice (the user's while
@@ -1819,6 +1849,7 @@
         if(c.speech && c.quietMs>=CALL_SILENCE_MS){ callUtterance(c); }
         else if(!c.speech && ts-c.recAt>CALL_RESTART_MS){ callRecStop(c, false); callRecStart(c); }
       }
+      callLive(c, ts);
     } else if(c.state==='speaking'){
       shown=rmsOf(c.outAn, c.outBuf);
       if(callPrefs.barge && c.rec){ /* the user talks over the answer → it stops, and what they are saying is the next utterance */
@@ -1841,7 +1872,7 @@
       c.ctx.createMediaStreamSource(stream).connect(c.an); /* the microphone is only measured, never played back */
       c.outAn=c.ctx.createAnalyser(); c.outAn.fftSize=512; c.outBuf=new Uint8Array(c.outAn.fftSize);
       c.outAn.connect(c.ctx.destination); /* the answer plays through this node, so its level can be shown */
-      callVizInit(c); c.feedN=-1; callFeed(c, ''); callEach('.cs-heard', function(el){ el.textContent=''; });
+      callVizInit(c); c.feedN=-1; callFeed(c, ''); callHeardText('', false);
       callEach('.call-time', function(el){ el.textContent=recClock(0); });
       c.clock=setInterval(function(){ var txt=recClock(Date.now()-c.started); callEach('.call-time', function(el){ el.textContent=txt; }); }, 500);
       document.body.classList.remove('call-min'); document.body.classList.add('in-call'); /* the dialog opens on its own screen */
@@ -1913,7 +1944,7 @@
   }
   /* send what was said */
   function callSay(c, said){
-    callEach('.cs-heard', function(el){ el.textContent=said; });
+    callHeardText(said, false);
     callAnswer(c);
     var b=(viewHome.hidden===false) ? document.querySelector('#view-home .send') : dlgSend();
     sendFlow(said, b);
@@ -1922,7 +1953,7 @@
   function callTyped(c){
     if(c.ctrl){ try{ c.ctrl.abort(); }catch(_){} c.ctrl=null; }
     callRecStop(c, false);
-    callEach('.cs-heard', function(el){ el.textContent=''; });
+    callHeardText('', false);
     callAnswer(c);
   }
   /* cut the answer off — both its voice and its writing */
