@@ -50,7 +50,7 @@
       'home.composerPh':'Ask or give a task…','dialog.composerPh':'Reply…',
       'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
       'composer.mic':'Dictate','composer.micCancel':'Cancel recording','composer.micDone':'Done',
-      'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking',
+      'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking','call.done':'Done','call.stop':'Stop','call.showChat':'Show chat','call.expand':'Expand','call.feed':'What Cloudling is doing',
       'call.end':'End','call.endAria':'End the voice dialog','call.tapDone':'I’m done speaking','call.tapStop':'Interrupt','call.err':'Voice dialog: {msg}',
       'mic.speak':'Speak…','mic.busy':'Transcribing…','mic.empty':'Didn’t catch that — nothing was recognised',
       'mic.insecure':'The microphone works only over HTTPS or on localhost','mic.denied':'No access to the microphone — allow it in the browser',
@@ -152,7 +152,7 @@
       'home.composerPh':'Спроси или дай задачу…','dialog.composerPh':'Ответить…',
       'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
       'composer.mic':'Диктовать','composer.micCancel':'Отменить запись','composer.micDone':'Готово',
-      'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю',
+      'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю','call.done':'Готово','call.stop':'Перебить','call.showChat':'Показать чат','call.expand':'Развернуть','call.feed':'Что делает Cloudling',
       'call.end':'Завершить','call.endAria':'Завершить голосовой диалог','call.tapDone':'Я всё сказал','call.tapStop':'Перебить','call.err':'Голосовой диалог: {msg}',
       'mic.speak':'Говорите…','mic.busy':'Распознаю…','mic.empty':'Не расслышал — ничего не распознано',
       'mic.insecure':'Микрофон доступен только по HTTPS или на localhost','mic.denied':'Нет доступа к микрофону — разрешите его в браузере',
@@ -723,12 +723,13 @@
   /* ---------- send → generation lifecycle ---------- */
   /* The round button of a composer when nothing is being generated: «Send» — dimmed while the
      field is empty — or, with an empty field and both speech servers configured, the cloud that
-     starts a voice dialog. Without speech-to-text the empty field keeps the dimmed arrow. */
+     starts a voice dialog. Without speech-to-text, and while a dialog is already on, the empty
+     field keeps the dimmed arrow. */
   function paintSend(btn){
     if(btn.classList.contains('stop')) return;
     var ent=btn.closest('.entry'), ta=ent.querySelector('textarea'), atts=ent.querySelector('.attachments');
     var empty=!(ta.value||'').trim() && !(atts && atts.children.length);
-    var asCall=empty && callAvailable();
+    var asCall=empty && !call && callAvailable();
     btn.classList.toggle('call', asCall); btn.classList.toggle('off', empty && !asCall);
     btn.innerHTML=asCall?IC.callCloud:IC.send;
     var l=t(asCall?'composer.call':'composer.send'); btn.title=l; btn.setAttribute('aria-label', l);
@@ -1391,8 +1392,10 @@
     }); }
     function trySend(){ if(btn.classList.contains('stop')) return; var v=(ta.value||'').trim(); if(!v && pending.length===0) return;
       var msg = pending.length ? {content:v, atts:stagedToAtts(pending)} : v;
-      ta.value=''; pending=[]; renderPending(); refresh(); sendFlow(msg, btn); }
-    btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ stopGen(btn); return; } if(btn.classList.contains('call')){ startCall(); return; } trySend(); });
+      ta.value=''; pending=[]; renderPending(); refresh();
+      if(call) callTyped(call); /* typed during a voice dialog: the answer is spoken all the same */
+      sendFlow(msg, btn); }
+    btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ if(call) callTap(); else stopGen(btn); return; } if(btn.classList.contains('call')){ startCall(); return; } trySend(); });
     ta.addEventListener('input', refresh);
     ta.addEventListener('keydown', function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); trySend(); } });
     if(clip){ clip.addEventListener('click', function(){ if(input) input.click(); }); }
@@ -1729,7 +1732,9 @@
     c.state=state; document.body.setAttribute('data-call', state);
     callEach('.call-status', function(el){ el.textContent=t('call.'+state); });
     var stop=(state==='thinking' || state==='speaking'), l=t(stop?'call.tapStop':'call.tapDone');
-    callEach('.call-tap', function(b){ b.innerHTML=stop?IC.callStop:IC.callDone; b.title=l; b.setAttribute('aria-label', l); b.disabled=(state==='transcribing'); });
+    var cap='<span class="lbl">'+esc(t(stop?'call.stop':'call.done'))+'</span>'; /* the caption shows on the dialog screen only */
+    if(state==='listening') callEach('.cs-feed', function(el){ el.classList.remove('on'); }); /* the answer is over: its actions fold away */
+    callEach('.call-tap', function(b){ b.innerHTML=(stop?IC.callStop:IC.callDone)+cap; b.title=l; b.setAttribute('aria-label', l); b.disabled=(state==='transcribing'); });
   }
   function callRecStart(c){
     if(c.rec) callRecStop(c, false);
@@ -1742,14 +1747,71 @@
   function callRecStop(c, keep){ var r=c.rec; c.rec=null; if(r && r.state!=='inactive'){ r.keep=!!keep; try{ r.stop(); }catch(_){} } }
   function callListen(c){ if(call!==c) return; callSetState(c, 'listening'); callRecStart(c); }
   function callUtterance(c){ if(call!==c || c.state!=='listening' || !c.speech) return; callSetState(c, 'transcribing'); callRecStop(c, true); }
-  /* one frame of the dialog: the level meter and, while listening, the end-of-utterance watch */
+  /* The living cloud of the dialog: the drops of the «thinking» cloud, moved by script so that
+     they can follow a voice. Quiet — gathered and slow; the louder the voice (the user's while
+     listening, the answer's while speaking), the faster and wider the drops swing and the bigger
+     the cloud. Thinking is the familiar steady churn (same paths and periods as `.cloud`). */
+  var CALL_DROPS=[{a:[-6,-3], b:[4,3], per:2.4}, {a:[6,-3], b:[-5,3], per:2.7}, {a:[2,5], b:[-3,-5], per:2.1}];
+  var CALL_VIZ_QUIET={amp:0.45, speed:0.6},  /* swing (share of the full path) and tempo in silence */
+      CALL_VIZ_LOUD={amp:1.1, speed:4, scale:1.2}, /* ...and at full voice */
+      CALL_MIC_GAIN=8, CALL_OUT_GAIN=5;      /* loudness (RMS) → 0..1 for the microphone and for the answer */
+  var CALL_CALM=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  function callVizInit(c){
+    c.viz=[]; callEach('.callviz', function(svg){ c.viz.push({svg:svg, drops:[svg.querySelector('.x1'), svg.querySelector('.x2'), svg.querySelector('.x3')]}); });
+    c.vz={lv:0, amp:CALL_VIZ_QUIET.amp, speed:CALL_VIZ_QUIET.speed, scale:1, ph:[0,0,0]};
+  }
+  function callVizFrame(c, dt, level){
+    var v=c.vz; if(!v) return;
+    var voiced=(c.state==='listening' || c.state==='speaking'), target=voiced?Math.max(0, Math.min(1, level)):0;
+    v.lv+=(target-v.lv)*(1-Math.exp(-dt/(target>v.lv?70:260))); /* quick to rise, slow to settle */
+    var amp=1, speed=1, scale=1;
+    if(voiced){
+      amp=CALL_VIZ_QUIET.amp+(CALL_VIZ_LOUD.amp-CALL_VIZ_QUIET.amp)*v.lv;
+      speed=CALL_VIZ_QUIET.speed+(CALL_VIZ_LOUD.speed-CALL_VIZ_QUIET.speed)*v.lv;
+      scale=1+(CALL_VIZ_LOUD.scale-1)*v.lv;
+    }
+    if(CALL_CALM){ amp=Math.min(amp, CALL_VIZ_QUIET.amp); speed=Math.min(speed, CALL_VIZ_QUIET.speed); scale=1; }
+    var k=1-Math.exp(-dt/180);
+    v.amp+=(amp-v.amp)*k; v.speed+=(speed-v.speed)*k; v.scale+=(scale-v.scale)*k;
+    var pos=CALL_DROPS.map(function(d, i){
+      v.ph[i]+=dt/1000*v.speed*2*Math.PI/d.per;
+      var w=Math.cos(v.ph[i])*v.amp;
+      return 'translate('+((d.a[0]+d.b[0])/2+(d.a[0]-d.b[0])/2*w).toFixed(2)+' '+((d.a[1]+d.b[1])/2+(d.a[1]-d.b[1])/2*w).toFixed(2)+')';
+    });
+    var sc='scale('+v.scale.toFixed(3)+')';
+    c.viz.forEach(function(z){ z.svg.style.transform=sc; z.drops.forEach(function(el, i){ if(el) el.setAttribute('transform', pos[i]); }); });
+  }
+  /* «What the agent is doing»: the tools the answer has called so far, the latest few */
+  var CALL_FEED_MAX=4, CALL_FEED_HINT=['query','command','url','file_path','path','pattern','description','prompt'];
+  function callFeed(c, acc){
+    var re=new RegExp(BLOCK_RE.source, 'g'), m, items=[];
+    while((m=re.exec(acc||''))){
+      if(m[1]!=='tool_calls') continue;
+      var name=(m[2].match(/\bname="([^"]*)"/)||[])[1]||''; if(!name || name==='TodoWrite') continue;
+      var hint='';
+      try{ var a=JSON.parse(decodeEntities((m[2].match(/\barguments="([^"]*)"/)||[])[1]||'{}'));
+        if(a && typeof a==='object'){
+          for(var i=0;i<CALL_FEED_HINT.length && !hint;i++){ if(typeof a[CALL_FEED_HINT[i]]==='string') hint=a[CALL_FEED_HINT[i]]; }
+          if(!hint){ for(var key in a){ if(typeof a[key]==='string'){ hint=a[key]; break; } } }
+        } }catch(_){}
+      items.push({name:name, hint:hint.replace(/\s+/g,' ').trim().slice(0,160), bad:/<summary>Tool Failed<\/summary>/.test(m[3])});
+    }
+    if(items.length===c.feedN) return;
+    c.feedN=items.length;
+    var html=items.slice(-CALL_FEED_MAX).map(function(it){
+      return '<div class="cs-act'+(it.bad?' bad':'')+'">'+(it.bad?IC.warn:IC.callDone)+'<span>'+esc(it.name)+(it.hint?': '+esc(it.hint):'')+'</span></div>'; }).join('');
+    callEach('.cs-feed', function(el){ el.classList.toggle('on', items.length>0); });
+    if(items.length) callEach('.cs-feed-list', function(el){ el.innerHTML=html; }); /* an emptied list keeps its lines while it folds away */
+  }
+  /* the dialog's own screen, or — folded — the card over the ordinary chat */
+  function callFold(min){ if(call) document.body.classList.toggle('call-min', !!min); }
+  /* one frame of the dialog: the cloud and, while listening, the end-of-utterance watch */
   function callFrame(c, ts){
     if(call!==c) return;
     c.raf=requestAnimationFrame(function(t2){ callFrame(c, t2); });
     var dt=Math.min(100, ts-(c.frameAt||ts)); c.frameAt=ts;
-    var rms=rmsOf(c.an, c.buf), shown=0;
+    var rms=rmsOf(c.an, c.buf), shown=0; /* shown: how loud the answer is right now */
     if(c.state==='listening'){
-      shown=rms;
       var loud=rms > Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE);
       if(loud){ c.loudMs+=dt; c.quietMs=0; if(!c.speech && c.loudMs>=CALL_SPEECH_MS) c.speech=true; }
       else {
@@ -1764,9 +1826,7 @@
         else { c.bargeMs=0; if(ts-c.recAt>CALL_RESTART_MS) callRecStart(c); }
       }
     }
-    c.peak=Math.max(c.peak||0, shown);
-    if(ts-(c.barAt||0)>=70){ c.barAt=ts; var lvl=Math.min(1, c.peak*4); c.peak=0;
-      callEach('.call-level', function(el){ if(!el._hist) el._hist=[]; paintLevel(el.children, el._hist, lvl); }); }
+    callVizFrame(c, dt, c.state==='listening' ? Math.max(0, rms-Math.max(CALL_MIN_LEVEL, c.noise*1.5))*CALL_MIC_GAIN : shown*CALL_OUT_GAIN);
   }
   function startCall(){
     if(call || generating || !callAvailable()) return;
@@ -1781,10 +1841,11 @@
       c.ctx.createMediaStreamSource(stream).connect(c.an); /* the microphone is only measured, never played back */
       c.outAn=c.ctx.createAnalyser(); c.outAn.fftSize=512; c.outBuf=new Uint8Array(c.outAn.fftSize);
       c.outAn.connect(c.ctx.destination); /* the answer plays through this node, so its level can be shown */
-      callEach('.call-level', function(el){ el.innerHTML=levelBars(MIC_BARS); el._hist=[]; });
+      callVizInit(c); c.feedN=-1; callFeed(c, ''); callEach('.cs-heard', function(el){ el.textContent=''; });
       callEach('.call-time', function(el){ el.textContent=recClock(0); });
       c.clock=setInterval(function(){ var txt=recClock(Date.now()-c.started); callEach('.call-time', function(el){ el.textContent=txt; }); }, 500);
-      document.body.classList.add('in-call');
+      document.body.classList.remove('call-min'); document.body.classList.add('in-call'); /* the dialog opens on its own screen */
+      document.querySelectorAll('.entry .send').forEach(paintSend);
       callListen(c);
       c.raf=requestAnimationFrame(function(ts){ callFrame(c, ts); });
     }).catch(function(err){
@@ -1810,8 +1871,9 @@
         c.ctrl=null; toast(t('mic.err',{msg:((err && err.message)||'')})); callListen(c);
       });
   }
-  /* send what was said and speak the answer while it is being written */
-  function callSay(c, said){
+  /* speak the answer to the message about to be sent, while it is being written */
+  function callAnswer(c){
+    c.feedN=-1; callFeed(c, '');
     var spk={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8), ctrl:new AbortController(), nodes:[], text:'', sent:-1, over:false, audioOver:false};
     c.spk=spk; callSetState(c, 'thinking');
     function live(){ return call===c && c.spk===spk; }
@@ -1828,7 +1890,7 @@
       c.spk=null; callListen(c);
     }
     genHook={
-      text:function(acc){ spk.text=acc; if(!spk.timer){ spk.timer=setTimeout(function(){ spk.timer=null; if(!spk.over && spk.text.length>spk.sent) push(false); }, CALL_PUSH_MS); } },
+      text:function(acc){ spk.text=acc; callFeed(c, acc); if(!spk.timer){ spk.timer=setTimeout(function(){ spk.timer=null; if(!spk.over && spk.text.length>spk.sent) push(false); }, CALL_PUSH_MS); } },
       done:function(){ spk.over=true; if(spk.timer){ clearTimeout(spk.timer); spk.timer=null; } push(true); next(); }
     };
     uiFetch('/ui/speak/live',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:spk.id}), signal:spk.ctrl.signal})
@@ -1848,8 +1910,20 @@
         toast(t('call.err',{msg:((err && err.message)||'')}));
         spk.audioOver=true; if(c.state==='speaking') callSetState(c, 'thinking'); next();
       });
+  }
+  /* send what was said */
+  function callSay(c, said){
+    callEach('.cs-heard', function(el){ el.textContent=said; });
+    callAnswer(c);
     var b=(viewHome.hidden===false) ? document.querySelector('#view-home .send') : dlgSend();
     sendFlow(said, b);
+  }
+  /* a message typed in the composer while the dialog is on (the caller sends it) */
+  function callTyped(c){
+    if(c.ctrl){ try{ c.ctrl.abort(); }catch(_){} c.ctrl=null; }
+    callRecStop(c, false);
+    callEach('.cs-heard', function(el){ el.textContent=''; });
+    callAnswer(c);
   }
   /* cut the answer off — both its voice and its writing */
   function callSilence(c){
@@ -1887,12 +1961,14 @@
     if(c.raf) cancelAnimationFrame(c.raf);
     if(c.stream) c.stream.getTracks().forEach(function(tr){ tr.stop(); });
     try{ c.ctx.close(); }catch(_){}
-    document.body.classList.remove('in-call'); document.body.removeAttribute('data-call');
+    document.body.classList.remove('in-call','call-min'); document.body.removeAttribute('data-call');
     document.querySelectorAll('.entry .send').forEach(paintSend);
     if(c.titleDue && c.titleDue===activeId) genTitle(); /* the title put off while the dialog was on */
   }
   callEach('.call-tap', function(b){ b.addEventListener('click', callTap); });
   callEach('.call-end', function(b){ b.addEventListener('click', endCall); });
+  callEach('.cs-min', function(b){ b.addEventListener('click', function(){ callFold(true); }); });
+  callEach('.cc-max', function(b){ b.addEventListener('click', function(){ callFold(false); }); });
 
   function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
   function loadSettings(){

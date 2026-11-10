@@ -429,7 +429,8 @@ body:not(.stt-on) .entry .mic{display:none;}
 .entry.transcribing .rec-dot{width:14px; height:14px; box-sizing:border-box; background:none; border:2px solid var(--line2); border-top-color:var(--load); animation:spin360 .9s linear infinite;}
 .entry.transcribing .rec-time,.entry.transcribing .rec-level{display:none;}
 /* voice dialog: with both speech servers the empty composer's round button is the cloud that
-   starts it; while it is on, a status row and two buttons stand in for the whole composer */
+   starts it. While it is on, the dialog has a screen of its own — the living cloud, the state,
+   what the agent is doing; «Show chat» folds that screen into a card floating over the chat. */
 .send.call svg{display:block;}
 .callcloud circle{fill:var(--on-accent);}
 .callcloud .x1{animation:call-rest1 3.1s ease-in-out infinite;}
@@ -438,22 +439,62 @@ body:not(.stt-on) .entry .mic{display:none;}
 @keyframes call-rest1{0%,100%{transform:translate(0,-3px)}50%{transform:translate(0,-4.3px)}}
 @keyframes call-rest2{0%,100%{transform:translate(-6px,1px)}50%{transform:translate(-7.3px,1.7px)}}
 @keyframes call-rest3{0%,100%{transform:translate(6px,1px)}50%{transform:translate(7.3px,1.7px)}}
-.entry .callrow,.entry .call-tap,.entry .call-end{display:none;}
-body.in-call .entry textarea,body.in-call .entry .attachments,body.in-call .entry .rec,body.in-call .entry .clip,body.in-call .entry .mic,body.in-call .entry .send,body.in-call .entry .rec-cancel,body.in-call .entry .rec-done{display:none;}
-body.in-call .entry .callrow{display:flex; align-items:center; gap:12px; min-height:104px; padding:14px 14px 4px; font-size:16px; line-height:1.55; color:var(--text);}
-body.in-call #view-dialog .entry .callrow{min-height:46px; padding-top:10px;}
-.callrow .call-dot{flex:none; width:9px; height:9px; border-radius:50%; background:var(--ok);}
-.callrow .call-status{font-weight:500; min-width:5.5em;}
-.callrow .call-time{color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums;}
-body[data-call="thinking"] .call-dot,body[data-call="transcribing"] .call-dot{width:14px; height:14px; box-sizing:border-box; background:none; border:2px solid var(--line2); border-top-color:var(--load); animation:spin360 .9s linear infinite;}
-body[data-call="speaking"] .call-dot{background:var(--load);}
-body[data-call="thinking"] .call-level,body[data-call="transcribing"] .call-level{visibility:hidden;}
-body.in-call .entry .call-tap{width:38px; height:38px; border-radius:50%; background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .12s, transform .1s;}
-body.in-call .entry .call-tap:hover{background:var(--s-ctrl-h);}
-body.in-call .entry .call-tap:active,body.in-call .entry .call-end:active{transform:scale(.94);}
-body.in-call .entry .call-tap:disabled{opacity:.4; cursor:default;}
-body.in-call .entry .call-end{height:38px; padding:0 16px; border-radius:var(--r-pill); background:#c8363b; border:none; color:#fff; font:inherit; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; transition:filter .12s, transform .1s;}
-body.in-call .entry .call-end:hover{filter:brightness(1.08);}
+body.in-call .entry .mic{display:none;}
+/* the drops of this cloud are moved by script (app.js, callVizFrame) so they can follow a voice */
+.callviz{display:block; overflow:visible; transform-origin:50% 50%; will-change:transform;}
+.callviz circle{fill:var(--load);}
+.callscreen{position:absolute; inset:0; z-index:30; box-sizing:border-box; padding:22px 60px 34px; background:var(--bg); display:flex; flex-direction:column; align-items:center; overflow:hidden;
+  opacity:0; visibility:hidden; transform-origin:calc(100% - 176px) 76px;
+  transition:transform .36s cubic-bezier(.3,.7,.2,1), opacity .24s ease, visibility 0s linear .36s;}
+body.in-call .callscreen{opacity:1; visibility:visible; transition:transform .36s cubic-bezier(.3,.7,.2,1), opacity .24s ease, visibility 0s;}
+body.in-call.call-min .callscreen{opacity:0; visibility:hidden; transform:scale(.2); transition:transform .36s cubic-bezier(.3,.7,.2,1), opacity .22s ease .1s, visibility 0s linear .36s;}
+.cs-top{width:100%; display:flex; align-items:center; justify-content:space-between;}
+.cs-meta{display:inline-flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums;}
+.cs-dot{width:7px; height:7px; border-radius:50%; background:var(--ok);}
+.cs-min{background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); font:inherit; font-size:13px; padding:8px 14px; border-radius:var(--r-pill); cursor:pointer; transition:background .12s;}
+.cs-min:hover,.cc-btn:hover{background:var(--s-ctrl-h);}
+/* the cloud with its captions sits in the middle of the screen; the list of actions, when the
+   answer calls tools, unfolds under it and so lifts it — and lets it settle back afterwards */
+.cs-mid{flex:1; min-height:0; width:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding-bottom:3vh;}
+.cs-stage{flex:none; height:230px; display:flex; align-items:center; justify-content:center;}
+.cs-status{font-size:20px; font-weight:600; margin-top:4px; min-height:1.4em;}
+.cs-heard{max-width:560px; min-height:3em; margin-top:8px; font-size:14px; line-height:1.5; color:var(--muted); text-align:center; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;}
+.cs-feed{width:560px; max-width:100%; box-sizing:border-box; background:var(--panel); border:1px solid transparent; border-radius:16px; display:flex; flex-direction:column; gap:10px; overflow:hidden;
+  max-height:0; margin-top:0; padding:0 16px; opacity:0; transition:max-height .45s cubic-bezier(.3,.7,.2,1), margin-top .45s cubic-bezier(.3,.7,.2,1), padding .45s cubic-bezier(.3,.7,.2,1), opacity .3s ease, border-color .3s ease;}
+.cs-feed.on{max-height:200px; margin-top:16px; padding:14px 16px; opacity:1; border-color:var(--line);}
+.cs-feed-h{font-size:12px; color:var(--muted);}
+.cs-feed-list{display:flex; flex-direction:column; gap:9px;}
+.cs-act{display:flex; align-items:center; gap:9px; min-width:0; font-size:13px; color:var(--muted);}
+.cs-act:last-child{color:var(--text);}
+.cs-act svg{flex:none; width:15px; height:15px; color:var(--ok);}
+.cs-act.bad svg{color:var(--muted);}
+.cs-act span{min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+/* the controls: one bar — what the middle button does is written on it */
+.cs-btns{flex:none; display:flex; align-items:center; gap:10px; padding:8px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r-pill); box-shadow:0 14px 40px rgba(0,0,0,.4);}
+.cs-act-btn{height:52px; min-width:168px; padding:0 22px; border-radius:var(--r-pill); border:1px solid var(--line2); background:var(--s-ctrl); color:var(--text); font:inherit; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:background .15s, color .15s, border-color .15s, opacity .15s, transform .1s;}
+.cs-act-btn:hover{background:var(--s-ctrl-h);}
+.cs-act-btn svg{flex:none; width:18px; height:18px;}
+body[data-call="listening"] .cs-act-btn{background:var(--accent); border-color:var(--accent); color:var(--on-accent);}
+body[data-call="listening"] .cs-act-btn:hover{background:var(--accent); filter:brightness(.93);}
+.cc-btn .lbl{display:none;}
+.cs-hang{flex:none; width:52px; height:52px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:filter .12s, transform .1s;}
+.cs-act-btn:active,.cs-hang:active,.cc-btn:active,.cc-hang:active{transform:scale(.96);}
+.call-tap:disabled{opacity:.45; cursor:default;}
+.cs-hang,.cc-hang{background:#c8363b; border:none; color:#fff;}
+.cs-hang:hover,.cc-hang:hover{filter:brightness(1.08);}
+.callcard{position:absolute; top:14px; right:58px; z-index:30; width:236px; box-sizing:border-box; background:var(--panel); border:1px solid var(--line2); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:12px; box-shadow:0 12px 36px rgba(0,0,0,.45);
+  opacity:0; visibility:hidden; transform:scale(.7); transform-origin:100% 0;
+  transition:transform .3s cubic-bezier(.3,.7,.2,1), opacity .18s ease, visibility 0s linear .3s;}
+body.in-call.call-min .callcard{opacity:1; visibility:visible; transform:none; transition:transform .3s cubic-bezier(.3,.7,.2,1) .12s, opacity .2s ease .14s, visibility 0s;}
+.cc-head{display:flex; align-items:center; gap:12px;}
+.cc-viz{flex:none; width:64px; height:56px; display:flex; align-items:center; justify-content:center;}
+.cc-txt{display:flex; flex-direction:column; gap:3px; min-width:0;}
+.cc-txt .call-status{font-size:15px; font-weight:600;}
+.cc-txt .call-time{font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums;}
+.cc-btns{display:flex; align-items:center; gap:8px;}
+.cc-btn{flex:none; width:44px; height:44px; border-radius:50%; background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .12s, transform .1s;}
+.cc-hang{flex:1; height:44px; border-radius:var(--r-pill); font:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:filter .12s, transform .1s;}
+@media (prefers-reduced-motion: reduce){ .callscreen,.callcard{transition:opacity .15s ease, visibility 0s !important; transform:none !important;} }
 
 /* tool-call block: flat with a thin left accent rail (green ok / red fail / gray reasoning),
    neutral tool name — replaces the old blue-tag card so it sits in the black-gray theme */
