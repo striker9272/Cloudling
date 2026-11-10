@@ -25,6 +25,8 @@
       'settings.voice':'Voice','settings.ttsUrl':'Speech server URL','settings.ttsKey':'API key','settings.ttsModel':'Model','settings.ttsVoice':'Voice',
       'settings.ttsExtra':'Extra request fields',
       'settings.voiceOut':'Speech output','settings.voiceIn':'Speech input','settings.sttUrl':'Recognition server URL',
+      'settings.voiceCall':'Voice dialog','settings.callReasoning':'Model reasoning in a dialog','settings.callBarge':'Interrupt by voice',
+      'settings.callNote':'The voice dialog starts from the cloud button at an empty message field (both servers above are needed). <b>Reasoning</b> off — answers start sooner, but are simpler; it is switched off with the standard <b>reasoning_effort: none</b>, which the model server must understand. <b>Interrupt by voice</b> — start talking and the answer stops; with loudspeakers the model may hear itself, then switch this off and use the button.',
       'settings.voiceNote':'Any OpenAI-compatible servers: text-to-speech (<b>/audio/speech</b>) and speech-to-text (<b>/audio/transcriptions</b>). An empty URL turns that side off: no “Speak” under answers, no microphone at the message field. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b> or <b>language=ru</b>; if the server rejects them, the request is repeated without them. Browsers give the microphone only over HTTPS or on localhost.',
       'common.speak':'Speak','common.stopSpeak':'Stop speaking',
       'settings.tools':'Tools','settings.mcpServers':'MCP servers',
@@ -48,6 +50,8 @@
       'home.composerPh':'Ask or give a task…','dialog.composerPh':'Reply…',
       'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
       'composer.mic':'Dictate','composer.micCancel':'Cancel recording','composer.micDone':'Done',
+      'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking',
+      'call.end':'End','call.endAria':'End the voice dialog','call.tapDone':'I’m done speaking','call.tapStop':'Interrupt','call.err':'Voice dialog: {msg}',
       'mic.speak':'Speak…','mic.busy':'Transcribing…','mic.empty':'Didn’t catch that — nothing was recognised',
       'mic.insecure':'The microphone works only over HTTPS or on localhost','mic.denied':'No access to the microphone — allow it in the browser',
       'mic.unsupported':'This browser cannot record audio','mic.err':'Speech recognition failed: {msg}',
@@ -123,6 +127,8 @@
       'settings.voice':'Голос','settings.ttsUrl':'Адрес сервера речи','settings.ttsKey':'Ключ API','settings.ttsModel':'Модель','settings.ttsVoice':'Голос',
       'settings.ttsExtra':'Доп. поля запроса',
       'settings.voiceOut':'Озвучка','settings.voiceIn':'Распознавание речи','settings.sttUrl':'Адрес сервера распознавания',
+      'settings.voiceCall':'Голосовой диалог','settings.callReasoning':'Размышления модели в диалоге','settings.callBarge':'Перебивание голосом',
+      'settings.callNote':'Голосовой диалог запускается кнопкой-облаком при пустом поле ввода (нужны оба сервера выше). <b>Размышления</b> выключены — ответ начинается быстрее, но он проще; выключаются стандартным <b>reasoning_effort: none</b>, сервер модели должен его понимать. <b>Перебивание голосом</b> — заговорили, и ответ обрывается; с колонками модель может услышать саму себя, тогда выключите и перебивайте кнопкой.',
       'settings.voiceNote':'Любые OpenAI-совместимые серверы: синтеза речи (<b>/audio/speech</b>) и распознавания (<b>/audio/transcriptions</b>). Пустой адрес выключает свою половину: нет «Озвучить» под ответами, нет микрофона у поля ввода. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b> или <b>language=ru</b>; если сервер их не принимает, запрос повторяется без них. Браузеры дают микрофон только по HTTPS или на localhost.',
       'common.speak':'Озвучить','common.stopSpeak':'Остановить озвучку',
       'settings.tools':'Инструменты','settings.mcpServers':'Серверы MCP',
@@ -146,6 +152,8 @@
       'home.composerPh':'Спроси или дай задачу…','dialog.composerPh':'Ответить…',
       'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
       'composer.mic':'Диктовать','composer.micCancel':'Отменить запись','composer.micDone':'Готово',
+      'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю',
+      'call.end':'Завершить','call.endAria':'Завершить голосовой диалог','call.tapDone':'Я всё сказал','call.tapStop':'Перебить','call.err':'Голосовой диалог: {msg}',
       'mic.speak':'Говорите…','mic.busy':'Распознаю…','mic.empty':'Не расслышал — ничего не распознано',
       'mic.insecure':'Микрофон доступен только по HTTPS или на localhost','mic.denied':'Нет доступа к микрофону — разрешите его в браузере',
       'mic.unsupported':'Этот браузер не умеет записывать звук','mic.err':'Не удалось распознать: {msg}',
@@ -254,6 +262,11 @@
     send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 6.4 L19.2 15.2 L12 13.9 L4.8 15.2 Z"/><path fill="none" stroke="#16161a" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="M10 19.6 H14"/></svg>',
     speak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>',
     stopSpeak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    /* the voice-dialog button: the same living cloud as the splash and «thinking» (drops fused by
+       the `goo` filter), at rest — gathered and barely breathing (motion in app.css, `.callcloud`) */
+    callCloud:'<svg class="callcloud" viewBox="0 0 40 28" width="30" height="21" aria-hidden="true"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="5"/></g></svg>',
+    callDone:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
+    callStop:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
@@ -708,10 +721,27 @@
   }
 
   /* ---------- send → generation lifecycle ---------- */
-  function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off'); btn.innerHTML='<span class="sq"></span>'; btn.title=t('composer.stop'); } else { btn.classList.remove('stop'); btn.innerHTML=IC.send; btn.title=t('composer.send'); var ta=btn.closest('.entry').querySelector('textarea'); btn.classList.toggle('off', !(ta.value||'').trim()); } }
+  /* The round button of a composer when nothing is being generated: «Send» — dimmed while the
+     field is empty — or, with an empty field and both speech servers configured, the cloud that
+     starts a voice dialog. Without speech-to-text the empty field keeps the dimmed arrow. */
+  function paintSend(btn){
+    if(btn.classList.contains('stop')) return;
+    var ent=btn.closest('.entry'), ta=ent.querySelector('textarea'), atts=ent.querySelector('.attachments');
+    var empty=!(ta.value||'').trim() && !(atts && atts.children.length);
+    var asCall=empty && callAvailable();
+    btn.classList.toggle('call', asCall); btn.classList.toggle('off', empty && !asCall);
+    btn.innerHTML=asCall?IC.callCloud:IC.send;
+    var l=t(asCall?'composer.call':'composer.send'); btn.title=l; btn.setAttribute('aria-label', l);
+  }
+  function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off','call'); btn.innerHTML='<span class="sq"></span>'; btn.title=t('composer.stop'); } else { btn.classList.remove('stop'); paintSend(btn); } }
   function clearTimers(){ genTimers.forEach(function(t){clearTimeout(t);clearInterval(t);}); genTimers=[]; }
 
-  function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); if(pendingLiveCancel){ pendingLiveCancel(); pendingLiveCancel=null; } }
+  /* Whoever wants to follow an answer while it is being written (the voice dialog speaks it):
+     text(acc) on every piece of content, done() once when the generation is over — however it
+     ends (complete, error, stopped). */
+  var genHook=null;
+  function genHookDone(){ var h=genHook; genHook=null; if(h){ try{ h.done(); }catch(_){} } }
+  function finishGen(btn){ generating=false; setSend(btn,false); setItemGenerating(activeItem,false); if(pendingLiveCancel){ pendingLiveCancel(); pendingLiveCancel=null; } genHookDone(); }
 
   /* Error-box headline is localized by the server's machine `kind` (error.kind in the SSE
      error chunk — see classify_engine_error in chat.rs); the raw message stays as the detail. */
@@ -1108,6 +1138,7 @@
     function onContent(piece){
       if(errored) return;
       acc+=piece; liveAcc=acc;
+      if(genHook){ try{ genHook.text(acc); }catch(_){} }
       if(thinkingShown){ turn.innerHTML=''; thinkingShown=false;
         liveBox=document.createElement('div'); liveBox.className='md'; turn.appendChild(liveBox);
         caretEl=document.createElement('span'); caretEl.className='caret'; }
@@ -1156,13 +1187,18 @@
       convo.push({role:'assistant', content:acc}); liveAcc='';
       saveActive(); refreshTaskbar();
       finishGen(btn); maybeScroll();
-      if(convo.length===2){ genTitle(); } /* first exchange complete → auto-title */
+      if(convo.length===2){ /* first exchange complete → auto-title; in a voice dialog only after it ends: the
+                               title is a separate model request that pushes the dialog's prompt out of the
+                               backend's cache, and the next answer would start seconds later */
+        if(call){ call.titleDue=activeId; } else { genTitle(); } }
       if(serverCompacted){ compactNow(true); } /* server rescued an overflowing context — shorten our stored history too */
       else { maybeAutoCompact(dlgToks[activeId]); } /* fold older turns if context crossed the window threshold */
     }
     fetch('/v1/chat/completions', {
       method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, /* marker: enable interactive AskUserQuestion widget */
-      body:JSON.stringify({ model:'claw', stream:true, messages:outgoingMessages() }),
+      body:JSON.stringify(call && !callPrefs.reasoning
+        ? { model:'claw', stream:true, messages:outgoingMessages(), reasoning_effort:'none' } /* voice dialog, reasoning switched off */
+        : { model:'claw', stream:true, messages:outgoingMessages() }),
       signal:ac.signal
     }).then(function(r){
       if(!r.ok || !r.body){ return r.text().then(function(t){ throw new Error('HTTP '+r.status+(t?': '+t:'')); }); }
@@ -1260,7 +1296,7 @@
     generate(btn);
   }
 
-  function stopGen(btn){ if(currentAbort){ currentAbort.abort(); currentAbort=null; } clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
+  function stopGen(btn){ genHookDone(); if(currentAbort){ currentAbort.abort(); currentAbort=null; } clearTimers(); generating=false; setSend(btn,false); setItemGenerating(activeItem,false);
     var th=thread.querySelector('.thinking'); if(th){ th.closest('.turn').remove(); liveAcc=''; return; }
     var turn=thread.querySelector('.turn.a:last-child'); if(!turn) return;
     /* the partial answer stays visible in the thread, so it must enter the history
@@ -1293,6 +1329,20 @@
   /* dictation: speech needs little bitrate (keeps the upload small); one utterance is capped, a
      slip of the finger shorter than MIC_MIN_MS is not sent */
   var MIC_BITRATE=32000, MIC_MAX_MS=5*60*1000, MIC_MIN_MS=300, MIC_BARS=20;
+  function micReady(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+  function recMime(){ var c=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'];
+    for(var i=0;i<c.length;i++){ if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } return ''; }
+  function recClock(ms){ var sec=Math.floor(ms/1000); return Math.floor(sec/60)+':'+('0'+(sec%60)).slice(-2); }
+  function levelBars(n){ var h=''; for(var i=0;i<n;i++){ h+='<i></i>'; } return h; }
+  /* scrolling level bars: push a 0..1 level, the bars show the last `bars.length` of them */
+  function paintLevel(bars, hist, lvl){
+    hist.push(lvl); if(hist.length>bars.length) hist.shift();
+    for(var k=0;k<bars.length;k++){ var h=hist[hist.length-bars.length+k];
+      bars[k].style.height=(h===undefined?4:Math.round(4+h*18))+'px'; bars[k].style.opacity=(h===undefined?'':'1'); }
+  }
+  function rmsOf(an, buf){ an.getByteTimeDomainData(buf); var sum=0; for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; sum+=v*v; } return Math.sqrt(sum/buf.length); }
+  /* the voice dialog needs both speech servers and a microphone the browser will hand out */
+  function callAvailable(){ var b=document.body.classList; return b.contains('stt-on') && b.contains('tts-on') && micReady(); }
   var TEXT_EXT=/\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|js|jsx|mjs|cjs|ts|tsx|py|rs|go|java|c|h|cpp|hpp|cc|rb|php|sh|bash|zsh|sql|r|lua|pl|swift|kt|scala|dart|vue|svelte|tex|rst|env|gitignore|dockerfile|makefile|diff|patch)$/i;
   function humanSize(n){ if(n==null) return ''; if(n<1024) return n+' '+t('size.b'); if(n<1024*1024) return (n/1024).toFixed(n<10240?1:0)+' '+t('size.kb'); return (n/1048576).toFixed(1)+' '+t('size.mb'); }
   function fileKind(f){
@@ -1326,7 +1376,7 @@
   function wireComposer(scope){ var ta=scope.querySelector('textarea'); var btn=scope.querySelector('.send');
     var clip=scope.querySelector('.clip'); var atts=scope.querySelector('.attachments'); var input=scope.querySelector('.fileinput');
     var pending=[]; /* files staged for the next send (live data: image url / text content) */
-    function refresh(){ if(!btn.classList.contains('stop')) btn.classList.toggle('off', !(ta.value||'').trim() && pending.length===0); }
+    function refresh(){ paintSend(btn); }
     function renderPending(){ atts.innerHTML='';
       pending.forEach(function(att){ atts.appendChild(attChipEl(att, function(){ var i=pending.indexOf(att); if(i>=0) pending.splice(i,1); renderPending(); refresh(); })); });
     }
@@ -1342,7 +1392,7 @@
     function trySend(){ if(btn.classList.contains('stop')) return; var v=(ta.value||'').trim(); if(!v && pending.length===0) return;
       var msg = pending.length ? {content:v, atts:stagedToAtts(pending)} : v;
       ta.value=''; pending=[]; renderPending(); refresh(); sendFlow(msg, btn); }
-    btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ stopGen(btn); return; } trySend(); });
+    btn.addEventListener('click', function(){ if(btn.classList.contains('stop')){ stopGen(btn); return; } if(btn.classList.contains('call')){ startCall(); return; } trySend(); });
     ta.addEventListener('input', refresh);
     ta.addEventListener('keydown', function(e){ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); trySend(); } });
     if(clip){ clip.addEventListener('click', function(){ if(input) input.click(); }); }
@@ -1370,10 +1420,6 @@
        secure context (HTTPS or localhost): elsewhere the button stays but explains why. */
     var mic=scope.querySelector('.mic'), recTime=scope.querySelector('.rec-time'), recLevel=scope.querySelector('.rec-level'), recMsg=scope.querySelector('.rec-msg');
     var rec=null; /* the utterance in progress: {stream, recorder, chunks, ctx, raf, timer, started, cancelled, ctrl} */
-    function micReady(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
-    function recMime(){ var c=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'];
-      for(var i=0;i<c.length;i++){ if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } return ''; }
-    function recClock(ms){ var sec=Math.floor(ms/1000); return Math.floor(sec/60)+':'+('0'+(sec%60)).slice(-2); }
     function recRelease(r){ /* let go of the microphone, the meter and the timer */
       if(r.timer){ clearInterval(r.timer); r.timer=null; }
       if(r.raf){ cancelAnimationFrame(r.raf); r.raf=null; }
@@ -1389,13 +1435,9 @@
       function draw(ts){
         if(rec!==r || !r.stream) return;
         r.raf=requestAnimationFrame(draw);
-        an.getByteTimeDomainData(buf);
-        var sum=0; for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; sum+=v*v; }
-        peak=Math.max(peak, Math.sqrt(sum/buf.length));
+        peak=Math.max(peak, rmsOf(an, buf));
         if(ts-last<70) return;
-        last=ts; hist.push(Math.min(1, peak*4)); peak=0; if(hist.length>bars.length) hist.shift();
-        for(var k=0;k<bars.length;k++){ var h=hist[hist.length-bars.length+k];
-          bars[k].style.height=(h===undefined?4:Math.round(4+h*18))+'px'; bars[k].style.opacity=(h===undefined?'':'1'); }
+        last=ts; paintLevel(bars, hist, Math.min(1, peak*4)); peak=0;
       }
       r.raf=requestAnimationFrame(draw);
     }
@@ -1459,7 +1501,7 @@
         });
     }
     if(mic){
-      if(recLevel){ var barsHtml=''; for(var b=0;b<MIC_BARS;b++){ barsHtml+='<i></i>'; } recLevel.innerHTML=barsHtml; }
+      if(recLevel) recLevel.innerHTML=levelBars(MIC_BARS);
       if(!micReady()) mic.classList.add('off');
       mic.addEventListener('click', recStart);
       scope.querySelector('.rec-cancel').addEventListener('click', function(){ recStop(true); });
@@ -1599,6 +1641,35 @@
     var acts=turn.querySelector('.row-acts'); if(!acts) return;
     acts.insertAdjacentHTML('afterend','<div class="note trunc speakerr">'+IC.warn+esc(String(msg||''))+'</div>');
   }
+  /* Play a /ui/speak* answer: raw 16-bit mono PCM (rate in the Content-Type), each arriving
+     chunk scheduled on `ctx` right after the previous one. Reading stops when alive() turns
+     false. `out` is the node to play into (default: the speakers), `nodes` collects the
+     scheduled sources so the caller can cut them off. Resolves with the ctx time at which the
+     scheduled audio ends. */
+  function playPcm(r, ctx, alive, out, nodes){
+    var m=(r.headers.get('content-type')||'').match(/rate=(\d+)/), rate=m?parseInt(m[1],10):24000;
+    var reader=r.body.getReader(), next=0, carry=null;
+    function pump(){
+      return reader.read().then(function(res){
+        if(!alive()){ try{ reader.cancel(); }catch(_){} return next; } /* stopped meanwhile */
+        if(res.done) return next;
+        var bytes=res.value;
+        if(carry){ var j=new Uint8Array(carry.length+bytes.length); j.set(carry); j.set(bytes, carry.length); bytes=j; carry=null; }
+        if(bytes.length%2){ carry=bytes.slice(bytes.length-1); bytes=bytes.subarray(0, bytes.length-1); } /* 16-bit samples may straddle chunks */
+        if(bytes.length){
+          var i16=new Int16Array(bytes.slice().buffer), f32=new Float32Array(i16.length);
+          for(var i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
+          var buf=ctx.createBuffer(1, f32.length, rate); buf.copyToChannel(f32, 0);
+          var src=ctx.createBufferSource(); src.buffer=buf; src.connect(out||ctx.destination);
+          var now=ctx.currentTime; if(next<now+0.05) next=now+0.05;
+          src.start(next); next+=buf.duration;
+          if(nodes) nodes.push(src);
+        }
+        return pump();
+      });
+    }
+    return pump();
+  }
   function speakTurn(turn, btn){
     if(speech && speech.btn===btn){ stopSpeech(); return; }
     stopSpeech();
@@ -1610,28 +1681,10 @@
     uiFetch('/ui/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:raw}),signal:s.ctrl.signal})
       .then(function(r){
         if(!r.ok || !r.body){ return r.text().then(function(m){ throw new Error(m||('HTTP '+r.status)); }); }
-        var m=(r.headers.get('content-type')||'').match(/rate=(\d+)/), rate=m?parseInt(m[1],10):24000;
-        var reader=r.body.getReader(), next=0, carry=null;
-        function pump(){
-          return reader.read().then(function(res){
-            if(speech!==s) return; /* stopped meanwhile */
-            if(res.done){ /* all audio is scheduled — release the button when it has played out */
-              setTimeout(function(){ if(speech===s) stopSpeech(); }, Math.max(0, next-s.ctx.currentTime)*1000+150); return; }
-            var bytes=res.value;
-            if(carry){ var j=new Uint8Array(carry.length+bytes.length); j.set(carry); j.set(bytes, carry.length); bytes=j; carry=null; }
-            if(bytes.length%2){ carry=bytes.slice(bytes.length-1); bytes=bytes.subarray(0, bytes.length-1); } /* 16-bit samples may straddle chunks */
-            if(bytes.length){
-              var i16=new Int16Array(bytes.slice().buffer), f32=new Float32Array(i16.length);
-              for(var i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
-              var buf=s.ctx.createBuffer(1, f32.length, rate); buf.copyToChannel(f32, 0);
-              var src=s.ctx.createBufferSource(); src.buffer=buf; src.connect(s.ctx.destination);
-              var now=s.ctx.currentTime; if(next<now+0.05) next=now+0.05;
-              src.start(next); next+=buf.duration;
-            }
-            return pump();
-          });
-        }
-        return pump();
+        return playPcm(r, s.ctx, function(){ return speech===s; }).then(function(end){
+          /* all audio is scheduled — release the button when it has played out */
+          if(speech===s) setTimeout(function(){ if(speech===s) stopSpeech(); }, Math.max(0, end-s.ctx.currentTime)*1000+150);
+        });
       })
       .catch(function(err){
         if(err && err.name==='AbortError') return;
@@ -1640,6 +1693,207 @@
   }
 
   /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
+  /* ---------- voice dialog ----------
+     A spoken conversation in a loop: listen → (a pause, or a tap on the button) → recognise →
+     send as an ordinary message → the answer is spoken while it is being written → listen
+     again. The microphone stays open for the whole dialog; one utterance is recorded at a time
+     and goes through the same /ui/transcribe as dictation. The end of an utterance is found
+     from the loudness alone (works with any STT server). The answer goes to /ui/speak/live:
+     the server cuts and speaks it sentence by sentence while the text is still arriving. What
+     was said and answered are ordinary messages of the dialog. */
+  var CALL_SILENCE_MS=1000,  /* this much quiet after speech ends the utterance */
+      CALL_SPEECH_MS=120,    /* this much unbroken sound counts as the start of speech */
+      CALL_RESTART_MS=3000,  /* while nobody speaks the recording is restarted, so an utterance never drags a long silence along */
+      CALL_MIN_LEVEL=0.012,  /* loudness (RMS, 0..1) below which nothing is speech */
+      CALL_OVER_NOISE=2.5,   /* speech must be this many times louder than the room */
+      CALL_PUSH_MS=120,      /* how often the growing answer is passed on to the speaker */
+      CALL_BARGE_MS=250,     /* this much unbroken speech over the answer interrupts it */
+      CALL_BARGE_OVER=2;     /* ...and it must be this many times louder than what starts an utterance */
+  var CALL_STYLE_NOTE='[Voice conversation: this message was dictated, and your reply text will be read aloud by a speech synthesizer. Just answer in plain text as usual - no tool is needed to deliver the reply. Answer the way people talk: short and to the point, usually one to three sentences, in the user\'s language. No lists, headings, tables, code or other markup; write numbers and units out in words. Give details only when asked.]';
+  /* dialog preferences (ui_kv, both default ON): let the model reason before answering; let the
+     user's voice interrupt the answer */
+  var callPrefs={reasoning:true, barge:true};
+  [['callReason','call_reasoning','reasoning'],['callBarge','call_barge','barge']].forEach(function(p){
+    var sel=document.getElementById(p[0]); if(!sel) return;
+    uiFetch('/ui/kv/'+p[1]).then(function(r){ return r.ok?r.json():null; }).then(function(d){
+      if(d && d.value==='false'){ sel.checked=false; callPrefs[p[2]]=false; }
+    }).catch(function(){});
+    sel.addEventListener('change', function(){
+      callPrefs[p[2]]=sel.checked;
+      uiFetch('/ui/kv/'+p[1],{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:sel.checked?'true':'false'})}).catch(function(){});
+    });
+  });
+  var call=null; /* {state, stream, ctx, an, outAn, rec, spk, ...} while a dialog is on */
+  function callEach(sel, fn){ document.querySelectorAll(sel).forEach(fn); }
+  function callSetState(c, state){
+    c.state=state; document.body.setAttribute('data-call', state);
+    callEach('.call-status', function(el){ el.textContent=t('call.'+state); });
+    var stop=(state==='thinking' || state==='speaking'), l=t(stop?'call.tapStop':'call.tapDone');
+    callEach('.call-tap', function(b){ b.innerHTML=stop?IC.callStop:IC.callDone; b.title=l; b.setAttribute('aria-label', l); b.disabled=(state==='transcribing'); });
+  }
+  function callRecStart(c){
+    if(c.rec) callRecStop(c, false);
+    var chunks=[], mime=recMime(), opts={audioBitsPerSecond:MIC_BITRATE}; if(mime) opts.mimeType=mime;
+    var r=new MediaRecorder(c.stream, opts);
+    r.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
+    r.onstop=function(){ if(r.keep && call===c) callHeard(c, new Blob(chunks, {type:r.mimeType||''})); };
+    r.start(); c.rec=r; c.recAt=performance.now(); c.speech=false; c.loudMs=0; c.quietMs=0;
+  }
+  function callRecStop(c, keep){ var r=c.rec; c.rec=null; if(r && r.state!=='inactive'){ r.keep=!!keep; try{ r.stop(); }catch(_){} } }
+  function callListen(c){ if(call!==c) return; callSetState(c, 'listening'); callRecStart(c); }
+  function callUtterance(c){ if(call!==c || c.state!=='listening' || !c.speech) return; callSetState(c, 'transcribing'); callRecStop(c, true); }
+  /* one frame of the dialog: the level meter and, while listening, the end-of-utterance watch */
+  function callFrame(c, ts){
+    if(call!==c) return;
+    c.raf=requestAnimationFrame(function(t2){ callFrame(c, t2); });
+    var dt=Math.min(100, ts-(c.frameAt||ts)); c.frameAt=ts;
+    var rms=rmsOf(c.an, c.buf), shown=0;
+    if(c.state==='listening'){
+      shown=rms;
+      var loud=rms > Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE);
+      if(loud){ c.loudMs+=dt; c.quietMs=0; if(!c.speech && c.loudMs>=CALL_SPEECH_MS) c.speech=true; }
+      else {
+        c.quietMs+=dt; if(!c.speech){ c.loudMs=0; c.noise=c.noise*0.97+rms*0.03; } /* the room, as heard between utterances */
+        if(c.speech && c.quietMs>=CALL_SILENCE_MS){ callUtterance(c); }
+        else if(!c.speech && ts-c.recAt>CALL_RESTART_MS){ callRecStop(c, false); callRecStart(c); }
+      }
+    } else if(c.state==='speaking'){
+      shown=rmsOf(c.outAn, c.outBuf);
+      if(callPrefs.barge && c.rec){ /* the user talks over the answer → it stops, and what they are saying is the next utterance */
+        if(rms > Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE)*CALL_BARGE_OVER){ c.bargeMs=(c.bargeMs||0)+dt; if(c.bargeMs>=CALL_BARGE_MS) callBarge(c); }
+        else { c.bargeMs=0; if(ts-c.recAt>CALL_RESTART_MS) callRecStart(c); }
+      }
+    }
+    c.peak=Math.max(c.peak||0, shown);
+    if(ts-(c.barAt||0)>=70){ c.barAt=ts; var lvl=Math.min(1, c.peak*4); c.peak=0;
+      callEach('.call-level', function(el){ if(!el._hist) el._hist=[]; paintLevel(el.children, el._hist, lvl); }); }
+  }
+  function startCall(){
+    if(call || generating || !callAvailable()) return;
+    var Ctx=window.AudioContext||window.webkitAudioContext; if(!Ctx) return;
+    stopSpeech();
+    var c={state:'', noise:0.004, started:Date.now(), ctx:new Ctx()}; call=c; /* the context is created on the click: autoplay policy */
+    navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}).then(function(stream){
+      if(call!==c){ stream.getTracks().forEach(function(tr){ tr.stop(); }); return; }
+      c.stream=stream;
+      try{ c.ctx.resume(); }catch(_){}
+      c.an=c.ctx.createAnalyser(); c.an.fftSize=512; c.buf=new Uint8Array(c.an.fftSize);
+      c.ctx.createMediaStreamSource(stream).connect(c.an); /* the microphone is only measured, never played back */
+      c.outAn=c.ctx.createAnalyser(); c.outAn.fftSize=512; c.outBuf=new Uint8Array(c.outAn.fftSize);
+      c.outAn.connect(c.ctx.destination); /* the answer plays through this node, so its level can be shown */
+      callEach('.call-level', function(el){ el.innerHTML=levelBars(MIC_BARS); el._hist=[]; });
+      callEach('.call-time', function(el){ el.textContent=recClock(0); });
+      c.clock=setInterval(function(){ var txt=recClock(Date.now()-c.started); callEach('.call-time', function(el){ el.textContent=txt; }); }, 500);
+      document.body.classList.add('in-call');
+      callListen(c);
+      c.raf=requestAnimationFrame(function(ts){ callFrame(c, ts); });
+    }).catch(function(err){
+      if(call===c) endCall();
+      toast(t((err && (err.name==='NotAllowedError' || err.name==='SecurityError')) ? 'mic.denied' : 'mic.unsupported'));
+    });
+  }
+  /* an utterance was recorded: recognise it and send it as a message */
+  function callHeard(c, blob){
+    if(!blob.size){ callListen(c); return; }
+    c.ctrl=new AbortController();
+    uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob, signal:c.ctrl.signal})
+      .then(function(resp){ if(!resp.ok){ return resp.text().then(function(m){ throw new Error(m||('HTTP '+resp.status)); }); } return resp.json(); })
+      .then(function(j){
+        if(call!==c) return;
+        c.ctrl=null;
+        var said=((j && j.text)||'').trim();
+        if(!said || generating){ callListen(c); return; } /* a cough, a noise: keep listening */
+        callSay(c, said);
+      })
+      .catch(function(err){
+        if(call!==c || (err && err.name==='AbortError')) return;
+        c.ctrl=null; toast(t('mic.err',{msg:((err && err.message)||'')})); callListen(c);
+      });
+  }
+  /* send what was said and speak the answer while it is being written */
+  function callSay(c, said){
+    var spk={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8), ctrl:new AbortController(), nodes:[], text:'', sent:-1, over:false, audioOver:false};
+    c.spk=spk; callSetState(c, 'thinking');
+    function live(){ return call===c && c.spk===spk; }
+    function push(done, tries){
+      if(!live()) return;
+      spk.sent=spk.text.length;
+      uiFetch('/ui/speak/push',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:spk.id, text:spk.text, done:!!done})})
+        .then(function(r){ /* the session may not be open yet when the very first text arrives — the final text is retried */
+          if(done && r.status===404 && !spk.audioOver && (tries||0)<8) setTimeout(function(){ push(true, (tries||0)+1); }, 250); })
+        .catch(function(){});
+    }
+    function next(){ /* back to listening once the answer is both written and heard */
+      if(!live() || !spk.over || !spk.audioOver) return;
+      c.spk=null; callListen(c);
+    }
+    genHook={
+      text:function(acc){ spk.text=acc; if(!spk.timer){ spk.timer=setTimeout(function(){ spk.timer=null; if(!spk.over && spk.text.length>spk.sent) push(false); }, CALL_PUSH_MS); } },
+      done:function(){ spk.over=true; if(spk.timer){ clearTimeout(spk.timer); spk.timer=null; } push(true); next(); }
+    };
+    uiFetch('/ui/speak/live',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:spk.id}), signal:spk.ctrl.signal})
+      .then(function(r){
+        if(!live()) return;
+        if(r.status===204){ spk.audioOver=true; next(); return; } /* nothing to say in this answer */
+        if(!r.ok || !r.body){ return r.text().then(function(m){ throw new Error(m||('HTTP '+r.status)); }); }
+        callSetState(c, 'speaking');
+        c.bargeMs=0; if(callPrefs.barge) callRecStart(c); /* listen under the answer, ready to be interrupted */
+        return playPcm(r, c.ctx, live, c.outAn, spk.nodes).then(function(end){
+          if(!live()) return;
+          setTimeout(function(){ spk.audioOver=true; next(); }, Math.max(0, end-c.ctx.currentTime)*1000+150);
+        });
+      })
+      .catch(function(err){
+        if(!live() || (err && err.name==='AbortError')) return;
+        toast(t('call.err',{msg:((err && err.message)||'')}));
+        spk.audioOver=true; if(c.state==='speaking') callSetState(c, 'thinking'); next();
+      });
+    var b=(viewHome.hidden===false) ? document.querySelector('#view-home .send') : dlgSend();
+    sendFlow(said, b);
+  }
+  /* cut the answer off — both its voice and its writing */
+  function callSilence(c){
+    var spk=c.spk; c.spk=null;
+    if(spk){ if(spk.timer) clearTimeout(spk.timer); try{ spk.ctrl.abort(); }catch(_){}
+      spk.nodes.forEach(function(n){ try{ n.stop(); }catch(_){} }); }
+    genHook=null;
+  }
+  /* interrupted by voice: silence the answer and go on listening to the utterance already being
+     recorded (the recording runs under the answer for exactly this) */
+  function callBarge(c){
+    if(call!==c || c.state!=='speaking') return;
+    callSilence(c);
+    if(generating){ var b=dlgSend(); if(b) stopGen(b); }
+    c.bargeMs=0; callSetState(c, 'listening');
+    if(c.rec){ c.speech=true; c.loudMs=CALL_SPEECH_MS; c.quietMs=0; } else { callRecStart(c); }
+  }
+  /* the middle button: «I'm done speaking» while listening, «Interrupt» while the answer is coming */
+  function callTap(){
+    var c=call; if(!c) return;
+    if(c.state==='listening'){ callUtterance(c); return; }
+    if(c.state==='thinking' || c.state==='speaking'){
+      callSilence(c);
+      if(generating){ var b=dlgSend(); if(b) stopGen(b); }
+      callListen(c);
+    }
+  }
+  function endCall(){
+    var c=call; if(!c) return;
+    call=null;
+    callSilence(c); /* the voice stops; an answer still being written is left to finish as text */
+    if(c.ctrl){ try{ c.ctrl.abort(); }catch(_){} }
+    callRecStop(c, false);
+    if(c.clock) clearInterval(c.clock);
+    if(c.raf) cancelAnimationFrame(c.raf);
+    if(c.stream) c.stream.getTracks().forEach(function(tr){ tr.stop(); });
+    try{ c.ctx.close(); }catch(_){}
+    document.body.classList.remove('in-call'); document.body.removeAttribute('data-call');
+    document.querySelectorAll('.entry .send').forEach(paintSend);
+    if(c.titleDue && c.titleDue===activeId) genTitle(); /* the title put off while the dialog was on */
+  }
+  callEach('.call-tap', function(b){ b.addEventListener('click', callTap); });
+  callEach('.call-end', function(b){ b.addEventListener('click', endCall); });
+
   function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
   function loadSettings(){
     return uiFetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
@@ -1647,6 +1901,7 @@
       settingsFields().forEach(function(el){ var k=el.getAttribute('data-key'); if(k in s) el.value=s[k]||''; });
       document.body.classList.toggle('tts-on', !!(s.CLOUDLING_TTS_BASE_URL||'').trim()); /* «Озвучить» shows only with a TTS server */
       document.body.classList.toggle('stt-on', !!(s.CLOUDLING_STT_BASE_URL||'').trim()); /* the microphone shows only with an STT server */
+      document.querySelectorAll('.entry .send').forEach(paintSend); /* the voice-dialog cloud needs both */
       var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
     }).catch(function(){});
   }
@@ -2019,6 +2274,13 @@
     var hist=convo.map(function(m, idx){ return m.role==='assistant'
       ? {role:m.role, content:stripReasoning(m.content)}
       : {role:m.role, content:userContentForBackend(m, idx===lastUserIdx)}; });
+    /* voice dialog: ask for a spoken-style answer. The note rides on the latest user message of
+       the outgoing copy only (the stored dialog stays clean) — not a system message: that sits
+       at the very start of the prompt, and changing the start makes the backend re-read all of
+       it (seconds of silence) when a dialog switches between text and voice. */
+    if(call && lastUserIdx>=0 && typeof hist[lastUserIdx].content==='string'){
+      hist[lastUserIdx]={role:'user', content:CALL_STYLE_NOTE+'\n\n'+hist[lastUserIdx].content};
+    }
     return sys ? [{role:'system', content:sys}].concat(hist) : hist;
   }
 

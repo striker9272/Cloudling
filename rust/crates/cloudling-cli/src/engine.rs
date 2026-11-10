@@ -333,6 +333,9 @@ pub(crate) struct ClawEngineSession {
     // steps so a disconnected client stops the agent instead of running on in the
     // background. Reused as the runtime's abort signal in `prepare_engine_runtime`.
     abort_signal: runtime::HookAbortSignal,
+    // `reasoning_effort` of the request being served (OpenAI-serve path), if the client sent
+    // one. Stored so every per-turn runtime rebuild passes it on to the backend.
+    reasoning_effort: Option<String>,
 }
 
 impl ClawEngineSession {
@@ -385,7 +388,14 @@ impl ClawEngineSession {
             working_dir,
             workspace_tempdir: Some(workspace_tempdir),
             abort_signal: runtime::HookAbortSignal::new(),
+            reasoning_effort: None,
         })
+    }
+
+    /// How much the model should reason on this session's turns — the OpenAI `reasoning_effort`
+    /// request field, passed to the backend as it is. `None` leaves the choice to the backend.
+    pub(crate) fn set_reasoning_effort(&mut self, effort: Option<String>) {
+        self.reasoning_effort = effort;
     }
 
     /// Handle to this session's turn-level cancellation signal. The streaming
@@ -456,6 +466,13 @@ impl EngineHost for ClawEngineSession {
         // the agentic loop — otherwise a tool-heavy turn fires compaction while the model window
         // is far from full (the cumulative sum of many small steps crosses the threshold).
         runtime.set_auto_compaction_use_latest_turn(true);
+        if self.reasoning_effort.is_some() {
+            if let Some(turn_runtime) = runtime.runtime.as_mut() {
+                turn_runtime
+                    .api_client_mut()
+                    .set_reasoning_effort(self.reasoning_effort.clone());
+            }
+        }
         let hook_abort_monitor = crate::HookAbortMonitor::spawn(hook_abort_signal);
 
         Ok((runtime, hook_abort_monitor))

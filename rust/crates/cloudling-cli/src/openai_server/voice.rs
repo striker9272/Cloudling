@@ -9,18 +9,21 @@
 //! the server rejects them. Audio reaches the client as raw 16-bit mono PCM
 //! (`audio/L16; rate=…`) as soon as the backend produces it, piece after piece.
 //!
-//! The [`Segmenter`] takes text in parts (`push` … `finish`) so a later live mode can feed it a
-//! reply while the model is still writing it; the "Speak" button feeds a whole message at once.
+//! The [`Segmenter`] takes text in parts (`push` … `finish`): the "Speak" button feeds it a whole
+//! message at once, a live session (`/ui/speak/live` + `/ui/speak/push`, the voice dialog) feeds
+//! it an answer while the model is still writing it — the voice starts with the first sentence.
 //!
 //! Voice input (the microphone button) is the mirror image: the browser records an utterance and
 //! posts it to `/ui/transcribe`, Cloudling passes it to any OpenAI-compatible speech-to-text
 //! backend (`POST {base}/audio/transcriptions`) and returns the text. Cloudling neither decodes
 //! nor converts the audio — the recording goes on in the container the browser produced.
 
-use std::sync::OnceLock;
-use std::time::Instant;
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, Instant};
 
 use axum::body::{Body, Bytes};
+use axum::extract::State;
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -29,6 +32,8 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
+
+use super::OpenAiServerState;
 
 /// The first piece is kept short so the voice starts early, but not shorter than this: a very
 /// short input sounds weak on neural TTS models.
@@ -43,6 +48,16 @@ const PAUSE_BETWEEN_PARAGRAPHS_SECS: f32 = 0.5;
 const DEFAULT_PCM_RATE: u32 = 24_000;
 /// A WAV header bigger than this without reaching the `data` chunk is treated as broken.
 const MAX_WAV_HEADER_BYTES: usize = 64 * 1024;
+/// A live session whose text stops arriving for this long is given up (the client is expected
+/// to close the connection long before; a model may think or use tools for minutes).
+const LIVE_IDLE_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const LIVE_ID_MAX_BYTES: usize = 64;
+/// In a live session the voice starts with the first sentence, even a short one: waiting for a
+/// second sentence costs a noticeable pause in a conversation. (Not shorter than this, so a lone
+/// "Да." is still spoken together with what follows.)
+const LIVE_FIRST_PIECE_MIN_CHARS: usize = 12;
+/// How often a live session waiting for text checks that the client is still there.
+const LIVE_POLL: Duration = Duration::from_millis(500);
 
 /// TTS backend settings, read from the environment per request so a UI "Save" applies live.
 #[derive(Debug, Clone)]
@@ -118,11 +133,18 @@ pub(crate) fn parse_extra(raw: &str) -> Map<String, Value> {
 /// are dropped, list items / headings / table rows become sentences. Paragraphs stay separated
 /// by a blank line; text written between tool calls stays (it is part of what the agent says).
 pub(crate) fn speakable_text(markup: &str) -> String {
+    speakable(markup, false)
+}
+
+/// [`speakable_text`], or with `open_tail` the same for the settled start of a message that is
+/// still being written: its last paragraph is not closed (no full stop is put after it), so the
+/// result only grows as the message does.
+fn speakable(markup: &str, open_tail: bool) -> String {
     static URL: OnceLock<regex::Regex> = OnceLock::new();
     let url = URL.get_or_init(|| {
         regex::Regex::new(r"(?i)\b(?:https?://|www\.)\S+").expect("static URL regex is valid")
     });
-    let plain = markdown_to_speech(&strip_details_blocks(markup));
+    let plain = markdown_to_speech(&strip_details_blocks(markup), open_tail);
     let plain = url.replace_all(&plain, "");
     let mut paragraphs = Vec::new();
     for para in plain.split("\n\n") {
@@ -169,11 +191,17 @@ fn strip_details_blocks(text: &str) -> String {
     out
 }
 
-fn markdown_to_speech(markdown: &str) -> String {
+fn markdown_to_speech(markdown: &str, open_tail: bool) -> String {
     let mut out = String::new();
     let mut skip = 0usize; // inside a code block or an image
+    // length of `out` before the paragraph that ended last was closed — `Some` only while that
+    // paragraph is the last thing in the text
+    let mut last_paragraph_open_len = None;
     let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH;
     for event in Parser::new_ext(markdown, options) {
+        let before = out.len();
+        let paragraph_end = matches!(event, Event::End(TagEnd::Paragraph));
+        last_paragraph_open_len = paragraph_end.then_some(before);
         match event {
             Event::Start(Tag::CodeBlock(_) | Tag::Image { .. }) => skip += 1,
             Event::End(TagEnd::CodeBlock | TagEnd::Image) => skip = skip.saturating_sub(1),
@@ -193,7 +221,70 @@ fn markdown_to_speech(markdown: &str) -> String {
             _ => {}
         }
     }
+    if open_tail {
+        if let Some(len) = last_paragraph_open_len {
+            out.truncate(len);
+        }
+    }
     out
+}
+
+/// How much of a message that is still being written can be cleaned up now without the result
+/// changing later: up to the last whitespace before which no inline markup is left open (an
+/// unclosed `**`, `` ` `` or link reads differently once it closes). A heading, list item, table
+/// row or quote is read as a sentence of its own, so such a last line waits until it is complete.
+fn settled_len(raw: &str) -> usize {
+    /// Text this far past the last settled point is taken as it is: a stray `*` or `[` must
+    /// not hold the voice back until the answer ends.
+    const UNSETTLED_MAX_BYTES: usize = 400;
+    let line_start = raw.rfind('\n').map_or(0, |at| at + 1);
+    let last_line = raw[line_start..].trim_start();
+    let after_digits = last_line.trim_start_matches(|c: char| c.is_ascii_digit());
+    let numbered = after_digits.len() < last_line.len()
+        && (after_digits.starts_with(". ") || after_digits.starts_with(") "));
+    if numbered
+        || last_line.starts_with(['#', '|', '>'])
+        || ["- ", "* ", "+ ", "```", "~~~"]
+            .iter()
+            .any(|marker| last_line.starts_with(marker))
+    {
+        return line_start;
+    }
+    // open/close marks seen so far: an odd count means something is still open
+    let (mut stars, mut ticks, mut brackets) = (0usize, 0usize, 0isize);
+    let mut in_link_target = false;
+    let (mut settled, mut last_space) = (0usize, 0usize);
+    let mut prev = '\n';
+    let mut chars = raw.char_indices().peekable();
+    while let Some((at, ch)) = chars.next() {
+        let next = chars.peek().map_or(' ', |&(_, next)| next);
+        match ch {
+            // a run of the same marker (`**`, a ``` fence) opens or closes once; a `*` standing
+            // alone ("2 * 3", a list marker) is not emphasis
+            '*' if prev == '*' => {}
+            '*' if !(prev.is_whitespace() && next.is_whitespace()) => stars += 1,
+            '`' if prev != '`' => ticks += 1,
+            '[' => brackets += 1,
+            ']' => {
+                brackets -= 1;
+                in_link_target = next == '(';
+            }
+            ')' => in_link_target = false,
+            _ if ch.is_whitespace() => {
+                last_space = at;
+                if stars % 2 == 0 && ticks % 2 == 0 && brackets <= 0 && !in_link_target {
+                    settled = at;
+                }
+            }
+            _ => {}
+        }
+        prev = ch;
+    }
+    if last_space.saturating_sub(settled) > UNSETTLED_MAX_BYTES {
+        last_space
+    } else {
+        settled
+    }
 }
 
 /// Close the current sentence: drop trailing spaces/commas, add a full stop unless the text
@@ -635,32 +726,267 @@ pub(super) struct SpeakRequest {
     text: String,
 }
 
+/// Open live sessions: the id the client chose → the channel its text arrives on.
+#[derive(Default)]
+pub(crate) struct LiveSpeechHub {
+    sessions: std::sync::Mutex<HashMap<String, mpsc::UnboundedSender<LiveText>>>,
+}
+
+/// One update of a live session: the answer text so far (the whole text, not a delta) and
+/// whether the answer is complete.
+type LiveText = (String, bool);
+
+impl LiveSpeechHub {
+    fn sessions(&self) -> std::sync::MutexGuard<'_, HashMap<String, mpsc::UnboundedSender<LiveText>>> {
+        // a poisoned lock still guards a usable map (see `OpenAiServerState`)
+        self.sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// `None` when a session with this id is already open.
+    fn open(&self, id: &str) -> Option<mpsc::UnboundedReceiver<LiveText>> {
+        let mut sessions = self.sessions();
+        if sessions.contains_key(id) {
+            return None;
+        }
+        let (tx, rx) = mpsc::unbounded_channel();
+        sessions.insert(id.to_string(), tx);
+        Some(rx)
+    }
+
+    /// `false` when there is no such session (not opened yet, or already over).
+    fn push(&self, id: &str, update: LiveText) -> bool {
+        self.sessions()
+            .get(id)
+            .is_some_and(|tx| tx.send(update).is_ok())
+    }
+
+    fn close(&self, id: &str) {
+        self.sessions().remove(id);
+    }
+}
+
+/// Keeps a live session registered; dropping it (the utterance ended or the client left)
+/// frees the id.
+struct LiveSession {
+    state: Arc<OpenAiServerState>,
+    id: String,
+}
+
+impl Drop for LiveSession {
+    fn drop(&mut self) {
+        self.state.live_speech.close(&self.id);
+    }
+}
+
+/// How far the text of a live session has been taken in.
+#[derive(Default)]
+struct LiveFeedText {
+    /// Longest text seen: a shorter update is a request that was overtaken on the way.
+    raw_len: usize,
+    /// How much of the cleaned-up text the segmenter has already been given.
+    fed_len: usize,
+    done: bool,
+}
+
+impl LiveFeedText {
+    /// Take in an update: clean up what has settled (everything, once the answer is complete)
+    /// and give the segmenter the part it has not seen yet.
+    fn accept(&mut self, segmenter: &mut Segmenter, text: &str, done: bool) {
+        if self.done || (text.len() < self.raw_len && !done) {
+            return;
+        }
+        self.raw_len = self.raw_len.max(text.len());
+        let cleaned = if done {
+            speakable(text, false)
+        } else {
+            speakable(&text[..settled_len(text)], true)
+        };
+        if cleaned.len() > self.fed_len {
+            let mut start = self.fed_len;
+            while !cleaned.is_char_boundary(start) {
+                start += 1;
+            }
+            segmenter.push(&cleaned[start..]);
+            self.fed_len = cleaned.len();
+        }
+        if done {
+            self.done = true;
+            segmenter.finish();
+        }
+    }
+}
+
+/// A live session as seen by the speaking side: its updates and how far they were taken in.
+struct LiveFeed {
+    rx: mpsc::UnboundedReceiver<LiveText>,
+    _session: LiveSession,
+    text: LiveFeedText,
+}
+
+/// Where the pieces of an utterance come from: a whole message, or a live session whose text
+/// is still being written.
+struct Feed {
+    segmenter: Segmenter,
+    live: Option<LiveFeed>,
+}
+
+impl Feed {
+    fn whole(text: &str) -> Self {
+        let mut segmenter = Segmenter::new(FIRST_PIECE_MIN_CHARS, PIECE_MAX_CHARS);
+        segmenter.push(text);
+        segmenter.finish();
+        Self {
+            segmenter,
+            live: None,
+        }
+    }
+
+    fn live(rx: mpsc::UnboundedReceiver<LiveText>, session: LiveSession) -> Self {
+        Self {
+            segmenter: Segmenter::new(LIVE_FIRST_PIECE_MIN_CHARS, PIECE_MAX_CHARS),
+            live: Some(LiveFeed {
+                rx,
+                _session: session,
+                text: LiveFeedText::default(),
+            }),
+        }
+    }
+
+    fn accept(&mut self, (text, done): LiveText) {
+        if let Some(live) = self.live.as_mut() {
+            live.text.accept(&mut self.segmenter, &text, done);
+        }
+    }
+
+    /// The next piece if one is ready right now.
+    fn try_piece(&mut self) -> Option<Piece> {
+        while let Some(update) = self.live.as_mut().and_then(|live| live.rx.try_recv().ok()) {
+            self.accept(update);
+        }
+        self.segmenter.next_piece()
+    }
+
+    /// The next piece, waiting for more text while the answer is still being written. `None`
+    /// when everything has been handed out, when `gone` reports that nobody is listening any
+    /// more (asked a couple of times a second), or when a live session went silent for too long.
+    async fn next_piece(&mut self, gone: impl Fn() -> bool) -> Option<Piece> {
+        let mut idle_since = Instant::now();
+        loop {
+            if let Some(piece) = self.try_piece() {
+                return Some(piece);
+            }
+            let live = self.live.as_mut()?;
+            if live.text.done {
+                return None;
+            }
+            match tokio::time::timeout(LIVE_POLL, live.rx.recv()).await {
+                Ok(Some(update)) => {
+                    idle_since = Instant::now();
+                    self.accept(update);
+                }
+                Ok(None) => return None,
+                Err(_) if gone() || idle_since.elapsed() > LIVE_IDLE_TIMEOUT => return None,
+                Err(_) => {}
+            }
+        }
+    }
+}
+
 /// `POST /ui/speak {text}` → the message as speech, streamed (`audio/L16; rate=…; channels=1`).
 /// The first piece is requested before answering, so a backend error comes back as a readable
 /// HTTP error instead of an empty stream. When the client disconnects the remaining pieces are
 /// dropped and the open backend request is closed.
 pub(super) async fn ui_speak(Json(request): Json<SpeakRequest>) -> Response {
     let Some(config) = TtsConfig::from_env() else {
-        return (
-            StatusCode::CONFLICT,
-            "voice output is not configured (CLOUDLING_TTS_BASE_URL is empty)",
-        )
-            .into_response();
+        return tts_not_configured();
     };
     let text = speakable_text(&request.text);
-    let chars = text.chars().count();
-    let mut segmenter = Segmenter::new(FIRST_PIECE_MIN_CHARS, PIECE_MAX_CHARS);
-    segmenter.push(&text);
-    segmenter.finish();
-    let Some(first) = segmenter.next_piece() else {
+    let mut feed = Feed::whole(&text);
+    let Some(first) = feed.try_piece() else {
         return (StatusCode::BAD_REQUEST, "nothing to speak in this message").into_response();
     };
+    speak_stream(config, feed, first, "speak").await
+}
+
+#[derive(Deserialize)]
+pub(super) struct LiveSpeakRequest {
+    id: String,
+}
+
+#[derive(Deserialize)]
+pub(super) struct LivePushRequest {
+    id: String,
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    done: bool,
+}
+
+/// `POST /ui/speak/live {id}` → an answer spoken while it is being written, streamed like
+/// [`ui_speak`]. The client picks the session id and feeds the text through
+/// [`ui_speak_push`]; the answer here starts with the first piece of speech (`204` when the
+/// answer ended with nothing to say). Closing the connection ends the session.
+pub(super) async fn ui_speak_live(
+    State(state): State<Arc<OpenAiServerState>>,
+    Json(request): Json<LiveSpeakRequest>,
+) -> Response {
+    let Some(config) = TtsConfig::from_env() else {
+        return tts_not_configured();
+    };
+    let id = request.id.trim();
+    if id.is_empty() || id.len() > LIVE_ID_MAX_BYTES {
+        return (StatusCode::BAD_REQUEST, "bad session id").into_response();
+    }
+    let Some(rx) = state.live_speech.open(id) else {
+        return (StatusCode::CONFLICT, "this speech session is already open").into_response();
+    };
+    let session = LiveSession {
+        state: state.clone(),
+        id: id.to_string(),
+    };
+    let mut feed = Feed::live(rx, session);
+    // (when the client leaves before the first piece, this handler is dropped with the connection)
+    let Some(first) = feed.next_piece(|| false).await else {
+        return StatusCode::NO_CONTENT.into_response();
+    };
+    speak_stream(config, feed, first, "speak (live)").await
+}
+
+/// `POST /ui/speak/push {id, text, done}` — the answer text so far for a live session. The
+/// whole text every time, not a delta: two requests may overtake each other on the way, and
+/// the longer text simply wins. `404` when the session is not open (yet, or any more).
+pub(super) async fn ui_speak_push(
+    State(state): State<Arc<OpenAiServerState>>,
+    Json(request): Json<LivePushRequest>,
+) -> Response {
+    if state
+        .live_speech
+        .push(request.id.trim(), (request.text, request.done))
+    {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "no such speech session").into_response()
+    }
+}
+
+fn tts_not_configured() -> Response {
+    (
+        StatusCode::CONFLICT,
+        "voice output is not configured (CLOUDLING_TTS_BASE_URL is empty)",
+    )
+        .into_response()
+}
+
+/// Speak the pieces of `feed`, starting with `first`, and stream the audio.
+async fn speak_stream(config: TtsConfig, mut feed: Feed, first: Piece, label: &'static str) -> Response {
     let started = Instant::now();
     let mut session = TtsSession::new(config, api::build_http_client_or_default());
     let audio = match session.request(&first.text).await {
         Ok(audio) => audio,
         Err(error) => {
-            eprintln!("cloudling openai-serve: speak: {error}");
+            eprintln!("cloudling openai-serve: {label}: {error}");
             return (StatusCode::BAD_GATEWAY, error).into_response();
         }
     };
@@ -668,30 +994,42 @@ pub(super) async fn ui_speak(Json(request): Json<SpeakRequest>) -> Response {
     let (tx, rx) = mpsc::channel::<Result<Bytes, std::io::Error>>(32);
     tokio::spawn(async move {
         let mut pieces = 1usize;
+        let mut chars = first.text.chars().count();
         let mut bytes = 0u64;
         let mut first_audio = None;
         let mut current = audio;
+        let request_ahead = |session: &TtsSession, piece: Piece| {
+            let mut ahead = session.clone();
+            let text = piece.text.clone();
+            (
+                piece,
+                tokio::spawn(async move {
+                    let result = ahead.request(&text).await;
+                    (ahead, result)
+                }),
+            )
+        };
         let mut prefetch: Option<(Piece, tokio::task::JoinHandle<_>)> = None;
         let status = loop {
             // Ask for the next piece while this one plays, so the backend starts on it right
             // away (a backend that serialises its GPU work queues it behind the current one).
-            if let Some(piece) = segmenter.next_piece() {
-                let mut ahead = session.clone();
-                let text = piece.text.clone();
-                prefetch = Some((
-                    piece,
-                    tokio::spawn(async move {
-                        let result = ahead.request(&text).await;
-                        (ahead, result)
-                    }),
-                ));
+            if let Some(piece) = feed.try_piece() {
+                prefetch = Some(request_ahead(&session, piece));
             }
             match pump(current, &tx, &mut first_audio).await {
                 Ok(sent) => bytes += sent,
                 Err(()) => break "stopped",
             }
-            let Some((piece, handle)) = prefetch.take() else {
-                break "done";
+            let (piece, handle) = match prefetch.take() {
+                Some(ahead) => ahead,
+                None => {
+                    // nothing was ready when this piece went out: wait for the text that is
+                    // still being written — unless the client leaves meanwhile
+                    let Some(piece) = feed.next_piece(|| tx.is_closed()).await else {
+                        break if tx.is_closed() { "stopped" } else { "done" };
+                    };
+                    request_ahead(&session, piece)
+                }
             };
             let pause = if piece.new_paragraph {
                 PAUSE_BETWEEN_PARAGRAPHS_SECS
@@ -708,22 +1046,23 @@ pub(super) async fn ui_speak(Json(request): Json<SpeakRequest>) -> Response {
                     next
                 }
                 Ok((_, Err(error))) => {
-                    eprintln!("cloudling openai-serve: speak: {error}");
+                    eprintln!("cloudling openai-serve: {label}: {error}");
                     break "TTS error";
                 }
                 Err(error) => {
-                    eprintln!("cloudling openai-serve: speak: TTS request task failed: {error}");
+                    eprintln!("cloudling openai-serve: {label}: TTS request task failed: {error}");
                     break "TTS error";
                 }
             };
             if next.rate != rate {
                 eprintln!(
-                    "cloudling openai-serve: speak: TTS changed its rate mid-utterance ({rate} → {})",
+                    "cloudling openai-serve: {label}: TTS changed its rate mid-utterance ({rate} → {})",
                     next.rate
                 );
                 break "rate changed";
             }
             pieces += 1;
+            chars += piece.text.chars().count();
             current = next;
         };
         if let Some((_, handle)) = prefetch {
@@ -736,7 +1075,7 @@ pub(super) async fn ui_speak(Json(request): Json<SpeakRequest>) -> Response {
             |at: Instant| format!("{} ms", at.duration_since(started).as_millis()),
         );
         eprintln!(
-            "cloudling openai-serve: speak: {chars} chars, {pieces} piece(s), {secs:.1}s audio at {rate} Hz, \
+            "cloudling openai-serve: {label}: {chars} chars, {pieces} piece(s), {secs:.1}s audio at {rate} Hz, \
              first audio after {first}, {status}"
         );
     });
@@ -1119,6 +1458,74 @@ mod tests {
         wav.extend_from_slice(b"data\xff\xff\xff\xff\x01\x00");
         assert_eq!(parse_wav_header(&wav).unwrap(), Some((24000, 44)));
         assert!(parse_wav_header(b"ID3\x04\x00\x00\x00\x00\x00\x00\x00\x00").is_err());
+    }
+
+    #[test]
+    fn settled_part_of_a_growing_answer() {
+        // up to the last whitespace; the word being written waits
+        assert_eq!(settled_len("Привет, как де"), "Привет, как".len());
+        // open inline markup holds everything after it back until it closes
+        assert_eq!(settled_len("Это **очень важ"), "Это".len());
+        assert_eq!(settled_len("Это **очень важно** и ещё"), "Это **очень важно** и".len());
+        assert_eq!(settled_len("Запусти `ls -la"), "Запусти".len());
+        assert_eq!(settled_len("См. [док по теме](https://ex"), "См.".len());
+        // a lone star is not emphasis
+        assert_eq!(settled_len("2 * 3 = 6 и д"), "2 * 3 = 6 и".len());
+        // a list item / heading is read as its own sentence: only complete lines
+        assert_eq!(settled_len("Список:\n- первый пун"), "Список:\n".len());
+        assert_eq!(settled_len("## Итоги за"), 0);
+        assert_eq!(settled_len("1. Первый шаг"), 0);
+        // a year or a decimal at the start of a line is not a list number
+        assert_eq!(settled_len("2026 год был"), "2026 год".len());
+    }
+
+    #[test]
+    fn open_tail_text_only_grows() {
+        let full = "Сейчас проверю.\n<details type=\"tool_calls\" done=\"true\">\n<summary>bash</summary>\nвывод\n</details>\n\
+                    Готово: сервис **перезапущен** и работает. Что дальше?\n\n- первый пункт\n- второй пункт\n\nВсё.";
+        let mut previous = String::new();
+        for (end, _) in full.char_indices().chain(std::iter::once((full.len(), ' '))) {
+            let part = &full[..end];
+            let cleaned = speakable(&part[..settled_len(part)], true);
+            assert!(
+                cleaned.starts_with(&previous),
+                "changed what was already said at {end}: {previous:?} → {cleaned:?}"
+            );
+            previous = cleaned;
+        }
+        let closed = speakable_text(full);
+        assert!(closed.starts_with(&previous), "{previous:?} vs {closed:?}");
+        assert!(!previous.contains("вывод") && !previous.contains('*'));
+    }
+
+    #[test]
+    fn live_feed_hands_out_sentences_as_they_arrive() {
+        let hub = LiveSpeechHub::default();
+        let rx = hub.open("a").expect("a new id opens");
+        assert!(hub.open("a").is_none(), "the id is taken while the session is open");
+        assert!(!hub.push("b", (String::new(), false)), "no such session");
+        let mut feed = Feed {
+            segmenter: Segmenter::new(FIRST_PIECE_MIN_CHARS, PIECE_MAX_CHARS),
+            live: None,
+        };
+        // (a `LiveFeed` needs the server state for its guard; the text path is the same)
+        let mut live = LiveFeedText::default();
+        let first = "Завтра в Москве около нуля, пасмурно, к вечеру небольшой снег. ";
+        assert!(hub.push("a", (format!("{first}На вы"), false)));
+        drop(rx);
+        live.accept(&mut feed.segmenter, &format!("{first}На вы"), false);
+        assert_eq!(feed.try_piece().map(|piece| piece.text).as_deref(), Some(first.trim()));
+        // an overtaken (shorter) update changes nothing
+        live.accept(&mut feed.segmenter, first, false);
+        assert_eq!(feed.try_piece(), None);
+        live.accept(&mut feed.segmenter, &format!("{first}На выходных потеплеет"), true);
+        assert_eq!(
+            feed.try_piece().map(|piece| piece.text).as_deref(),
+            Some("На выходных потеплеет.")
+        );
+        assert_eq!(feed.try_piece(), None);
+        hub.close("a");
+        assert!(hub.open("a").is_some(), "a closed id is free again");
     }
 
     #[test]

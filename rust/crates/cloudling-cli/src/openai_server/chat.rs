@@ -28,6 +28,10 @@ pub(super) struct ChatCompletionRequest {
     messages: Vec<ChatMessage>,
     #[serde(default)]
     stream: bool,
+    /// Standard OpenAI field, passed on to the backend as it is (e.g. `none` — answer without
+    /// reasoning — for the built-in UI's voice dialog). Absent: the backend decides.
+    #[serde(default)]
+    reasoning_effort: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,6 +136,7 @@ pub(super) async fn chat_completions(
     };
 
     let state_for_task = state.clone();
+    let reasoning_effort = request.reasoning_effort.clone();
     let result = tokio::task::spawn_blocking(
         move || -> Result<(crate::engine::ClawEngineResponse, u32), String> {
             let StatelessConversation {
@@ -148,6 +153,7 @@ pub(super) async fn chat_completions(
                 (history, system_additions),
             )
             .map_err(|error| error.to_string())?;
+            session.set_reasoning_effort(reasoning_effort);
             // Capture the LAST model call's context size (evaluated input + cache), the same
             // figure the streaming path reports, so the token counter matches across modes.
             // `response.usage` is cumulative across the agentic loop and over-counts here.
@@ -255,6 +261,7 @@ fn stream_chat_completions(
         }
     };
 
+    let reasoning_effort = request.reasoning_effort.clone();
     let response_model = request
         .model
         .unwrap_or_else(|| state.served_model_id());
@@ -319,6 +326,7 @@ fn stream_chat_completions(
                     return;
                 }
             };
+            session.set_reasoning_effort(reasoning_effort);
 
             let abort_signal = session.abort_signal();
             let last_ctx_sink = last_ctx.clone();

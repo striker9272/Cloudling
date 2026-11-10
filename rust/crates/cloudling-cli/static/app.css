@@ -428,6 +428,32 @@ body:not(.stt-on) .entry .mic{display:none;}
 .rec .rec-msg{color:var(--muted);}
 .entry.transcribing .rec-dot{width:14px; height:14px; box-sizing:border-box; background:none; border:2px solid var(--line2); border-top-color:var(--load); animation:spin360 .9s linear infinite;}
 .entry.transcribing .rec-time,.entry.transcribing .rec-level{display:none;}
+/* voice dialog: with both speech servers the empty composer's round button is the cloud that
+   starts it; while it is on, a status row and two buttons stand in for the whole composer */
+.send.call svg{display:block;}
+.callcloud circle{fill:var(--on-accent);}
+.callcloud .x1{animation:call-rest1 3.1s ease-in-out infinite;}
+.callcloud .x2{animation:call-rest2 3.6s ease-in-out infinite;}
+.callcloud .x3{animation:call-rest3 2.8s ease-in-out infinite;}
+@keyframes call-rest1{0%,100%{transform:translate(0,-3px)}50%{transform:translate(0,-4.3px)}}
+@keyframes call-rest2{0%,100%{transform:translate(-6px,1px)}50%{transform:translate(-7.3px,1.7px)}}
+@keyframes call-rest3{0%,100%{transform:translate(6px,1px)}50%{transform:translate(7.3px,1.7px)}}
+.entry .callrow,.entry .call-tap,.entry .call-end{display:none;}
+body.in-call .entry textarea,body.in-call .entry .attachments,body.in-call .entry .rec,body.in-call .entry .clip,body.in-call .entry .mic,body.in-call .entry .send,body.in-call .entry .rec-cancel,body.in-call .entry .rec-done{display:none;}
+body.in-call .entry .callrow{display:flex; align-items:center; gap:12px; min-height:104px; padding:14px 14px 4px; font-size:16px; line-height:1.55; color:var(--text);}
+body.in-call #view-dialog .entry .callrow{min-height:46px; padding-top:10px;}
+.callrow .call-dot{flex:none; width:9px; height:9px; border-radius:50%; background:var(--ok);}
+.callrow .call-status{font-weight:500; min-width:5.5em;}
+.callrow .call-time{color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums;}
+body[data-call="thinking"] .call-dot,body[data-call="transcribing"] .call-dot{width:14px; height:14px; box-sizing:border-box; background:none; border:2px solid var(--line2); border-top-color:var(--load); animation:spin360 .9s linear infinite;}
+body[data-call="speaking"] .call-dot{background:var(--load);}
+body[data-call="thinking"] .call-level,body[data-call="transcribing"] .call-level{visibility:hidden;}
+body.in-call .entry .call-tap{width:38px; height:38px; border-radius:50%; background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .12s, transform .1s;}
+body.in-call .entry .call-tap:hover{background:var(--s-ctrl-h);}
+body.in-call .entry .call-tap:active,body.in-call .entry .call-end:active{transform:scale(.94);}
+body.in-call .entry .call-tap:disabled{opacity:.4; cursor:default;}
+body.in-call .entry .call-end{height:38px; padding:0 16px; border-radius:var(--r-pill); background:#c8363b; border:none; color:#fff; font:inherit; font-size:14px; font-weight:600; cursor:pointer; display:flex; align-items:center; transition:filter .12s, transform .1s;}
+body.in-call .entry .call-end:hover{filter:brightness(1.08);}
 
 /* tool-call block: flat with a thin left accent rail (green ok / red fail / gray reasoning),
    neutral tool name — replaces the old blue-tag card so it sits in the black-gray theme */

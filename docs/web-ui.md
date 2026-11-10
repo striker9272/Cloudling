@@ -249,6 +249,37 @@ explains the reason instead of recording. Put the UI behind an HTTPS reverse pro
 if the proxy buffers responses, turn that off for this site so streamed answers and speech
 stay live (in Caddy: `flush_interval -1` inside `reverse_proxy`).
 
+## Voice dialog
+
+With both speech servers configured (and a secure context, see above), the round button of an
+empty message field is the Cloudling cloud: it starts a spoken conversation. The microphone
+stays open and the loop runs by itself — you speak, a pause of about a second (or the middle
+button) ends the utterance, it is recognised and sent as an ordinary message, and the answer is
+spoken **while it is being written**; then it listens again. The middle button interrupts an
+answer, and so does your voice (talk over it — what you are saying becomes the next
+utterance). **End** leaves the dialog; an answer still being written finishes as text. What
+was said and answered are ordinary messages of the chat.
+
+- The end of an utterance is found from the loudness of the microphone alone, so any STT
+  server works; one utterance goes through the same `POST /ui/transcribe` as dictation.
+- The answer is spoken through `POST /ui/speak/live {id}` (the audio stream, as for **Speak**)
+  fed by `POST /ui/speak/push {id, text, done}` — the answer text so far, the whole text every
+  time. The server cleans it up, cuts it into sentences and starts speaking with the first one.
+- Each spoken message carries a short note asking the model for a conversational answer (brief,
+  no lists or markup). The note is added to the outgoing copy only, not to the stored chat.
+- The chat title is generated after the dialog ends, not after the first exchange: the title
+  is a separate model request, and on a backend with a single prompt-cache slot it would make
+  the next answer start several seconds later.
+
+Two switches in **Settings → Voice** (stored with the UI data, both on by default):
+**Model reasoning in a dialog** — off sends the standard `reasoning_effort: "none"` with the
+dialog's requests (the model server must understand it; answers start sooner but are simpler —
+though a backend that caches one prompt re-reads the whole prompt once when a chat switches
+between reasoning on and off, i.e. on the first spoken message and the first typed one after);
+**Interrupt by voice** — off leaves only the button (useful with loudspeakers, where the model
+may hear itself). `POST /v1/chat/completions` passes a client's `reasoning_effort` on to the
+backend for any client, not only the built-in UI.
+
 ## First-run / onboarding
 
 A fresh instance whose engine is not yet configured (empty `OPENAI_BASE_URL`)

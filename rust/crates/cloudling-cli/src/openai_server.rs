@@ -28,7 +28,7 @@ use ui::{
     ui_kv_get, ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list,
     ui_settings_get, ui_settings_save_restart, ui_summarize, ui_title,
 };
-use voice::{ui_speak, ui_transcribe, MAX_TRANSCRIBE_BYTES};
+use voice::{ui_speak, ui_speak_live, ui_speak_push, ui_transcribe, MAX_TRANSCRIBE_BYTES};
 
 pub(crate) struct OpenAiServerState {
     // Engine model, served id, and permission mode are mutable behind locks so the UI
@@ -53,6 +53,9 @@ pub(crate) struct OpenAiServerState {
     /// receiver; `POST /ui/answer` looks the id up and delivers the user's index-aligned choices.
     pending_questions:
         std::sync::Mutex<std::collections::HashMap<String, std::sync::mpsc::Sender<Vec<String>>>>,
+    /// Live speech sessions of the built-in UI's voice dialog (an answer spoken while it is
+    /// being written): `POST /ui/speak/live` opens one, `POST /ui/speak/push` feeds it text.
+    live_speech: voice::LiveSpeechHub,
 }
 
 impl OpenAiServerState {
@@ -310,6 +313,7 @@ async fn serve(
         ui_token,
         bind_is_loopback: addr.ip().is_loopback(),
         pending_questions: std::sync::Mutex::new(std::collections::HashMap::new()),
+        live_speech: voice::LiveSpeechHub::default(),
     });
 
     // API routes are always present. The built-in web UI is opt-in via `--ui`, so the
@@ -347,6 +351,8 @@ async fn serve(
             .route("/ui/title", post(ui_title))
             .route("/ui/summarize", post(ui_summarize))
             .route("/ui/speak", post(ui_speak))
+            .route("/ui/speak/live", post(ui_speak_live))
+            .route("/ui/speak/push", post(ui_speak_push))
             // a recording is larger than the default request-body limit allows
             .route(
                 "/ui/transcribe",
