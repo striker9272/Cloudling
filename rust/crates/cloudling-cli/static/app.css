@@ -405,6 +405,29 @@ body.open-right .drawer.right{transform:translateX(0);}
 /* voice output: «Озвучить» only when a TTS server is configured; the row stays visible while speaking */
 body:not(.tts-on) .act[data-act="speak"]{display:none;}
 .turn.speaking .row-acts{opacity:1;}
+/* voice input: the microphone shows only when an STT server is configured; while recording
+   (and then transcribing) a status row stands in for the text field, whose content is kept */
+.entry .barright{display:flex; align-items:center; gap:8px;}
+.entry .mic,.entry .rec-cancel{width:38px; height:38px; border-radius:50%; background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .12s, transform .1s;}
+.entry .mic:hover,.entry .rec-cancel:hover{background:var(--s-ctrl-h);}
+.entry .mic:active,.entry .rec-cancel:active,.entry .rec-done:active{transform:scale(.94);}
+.entry .mic.off{opacity:.4;}
+.entry .rec-done{width:38px; height:38px; border-radius:50%; background:var(--accent); border:none; color:var(--on-accent); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:filter .12s, transform .1s;}
+.entry .rec-done:hover{filter:brightness(.93);}
+body:not(.stt-on) .entry .mic{display:none;}
+.entry .rec,.entry .rec-cancel,.entry .rec-done{display:none;}
+.entry.recording textarea,.entry.transcribing textarea,.entry.recording .attachments,.entry.transcribing .attachments{display:none;}
+.entry.recording .mic,.entry.transcribing .mic,.entry.recording .send,.entry.transcribing .send{display:none;}
+.entry.recording .rec-cancel,.entry.transcribing .rec-cancel,.entry.recording .rec-done{display:flex;}
+.entry.recording .rec,.entry.transcribing .rec{display:flex; align-items:center; gap:12px; min-height:104px; padding:14px 14px 4px; font-size:16px; line-height:1.55; color:var(--text);}
+#view-dialog .entry.recording .rec,#view-dialog .entry.transcribing .rec{min-height:46px; padding-top:10px;}
+.rec .rec-dot{flex:none; width:9px; height:9px; border-radius:50%; background:#d97b7b; animation:blink 1.05s ease-in-out infinite;}
+.rec .rec-time{font-variant-numeric:tabular-nums;}
+.rec .rec-level{display:flex; align-items:center; gap:3px; height:22px;}
+.rec .rec-level i{width:3px; height:4px; border-radius:2px; background:var(--text); opacity:.35;}
+.rec .rec-msg{color:var(--muted);}
+.entry.transcribing .rec-dot{width:14px; height:14px; box-sizing:border-box; background:none; border:2px solid var(--line2); border-top-color:var(--load); animation:spin360 .9s linear infinite;}
+.entry.transcribing .rec-time,.entry.transcribing .rec-level{display:none;}
 
 /* tool-call block: flat with a thin left accent rail (green ok / red fail / gray reasoning),
    neutral tool name — replaces the old blue-tag card so it sits in the black-gray theme */

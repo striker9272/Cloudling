@@ -11,12 +11,17 @@
 //!
 //! The [`Segmenter`] takes text in parts (`push` … `finish`) so a later live mode can feed it a
 //! reply while the model is still writing it; the "Speak" button feeds a whole message at once.
+//!
+//! Voice input (the microphone button) is the mirror image: the browser records an utterance and
+//! posts it to `/ui/transcribe`, Cloudling passes it to any OpenAI-compatible speech-to-text
+//! backend (`POST {base}/audio/transcriptions`) and returns the text. Cloudling neither decodes
+//! nor converts the audio — the recording goes on in the container the browser produced.
 
 use std::sync::OnceLock;
 use std::time::Instant;
 
 use axum::body::{Body, Bytes};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
@@ -742,6 +747,244 @@ pub(super) async fn ui_speak(Json(request): Json<SpeakRequest>) -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
+// ---------------------------------------------------------------------------------------------
+// Voice input: a recorded utterance → text
+// ---------------------------------------------------------------------------------------------
+
+/// Largest recording `/ui/transcribe` accepts (the route's body limit). 25 MB is also the cap of
+/// OpenAI's own transcription endpoint, so a compatible backend is not expected to take more.
+pub(super) const MAX_TRANSCRIBE_BYTES: usize = 25 * 1024 * 1024;
+
+/// STT backend settings, read from the environment per request so a UI "Save" applies live.
+#[derive(Debug, Clone)]
+pub(crate) struct SttConfig {
+    base_url: String,
+    api_key: String,
+    model: String,
+    extra: Map<String, Value>,
+}
+
+impl SttConfig {
+    /// `None` when `CLOUDLING_STT_BASE_URL` is empty — voice input is off.
+    pub(crate) fn from_env() -> Option<Self> {
+        let get = |key: &str| std::env::var(key).unwrap_or_default().trim().to_string();
+        let base_url = get("CLOUDLING_STT_BASE_URL").trim_end_matches('/').to_string();
+        if base_url.is_empty() {
+            return None;
+        }
+        Some(Self {
+            base_url,
+            api_key: get("CLOUDLING_STT_API_KEY"),
+            model: get("CLOUDLING_STT_MODEL"),
+            // same `key=value` list as `CLOUDLING_TTS_EXTRA` (e.g. `language=ru`)
+            extra: parse_extra(&get("CLOUDLING_STT_EXTRA")),
+        })
+    }
+
+    /// The text fields of the transcription form: the model (when set) and, unless the backend
+    /// has refused them, the extra fields.
+    fn form_fields(&self, with_extra: bool) -> Vec<(String, String)> {
+        let mut fields = Vec::new();
+        if !self.model.is_empty() {
+            fields.push(("model".to_string(), self.model.clone()));
+        }
+        if with_extra {
+            for (key, value) in &self.extra {
+                let value = match value {
+                    Value::String(text) => text.clone(),
+                    other => other.to_string(),
+                };
+                fields.push((key.clone(), value));
+            }
+        }
+        fields
+    }
+}
+
+/// File name for the uploaded recording. The media type the browser recorded in decides the
+/// extension: OpenAI-compatible backends tell the container by it.
+fn recording_file_name(content_type: &str) -> &'static str {
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match essence.as_str() {
+        "audio/webm" | "video/webm" => "audio.webm",
+        "audio/ogg" | "application/ogg" => "audio.ogg",
+        "audio/mp4" | "audio/m4a" | "audio/x-m4a" | "audio/aac" | "video/mp4" => "audio.mp4",
+        "audio/wav" | "audio/x-wav" | "audio/wave" => "audio.wav",
+        "audio/mpeg" | "audio/mp3" => "audio.mp3",
+        "audio/flac" | "audio/x-flac" => "audio.flac",
+        _ => "audio.bin",
+    }
+}
+
+/// A boundary that does not occur in the recording (a multipart body is cut at its boundary).
+fn multipart_boundary(audio: &[u8]) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    let mut attempt = 0u32;
+    loop {
+        let boundary = format!("cloudling-{nanos:032x}-{attempt}");
+        let needle = boundary.as_bytes();
+        if !audio.windows(needle.len()).any(|window| window == needle) {
+            return boundary;
+        }
+        attempt += 1;
+    }
+}
+
+/// `multipart/form-data` body of a transcription request: the text fields, then the recording as
+/// the `file` part. Built by hand — it is a few lines, and the `multipart` feature of the HTTP
+/// client would add third-party crates for nothing else. Field names and values come from the
+/// settings; control characters and quotes that would break a part header are dropped.
+fn multipart_body(
+    boundary: &str,
+    fields: &[(String, String)],
+    file_name: &str,
+    content_type: &str,
+    audio: &[u8],
+) -> Vec<u8> {
+    let header_safe = |text: &str| -> String {
+        text.chars()
+            .filter(|ch| !ch.is_control() && *ch != '"')
+            .collect()
+    };
+    let mut body = Vec::with_capacity(audio.len() + 1024);
+    for (name, value) in fields {
+        let name = header_safe(name);
+        if name.is_empty() {
+            continue;
+        }
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{}\r\n",
+                value.replace(['\r', '\n'], " ")
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{}\"\r\n\
+             Content-Type: {}\r\n\r\n",
+            header_safe(file_name),
+            header_safe(content_type)
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(audio);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    body
+}
+
+/// The recognised text of a backend answer: the `text` field of the JSON answer, or the body as
+/// it is when the backend answered with plain text.
+fn transcript_from_answer(answer: &str) -> Result<String, String> {
+    match serde_json::from_str::<Value>(answer) {
+        Ok(Value::Object(map)) => match map.get("text") {
+            Some(Value::String(text)) => Ok(text.trim().to_string()),
+            _ => Err("STT backend answer has no `text` field".into()),
+        },
+        Ok(Value::String(text)) => Ok(text.trim().to_string()),
+        Ok(_) => Err("STT backend answer is not a transcription".into()),
+        Err(_) => Ok(answer.trim().to_string()),
+    }
+}
+
+/// Send the recording to the STT backend; on a "bad request" answer retry once without the extra
+/// fields (same rule as for speech), so a setting one backend needs does not break another.
+async fn transcribe(
+    config: &SttConfig,
+    client: &reqwest::Client,
+    content_type: &str,
+    audio: &[u8],
+) -> Result<String, String> {
+    let mut with_extra = !config.extra.is_empty();
+    loop {
+        let boundary = multipart_boundary(audio);
+        let body = multipart_body(
+            &boundary,
+            &config.form_fields(with_extra),
+            recording_file_name(content_type),
+            content_type,
+            audio,
+        );
+        let mut request = client
+            .post(format!("{}/audio/transcriptions", config.base_url))
+            .header(
+                reqwest::header::CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
+            .body(body);
+        if !config.api_key.is_empty() {
+            request = request.bearer_auth(&config.api_key);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|error| format!("STT backend unreachable: {error}"))?;
+        let status = response.status().as_u16();
+        let answer = response
+            .text()
+            .await
+            .map_err(|error| format!("STT backend answer could not be read: {error}"))?;
+        if (200..300).contains(&status) {
+            return transcript_from_answer(&answer);
+        }
+        if (status == 400 || status == 422) && with_extra {
+            eprintln!(
+                "cloudling openai-serve: transcribe: STT rejected the request (HTTP {status}); \
+                 retrying without CLOUDLING_STT_EXTRA"
+            );
+            with_extra = false;
+            continue;
+        }
+        let detail: String = answer.chars().take(300).collect();
+        return Err(format!("STT backend answered HTTP {status}: {detail}"));
+    }
+}
+
+/// `POST /ui/transcribe` — body: the recording as the browser produced it, `Content-Type`: its
+/// media type → `{"text": "…"}`. An empty `text` means the backend heard no speech.
+pub(super) async fn ui_transcribe(headers: HeaderMap, audio: Bytes) -> Response {
+    let Some(config) = SttConfig::from_env() else {
+        return (
+            StatusCode::CONFLICT,
+            "voice input is not configured (CLOUDLING_STT_BASE_URL is empty)",
+        )
+            .into_response();
+    };
+    if audio.is_empty() {
+        return (StatusCode::BAD_REQUEST, "the recording is empty").into_response();
+    }
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("application/octet-stream");
+    let started = Instant::now();
+    let client = api::build_http_client_or_default();
+    match transcribe(&config, &client, content_type, &audio).await {
+        Ok(text) => {
+            eprintln!(
+                "cloudling openai-serve: transcribe: {} bytes of {content_type} → {} chars in {} ms",
+                audio.len(),
+                text.chars().count(),
+                started.elapsed().as_millis()
+            );
+            Json(serde_json::json!({ "text": text })).into_response()
+        }
+        Err(error) => {
+            eprintln!("cloudling openai-serve: transcribe: {error}");
+            (StatusCode::BAD_GATEWAY, error).into_response()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -876,5 +1119,47 @@ mod tests {
         wav.extend_from_slice(b"data\xff\xff\xff\xff\x01\x00");
         assert_eq!(parse_wav_header(&wav).unwrap(), Some((24000, 44)));
         assert!(parse_wav_header(b"ID3\x04\x00\x00\x00\x00\x00\x00\x00\x00").is_err());
+    }
+
+    #[test]
+    fn recording_is_named_by_its_media_type() {
+        assert_eq!(recording_file_name("audio/webm;codecs=opus"), "audio.webm");
+        assert_eq!(recording_file_name("Audio/OGG; codecs=opus"), "audio.ogg");
+        assert_eq!(recording_file_name("audio/mp4"), "audio.mp4");
+        assert_eq!(recording_file_name("audio/wav"), "audio.wav");
+        assert_eq!(recording_file_name("application/octet-stream"), "audio.bin");
+        assert_eq!(recording_file_name(""), "audio.bin");
+    }
+
+    #[test]
+    fn multipart_body_carries_fields_then_the_recording() {
+        let audio = b"\x1aE\xdf\xa3 not text \r\n--x";
+        let boundary = multipart_boundary(audio);
+        assert!(!audio.windows(boundary.len()).any(|w| w == boundary.as_bytes()));
+        let fields = vec![
+            ("model".to_string(), "stt-1".to_string()),
+            ("lang\"uage\r\n".to_string(), "r\nu".to_string()),
+        ];
+        let body = multipart_body(&boundary, &fields, "audio.webm", "audio/webm;codecs=opus", audio);
+        let head = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nstt-1\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"language\"\r\n\r\nr u\r\n\
+             --{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"audio.webm\"\r\n\
+             Content-Type: audio/webm;codecs=opus\r\n\r\n"
+        );
+        let tail = format!("\r\n--{boundary}--\r\n");
+        assert!(body.starts_with(head.as_bytes()));
+        assert!(body.ends_with(tail.as_bytes()));
+        assert_eq!(&body[head.len()..body.len() - tail.len()], audio);
+    }
+
+    #[test]
+    fn transcript_is_read_from_json_or_plain_text() {
+        assert_eq!(transcript_from_answer("{\"text\": \" Привет. \"}").unwrap(), "Привет.");
+        assert_eq!(transcript_from_answer("{\"text\":\"\"}").unwrap(), "");
+        assert_eq!(transcript_from_answer("Привет.\n").unwrap(), "Привет.");
+        assert_eq!(transcript_from_answer("\"Привет.\"").unwrap(), "Привет.");
+        assert!(transcript_from_answer("{\"error\":\"x\"}").is_err());
+        assert!(transcript_from_answer("[1]").is_err());
     }
 }

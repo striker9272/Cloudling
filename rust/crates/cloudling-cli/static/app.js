@@ -24,7 +24,8 @@
       'settings.reasoningNote':'A collapsible block with the reasoning model’s thinking. Applies from the next message; if the model has no such mode, the block simply won’t appear.',
       'settings.voice':'Voice','settings.ttsUrl':'Speech server URL','settings.ttsKey':'API key','settings.ttsModel':'Model','settings.ttsVoice':'Voice',
       'settings.ttsExtra':'Extra request fields',
-      'settings.voiceNote':'Any OpenAI-compatible text-to-speech server (<b>/audio/speech</b>). Empty URL — voice output is off. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b>; if the server rejects them, the request is repeated without them.',
+      'settings.voiceOut':'Speech output','settings.voiceIn':'Speech input','settings.sttUrl':'Recognition server URL',
+      'settings.voiceNote':'Any OpenAI-compatible servers: text-to-speech (<b>/audio/speech</b>) and speech-to-text (<b>/audio/transcriptions</b>). An empty URL turns that side off: no “Speak” under answers, no microphone at the message field. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b> or <b>language=ru</b>; if the server rejects them, the request is repeated without them. Browsers give the microphone only over HTTPS or on localhost.',
       'common.speak':'Speak','common.stopSpeak':'Stop speaking',
       'settings.tools':'Tools','settings.mcpServers':'MCP servers',
       'settings.mcpNote':'An MCP server is an external program that gives the model new tools (they appear in chat as <b>mcp__name__*</b>). The stdio transport is supported: the given command runs for the duration of each reply.',
@@ -46,6 +47,10 @@
       'home.sub':'A local agent with tools and web search. Describe a task — cloudling answers and reaches for tools when needed.',
       'home.composerPh':'Ask or give a task…','dialog.composerPh':'Reply…',
       'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
+      'composer.mic':'Dictate','composer.micCancel':'Cancel recording','composer.micDone':'Done',
+      'mic.speak':'Speak…','mic.busy':'Transcribing…','mic.empty':'Didn’t catch that — nothing was recognised',
+      'mic.insecure':'The microphone works only over HTTPS or on localhost','mic.denied':'No access to the microphone — allow it in the browser',
+      'mic.unsupported':'This browser cannot record audio','mic.err':'Speech recognition failed: {msg}',
       'composer.scrollDown':'Down','composer.scrollDownAria':'Scroll to bottom',
       'setup.hi':'Hi! This is cloudling',
       'setup.intro':'A local agent with tools and web search. To begin, connect an engine — the model cloudling will talk to.',
@@ -117,7 +122,8 @@
       'settings.reasoningNote':'Сворачиваемый блок с рассуждениями reasoning-модели. Применяется со следующего сообщения; если у модели нет этого режима — блока просто не будет.',
       'settings.voice':'Голос','settings.ttsUrl':'Адрес сервера речи','settings.ttsKey':'Ключ API','settings.ttsModel':'Модель','settings.ttsVoice':'Голос',
       'settings.ttsExtra':'Доп. поля запроса',
-      'settings.voiceNote':'Любой OpenAI-совместимый сервер синтеза речи (<b>/audio/speech</b>). Пустой адрес — озвучка выключена. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b>; если сервер их не принимает, запрос повторяется без них.',
+      'settings.voiceOut':'Озвучка','settings.voiceIn':'Распознавание речи','settings.sttUrl':'Адрес сервера распознавания',
+      'settings.voiceNote':'Любые OpenAI-совместимые серверы: синтеза речи (<b>/audio/speech</b>) и распознавания (<b>/audio/transcriptions</b>). Пустой адрес выключает свою половину: нет «Озвучить» под ответами, нет микрофона у поля ввода. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b> или <b>language=ru</b>; если сервер их не принимает, запрос повторяется без них. Браузеры дают микрофон только по HTTPS или на localhost.',
       'common.speak':'Озвучить','common.stopSpeak':'Остановить озвучку',
       'settings.tools':'Инструменты','settings.mcpServers':'Серверы MCP',
       'settings.mcpNote':'MCP-сервер — внешняя программа, которая добавляет модели новые инструменты (в чате они видны как <b>mcp__имя__*</b>). Поддерживается транспорт stdio: указанная команда запускается на время каждого ответа.',
@@ -139,6 +145,10 @@
       'home.sub':'Локальный агент с инструментами и веб-поиском. Опиши задачу — cloudling ответит и при необходимости сам сходит в инструменты.',
       'home.composerPh':'Спроси или дай задачу…','dialog.composerPh':'Ответить…',
       'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
+      'composer.mic':'Диктовать','composer.micCancel':'Отменить запись','composer.micDone':'Готово',
+      'mic.speak':'Говорите…','mic.busy':'Распознаю…','mic.empty':'Не расслышал — ничего не распознано',
+      'mic.insecure':'Микрофон доступен только по HTTPS или на localhost','mic.denied':'Нет доступа к микрофону — разрешите его в браузере',
+      'mic.unsupported':'Этот браузер не умеет записывать звук','mic.err':'Не удалось распознать: {msg}',
       'composer.scrollDown':'Вниз','composer.scrollDownAria':'Прокрутить вниз',
       'setup.hi':'Привет! Это cloudling',
       'setup.intro':'Локальный агент с инструментами и веб-поиском. Чтобы начать, подключи движок — модель, к которой cloudling будет обращаться.',
@@ -1280,6 +1290,9 @@
      `atts` (with the image data URL / file text), so persistence is free (saved in the
      transcript → survives F5) and outgoingMessages() assembles the OWUI content array. */
   var MAX_ATT=10*1024*1024; /* soft 10 MB/file cap (base64 images bloat the request/context) */
+  /* dictation: speech needs little bitrate (keeps the upload small); one utterance is capped, a
+     slip of the finger shorter than MIC_MIN_MS is not sent */
+  var MIC_BITRATE=32000, MIC_MAX_MS=5*60*1000, MIC_MIN_MS=300, MIC_BARS=20;
   var TEXT_EXT=/\.(txt|md|markdown|csv|tsv|json|jsonl|ya?ml|toml|ini|cfg|conf|log|xml|html?|css|js|jsx|mjs|cjs|ts|tsx|py|rs|go|java|c|h|cpp|hpp|cc|rb|php|sh|bash|zsh|sql|r|lua|pl|swift|kt|scala|dart|vue|svelte|tex|rst|env|gitignore|dockerfile|makefile|diff|patch)$/i;
   function humanSize(n){ if(n==null) return ''; if(n<1024) return n+' '+t('size.b'); if(n<1024*1024) return (n/1024).toFixed(n<10240?1:0)+' '+t('size.kb'); return (n/1048576).toFixed(1)+' '+t('size.mb'); }
   function fileKind(f){
@@ -1349,6 +1362,110 @@
       else if(cd.items){ Array.prototype.slice.call(cd.items).forEach(function(it){ if(it.kind==='file'){ var f=it.getAsFile(); if(f) files.push(f); } }); }
       if(files.length){ e.preventDefault(); addFiles(files); }
     });
+    /* ---------- voice input: the microphone button ----------
+       Record one utterance (MediaRecorder), with a timer and a level meter standing in for the
+       text field, then POST the recording to /ui/transcribe and put the recognised text into
+       the field (after anything already typed) for the user to check and send. «Cancel» (or
+       Esc) drops the recording or the pending recognition. Browsers hand out the microphone only in a
+       secure context (HTTPS or localhost): elsewhere the button stays but explains why. */
+    var mic=scope.querySelector('.mic'), recTime=scope.querySelector('.rec-time'), recLevel=scope.querySelector('.rec-level'), recMsg=scope.querySelector('.rec-msg');
+    var rec=null; /* the utterance in progress: {stream, recorder, chunks, ctx, raf, timer, started, cancelled, ctrl} */
+    function micReady(){ return !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder); }
+    function recMime(){ var c=['audio/webm;codecs=opus','audio/ogg;codecs=opus','audio/mp4'];
+      for(var i=0;i<c.length;i++){ if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c[i])) return c[i]; } return ''; }
+    function recClock(ms){ var sec=Math.floor(ms/1000); return Math.floor(sec/60)+':'+('0'+(sec%60)).slice(-2); }
+    function recRelease(r){ /* let go of the microphone, the meter and the timer */
+      if(r.timer){ clearInterval(r.timer); r.timer=null; }
+      if(r.raf){ cancelAnimationFrame(r.raf); r.raf=null; }
+      if(r.stream){ r.stream.getTracks().forEach(function(tr){ tr.stop(); }); r.stream=null; }
+      if(r.ctx){ try{ r.ctx.close(); }catch(_){} r.ctx=null; }
+    }
+    function recEnd(r){ recRelease(r); if(rec===r){ rec=null; scope.classList.remove('recording','transcribing'); refresh(); } }
+    function recMeter(r){ /* scrolling bars: one per ~70 ms, height = the loudest moment in it */
+      var Ctx=window.AudioContext||window.webkitAudioContext; if(!Ctx || !recLevel) return;
+      var bars=recLevel.children, an, buf;
+      try{ r.ctx=new Ctx(); an=r.ctx.createAnalyser(); an.fftSize=512; r.ctx.createMediaStreamSource(r.stream).connect(an); buf=new Uint8Array(an.fftSize); }catch(_){ return; }
+      var hist=[], last=0, peak=0;
+      function draw(ts){
+        if(rec!==r || !r.stream) return;
+        r.raf=requestAnimationFrame(draw);
+        an.getByteTimeDomainData(buf);
+        var sum=0; for(var i=0;i<buf.length;i++){ var v=(buf[i]-128)/128; sum+=v*v; }
+        peak=Math.max(peak, Math.sqrt(sum/buf.length));
+        if(ts-last<70) return;
+        last=ts; hist.push(Math.min(1, peak*4)); peak=0; if(hist.length>bars.length) hist.shift();
+        for(var k=0;k<bars.length;k++){ var h=hist[hist.length-bars.length+k];
+          bars[k].style.height=(h===undefined?4:Math.round(4+h*18))+'px'; bars[k].style.opacity=(h===undefined?'':'1'); }
+      }
+      r.raf=requestAnimationFrame(draw);
+    }
+    function recStart(){
+      if(rec) return;
+      if(!window.isSecureContext){ toast(t('mic.insecure')); return; }
+      if(!micReady()){ toast(t('mic.unsupported')); return; }
+      var r={chunks:[], cancelled:false}; rec=r;
+      navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}).then(function(stream){
+        if(rec!==r){ stream.getTracks().forEach(function(tr){ tr.stop(); }); return; }
+        r.stream=stream;
+        var mime=recMime(), opts={audioBitsPerSecond:MIC_BITRATE}; if(mime) opts.mimeType=mime;
+        r.recorder=new MediaRecorder(stream, opts);
+        r.recorder.ondataavailable=function(e){ if(e.data && e.data.size) r.chunks.push(e.data); };
+        r.recorder.onstop=function(){ recFinish(r); };
+        r.recorder.start();
+        r.started=Date.now();
+        if(recLevel){ Array.prototype.forEach.call(recLevel.children, function(b){ b.style.height=''; b.style.opacity=''; }); }
+        if(recTime) recTime.textContent=recClock(0);
+        if(recMsg) recMsg.textContent=t('mic.speak');
+        scope.classList.add('recording');
+        r.timer=setInterval(function(){ var ms=Date.now()-r.started; if(recTime) recTime.textContent=recClock(ms); if(ms>=MIC_MAX_MS) recStop(false); }, 250);
+        recMeter(r);
+      }).catch(function(err){
+        recEnd(r);
+        toast(t((err && (err.name==='NotAllowedError' || err.name==='SecurityError')) ? 'mic.denied' : 'mic.unsupported'));
+      });
+    }
+    function recStop(cancel){
+      var r=rec; if(!r) return;
+      if(cancel) r.cancelled=true;
+      if(r.ctrl){ if(cancel){ r.ctrl.abort(); recEnd(r); } return; } /* already transcribing */
+      if(r.recorder && r.recorder.state!=='inactive'){ r.recorder.stop(); } /* → onstop → recFinish */
+      else if(cancel){ recEnd(r); }
+    }
+    function recFinish(r){
+      var took=Date.now()-(r.started||Date.now()), type=(r.recorder && r.recorder.mimeType)||'';
+      recRelease(r);
+      if(rec!==r) return;
+      if(r.cancelled || !r.chunks.length || took<MIC_MIN_MS){ recEnd(r); return; }
+      var blob=new Blob(r.chunks, {type:type}); r.chunks=[];
+      scope.classList.remove('recording'); scope.classList.add('transcribing');
+      if(recMsg) recMsg.textContent=t('mic.busy');
+      r.ctrl=new AbortController();
+      uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob, signal:r.ctrl.signal})
+        .then(function(resp){ if(!resp.ok){ return resp.text().then(function(m){ throw new Error(m||('HTTP '+resp.status)); }); } return resp.json(); })
+        .then(function(j){
+          if(rec!==r) return;
+          recEnd(r);
+          var said=((j && j.text)||'').trim();
+          if(!said){ toast(t('mic.empty')); return; }
+          var typed=(ta.value||'').trim();
+          ta.value=typed ? typed+' '+said : said;
+          ta.dispatchEvent(new Event('input')); /* same path as typing: the Send button wakes up */
+          ta.focus(); try{ ta.setSelectionRange(ta.value.length, ta.value.length); }catch(_){}
+          ta.scrollTop=ta.scrollHeight;
+        })
+        .catch(function(err){
+          if(rec!==r || (err && err.name==='AbortError')) return;
+          recEnd(r); toast(t('mic.err',{msg:((err && err.message)||'')}));
+        });
+    }
+    if(mic){
+      if(recLevel){ var barsHtml=''; for(var b=0;b<MIC_BARS;b++){ barsHtml+='<i></i>'; } recLevel.innerHTML=barsHtml; }
+      if(!micReady()) mic.classList.add('off');
+      mic.addEventListener('click', recStart);
+      scope.querySelector('.rec-cancel').addEventListener('click', function(){ recStop(true); });
+      scope.querySelector('.rec-done').addEventListener('click', function(){ recStop(false); });
+      document.addEventListener('keydown', function(e){ if(e.key==='Escape' && rec){ recStop(true); } });
+    }
     refresh();
   }
   wireComposer(document.querySelector('#view-home .entry'));
@@ -1529,6 +1646,7 @@
       if(!s) return;
       settingsFields().forEach(function(el){ var k=el.getAttribute('data-key'); if(k in s) el.value=s[k]||''; });
       document.body.classList.toggle('tts-on', !!(s.CLOUDLING_TTS_BASE_URL||'').trim()); /* «Озвучить» shows only with a TTS server */
+      document.body.classList.toggle('stt-on', !!(s.CLOUDLING_STT_BASE_URL||'').trim()); /* the microphone shows only with an STT server */
       var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
     }).catch(function(){});
   }

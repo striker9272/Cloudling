@@ -112,7 +112,8 @@ The right-hand drawer groups settings into:
 - **System prompt** — manage presets.
 - **Chat** — toggle whether the model's reasoning block is shown.
 - **Voice** — the text-to-speech server behind the **Speak** button (see
-  [Voice output](#voice-output)); saved to the env file, applied live.
+  [Voice output](#voice-output)) and the speech-to-text server behind the microphone (see
+  [Voice input](#voice-input)); saved to the env file, applied live.
 - **Tools** — configure MCP servers (`mcpServers` in `settings.json`); applied on
   the next message, no restart. See [MCP servers](#mcp-servers) below.
 - **Security** — a single **Access level** preset that the UI maps onto the
@@ -220,6 +221,33 @@ Cloudling asks for `pcm` (OpenAI's contract: 24 kHz unless the response states i
 `Content-Type`) and falls back to `wav` if the server rejects `pcm`. A server that streams its
 audio is relayed chunk by chunk; one that returns a whole file per request still works — each
 sentence group then arrives whole.
+
+## Voice input
+
+With a speech-to-text server configured, the message field gets a **microphone** button next
+to **Send**. Press it, speak, press **Done**: the browser records the utterance, the server
+passes the recording to the STT backend (`POST /ui/transcribe` → `{"text": "…"}`) and the
+recognised text lands in the message field, after anything already typed, for you to check
+and send. While recording, a timer and a level meter stand in for the text field;
+**Cancel** (or `Esc`) drops the recording. A recording is capped at 5 minutes.
+
+Any OpenAI-compatible STT server works — only `POST {base}/audio/transcriptions` is required.
+The recording is uploaded in the container the browser produced (WebM/Opus in Chromium and
+Firefox, MP4/AAC in Safari); Cloudling does not decode or convert it.
+
+| Variable | What it does |
+|---|---|
+| `CLOUDLING_STT_BASE_URL` | STT base URL including `/v1`, e.g. `http://host:9876/v1`. Empty — voice input is off and the microphone is hidden. |
+| `CLOUDLING_STT_API_KEY` | Bearer key, if the server needs one. |
+| `CLOUDLING_STT_MODEL` | `model` field (required by OpenAI itself, e.g. `whisper-1`); omitted when empty. |
+| `CLOUDLING_STT_EXTRA` | Extra form fields, as `key=value` pairs separated by commas, e.g. `language=ru`. If the server answers 400/422, the request is repeated without these fields. |
+
+**The microphone needs a secure context.** Browsers hand it out only on `https://` pages and
+on `localhost`. The desktop/tray app (which opens `localhost`) is not affected. A server
+install opened from another device over plain `http://` is: the button stays visible but
+explains the reason instead of recording. Put the UI behind an HTTPS reverse proxy to use it;
+if the proxy buffers responses, turn that off for this site so streamed answers and speech
+stay live (in Caddy: `flush_interval -1` inside `reverse_proxy`).
 
 ## First-run / onboarding
 

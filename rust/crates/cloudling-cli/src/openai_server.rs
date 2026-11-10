@@ -13,7 +13,7 @@ mod voice;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{DefaultBodyLimit, State};
 use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
@@ -28,7 +28,7 @@ use ui::{
     ui_kv_get, ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list,
     ui_settings_get, ui_settings_save_restart, ui_summarize, ui_title,
 };
-use voice::ui_speak;
+use voice::{ui_speak, ui_transcribe, MAX_TRANSCRIBE_BYTES};
 
 pub(crate) struct OpenAiServerState {
     // Engine model, served id, and permission mode are mutable behind locks so the UI
@@ -347,6 +347,11 @@ async fn serve(
             .route("/ui/title", post(ui_title))
             .route("/ui/summarize", post(ui_summarize))
             .route("/ui/speak", post(ui_speak))
+            // a recording is larger than the default request-body limit allows
+            .route(
+                "/ui/transcribe",
+                post(ui_transcribe).layer(DefaultBodyLimit::max(MAX_TRANSCRIBE_BYTES)),
+            )
             .route_layer(middleware::from_fn_with_state(
                 state.clone(),
                 ui_auth_middleware,

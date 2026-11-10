@@ -383,6 +383,11 @@ const SETTINGS_KEYS: &[&str] = &[
     "CLOUDLING_TTS_MODEL",
     "CLOUDLING_TTS_VOICE",
     "CLOUDLING_TTS_EXTRA",
+    // Voice input (`/ui/transcribe`): any OpenAI-compatible STT backend; empty base URL = off.
+    "CLOUDLING_STT_BASE_URL",
+    "CLOUDLING_STT_API_KEY",
+    "CLOUDLING_STT_MODEL",
+    "CLOUDLING_STT_EXTRA",
 ];
 
 pub(super) async fn ui_settings_get() -> Response {
