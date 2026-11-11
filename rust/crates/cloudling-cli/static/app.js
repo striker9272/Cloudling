@@ -50,7 +50,7 @@
       'home.composerPh':'Ask or give a task…','dialog.composerPh':'Reply…',
       'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
       'composer.mic':'Dictate','composer.micCancel':'Cancel recording','composer.micDone':'Done',
-      'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking','call.done':'Done','call.stop':'Stop','call.showChat':'Show chat','call.expand':'Expand','call.feed':'What Cloudling is doing',
+      'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking','call.muted':'Microphone off','call.mutedNote':'Cloudling can’t hear you','call.mute':'Turn the microphone off','call.unmute':'Turn the microphone on','call.showChat':'Show chat','call.expand':'Expand','call.feed':'What Cloudling is doing',
       'call.end':'End','call.endAria':'End the voice dialog','call.tapDone':'I’m done speaking','call.tapStop':'Interrupt','call.err':'Voice dialog: {msg}',
       'mic.speak':'Speak…','mic.busy':'Transcribing…','mic.empty':'Didn’t catch that — nothing was recognised',
       'mic.insecure':'The microphone works only over HTTPS or on localhost','mic.denied':'No access to the microphone — allow it in the browser',
@@ -152,7 +152,7 @@
       'home.composerPh':'Спроси или дай задачу…','dialog.composerPh':'Ответить…',
       'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
       'composer.mic':'Диктовать','composer.micCancel':'Отменить запись','composer.micDone':'Готово',
-      'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю','call.done':'Готово','call.stop':'Перебить','call.showChat':'Показать чат','call.expand':'Развернуть','call.feed':'Что делает Cloudling',
+      'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю','call.muted':'Микрофон выключен','call.mutedNote':'Cloudling вас не слышит','call.mute':'Выключить микрофон','call.unmute':'Включить микрофон','call.showChat':'Показать чат','call.expand':'Развернуть','call.feed':'Что делает Cloudling',
       'call.end':'Завершить','call.endAria':'Завершить голосовой диалог','call.tapDone':'Я всё сказал','call.tapStop':'Перебить','call.err':'Голосовой диалог: {msg}',
       'mic.speak':'Говорите…','mic.busy':'Распознаю…','mic.empty':'Не расслышал — ничего не распознано',
       'mic.insecure':'Микрофон доступен только по HTTPS или на localhost','mic.denied':'Нет доступа к микрофону — разрешите его в браузере',
@@ -266,7 +266,8 @@
        the `goo` filter), at rest — gathered and barely breathing (motion in app.css, `.callcloud`) */
     callCloud:'<svg class="callcloud" viewBox="0 0 40 28" width="30" height="21" aria-hidden="true"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="5"/></g></svg>',
     callDone:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
-    callStop:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
+    callMic:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
+    callMicOff:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M4 3l16 18"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
@@ -1289,6 +1290,7 @@
       if(fromRect) dockMorph(fromRect); /* slide the composer from center down into the dock */
       var dh=viewDlg.querySelector('.dhdr'); if(dh && dh.animate){ dh.animate([{opacity:0},{opacity:1}],{duration:260, easing:'ease-out'}); }
     }
+    if(call){ entry.voice=call.noted?1:2; call.noted=true; } /* said in a voice dialog: see voiceNoted */
     convo.push(entry);
     saveActive(); /* persist now so the dialog exists even before the answer */
     generating=true; setSend(btn,true); setItemGenerating(activeItem,true);
@@ -1697,26 +1699,34 @@
 
   /* ---------- settings «Основное»: load active values, save + self-restart ---------- */
   /* ---------- voice dialog ----------
-     A spoken conversation in a loop: listen → (a pause, or a tap on the button) → recognise →
+     A spoken conversation in a loop: listen → (a pause, or a tap on the cloud) → recognise →
      send as an ordinary message → the answer is spoken while it is being written → listen
      again. The microphone stays open for the whole dialog; one utterance is recorded at a time
-     and goes through the same /ui/transcribe as dictation. The end of an utterance is found
-     from the loudness alone (works with any STT server). The answer goes to /ui/speak/live:
+     and goes through the same /ui/transcribe as dictation. An utterance starts only with
+     a voice (see callVoicedness) and ends with a pause — both found right here, in the browser, so
+     any STT server will do. The answer goes to /ui/speak/live:
      the server cuts and speaks it sentence by sentence while the text is still arriving. What
      was said and answered are ordinary messages of the dialog. */
   var CALL_SILENCE_MS=1000,  /* this much quiet after speech ends the utterance */
-      CALL_SPEECH_MS=120,    /* this much unbroken sound counts as the start of speech */
+      CALL_SPEECH_MS=150,    /* this much voice counts as the start of speech (a knock or a click is shorter) */
       CALL_RESTART_MS=3000,  /* while nobody speaks the recording is restarted, so an utterance never drags a long silence along */
       CALL_MIN_LEVEL=0.012,  /* loudness (RMS, 0..1) below which nothing is speech */
       CALL_OVER_NOISE=2.5,   /* speech must be this many times louder than the room */
       CALL_PUSH_MS=120,      /* how often the growing answer is passed on to the speaker */
-      CALL_BARGE_MS=250,     /* this much unbroken speech over the answer interrupts it */
-      CALL_BARGE_OVER=2,     /* ...and it must be this many times louder than what starts an utterance */
+      CALL_BARGE_MS=250,     /* this much voice over the answer interrupts it */
+      CALL_BARGE_OVER=2,     /* ...and it must be this many times louder than a voice that starts an utterance */
+      CALL_VOICE_HZ=[80,400], /* the pitch of a human voice */
+      CALL_VOICE_RATE=8000,  /* the sound is thinned out to about this rate before the pitch is looked for */
+      CALL_VOICED_MIN=0.5,   /* how regular (0..1) a sound must be to count as a voice */
+      CALL_VOICE_LEVEL=0.004, /* loudness (RMS) below which even a voice is not listened to */
+      CALL_VOICE_OVER=1.3,   /* a voice needs to be only this many times louder than the room: it is told by its pitch, not by its loudness */
+      CALL_EARLY_MS=350,     /* this far into a pause the utterance is sent to be recognised, in case the pause is its end */
       CALL_LIVE_CHUNK_MS=300, /* the recorder hands its data over this often, so an unfinished utterance can be recognised */
       CALL_LIVE_MS=600,      /* pause between two recognitions of an unfinished utterance */
       CALL_LIVE_QUIET_MS=350, /* none once the speaker has been quiet this long: the final one is about to start */
       CALL_LIVE_MAX_MS=45000; /* ...and none for an utterance longer than this (each pass re-reads all of it) */
   var CALL_STYLE_NOTE='[Voice conversation: this message was dictated, and your reply text will be read aloud by a speech synthesizer. Just answer in plain text as usual - no tool is needed to deliver the reply. Answer the way people talk: short and to the point, usually one to three sentences, in the user\'s language. No lists, headings, tables, code or other markup; write numbers and units out in words. Give details only when asked.]';
+  var CALL_STYLE_SHORT='[Voice conversation: dictated, the reply is read aloud. Answer briefly in plain spoken text - no markup, no tool to deliver it.]';
   /* dialog preferences (ui_kv, all default ON): let the model reason before answering; let the
      user's voice interrupt the answer; show the words while they are being said */
   var callPrefs={reasoning:true, barge:true, live:true};
@@ -1732,23 +1742,76 @@
   });
   var call=null; /* {state, stream, ctx, an, outAn, rec, spk, ...} while a dialog is on */
   function callEach(sel, fn){ document.querySelectorAll(sel).forEach(fn); }
+  function callStatus(c){ return t((c.muted && c.state==='listening') ? 'call.muted' : 'call.'+c.state); }
   function callSetState(c, state){
     c.state=state; document.body.setAttribute('data-call', state);
-    callEach('.call-status', function(el){ el.textContent=t('call.'+state); });
-    var stop=(state==='thinking' || state==='speaking'), l=t(stop?'call.tapStop':'call.tapDone');
-    var cap='<span class="lbl">'+esc(t(stop?'call.stop':'call.done'))+'</span>'; /* the caption shows on the dialog screen only */
-    if(state==='listening') callEach('.cs-feed', function(el){ el.classList.remove('on'); }); /* the answer is over: its actions fold away */
-    callEach('.call-tap', function(b){ b.innerHTML=(stop?IC.callStop:IC.callDone)+cap; b.title=l; b.setAttribute('aria-label', l); b.disabled=(state==='transcribing'); });
+    callEach('.call-status', function(el){ el.textContent=callStatus(c); });
+    var l=t((state==='thinking' || state==='speaking')?'call.tapStop':'call.tapDone'); /* what a tap on the cloud does now */
+    callEach('.call-tap', function(b){ b.title=l; b.setAttribute('aria-label', l); });
+    if(state==='listening'){
+      callEach('.cs-feed', function(el){ el.classList.remove('on'); }); /* the answer is over: its actions fold away */
+      if(c.muted) callHeardText(t('call.mutedNote'), false);
+    }
   }
+  /* The microphone button. While it is off nothing is recorded or recognised and a voice cannot
+     interrupt the answer; an utterance cut short by it is dropped. The answer itself goes on. */
+  function callPaintMute(c){
+    var off=!!c.muted, l=t(off?'call.unmute':'call.mute');
+    document.body.classList.toggle('call-muted', off);
+    callEach('.call-mute', function(b){ b.innerHTML=off?IC.callMicOff:IC.callMic; b.title=l; b.setAttribute('aria-label', l); b.setAttribute('aria-pressed', off?'true':'false'); });
+    callEach('.call-status', function(el){ el.textContent=callStatus(c); });
+  }
+  function callMute(){
+    var c=call; if(!c || !c.stream) return;
+    c.muted=!c.muted;
+    c.stream.getAudioTracks().forEach(function(tr){ tr.enabled=!c.muted; });
+    if(c.muted){
+      callRecStop(c, false); c.speech=false; c.loudMs=0; c.quietMs=0; c.bargeMs=0;
+      if(c.state==='listening') callHeardText(t('call.mutedNote'), false);
+    } else if(c.state==='listening'){ callHeardText('', false); callRecStart(c); }
+    else if(c.state==='speaking' && callPrefs.barge){ c.bargeMs=0; callRecStart(c); }
+    callPaintMute(c);
+  }
+  /* Is it a voice? A voice has a pitch: its sound repeats itself 80–400 times a second, while a
+     knock, a click, a rustle or a hiss does not. The measure is how well the last few hundredths
+     of a second match themselves shifted by one such period (normalised autocorrelation, 0..1);
+     only a peak inside the range counts, so a slow thump or a hum below it is not taken for one.
+     A steady tone (a beep, a whistle) does pass — it is as regular as a voice. */
+  function callVoicedness(buf, rate){
+    var k=Math.max(1, Math.round(rate/CALL_VOICE_RATE)), n=Math.floor(buf.length/k), x=new Float32Array(n), i, j, s, mean=0;
+    for(i=0;i<n;i++){ s=0; for(j=0;j<k;j++) s+=buf[i*k+j]; x[i]=s/k; mean+=x[i]; }
+    mean/=n; for(i=0;i<n;i++) x[i]-=mean;
+    var r=rate/k, lo=Math.max(2, Math.floor(r/CALL_VOICE_HZ[1])), hi=Math.min((n>>1)-1, Math.ceil(r/CALL_VOICE_HZ[0])), best=0, prev=0, cur=0, next;
+    for(var lag=lo-1; lag<=hi+1; lag++){
+      var ab=0, aa=0, bb=0;
+      for(i=0;i+lag<n;i++){ ab+=x[i]*x[i+lag]; aa+=x[i]*x[i]; bb+=x[i+lag]*x[i+lag]; }
+      next=(aa>0 && bb>0) ? ab/Math.sqrt(aa*bb) : 0;
+      if(lag>lo && cur>=prev && cur>next && cur>best) best=cur; /* a peak inside the range, not its edge */
+      prev=cur; cur=next;
+    }
+    return best;
+  }
+  function callIsVoice(c){ c.van.getFloatTimeDomainData(c.vbuf); return callVoicedness(c.vbuf, c.ctx.sampleRate)>=CALL_VOICED_MIN; }
   function callRecStart(c){
     if(c.rec) callRecStop(c, false);
+    if(c.muted) return; /* the microphone is off */
     var chunks=[], mime=recMime(), opts={audioBitsPerSecond:MIC_BITRATE}; if(mime) opts.mimeType=mime;
     var r=new MediaRecorder(c.stream, opts);
-    r.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); };
-    r.onstop=function(){ if(r.keep && call===c) callHeard(c, new Blob(chunks, {type:r.mimeType||''})); };
-    r.parts=chunks; if(callPrefs.live) r.start(CALL_LIVE_CHUNK_MS); else r.start();
+    r.ondataavailable=function(e){ if(e.data && e.data.size) chunks.push(e.data); if(r.earlyDue){ r.earlyDue=false; callEarly(c, r); } };
+    r.onstop=function(){ if(r.keep && call===c) callHeard(c, new Blob(chunks, {type:r.mimeType||''}), r.early); };
+    r.parts=chunks; r.start(CALL_LIVE_CHUNK_MS);
     c.rec=r; c.recAt=performance.now(); c.speech=false; c.loudMs=0; c.quietMs=0;
   }
+  /* A pause may be the end of the utterance: it is sent to be recognised while the pause is still
+     being waited out, so the text is ready the moment the utterance is declared over. If the
+     speaker goes on, the answer is thrown away (callEarlyDrop) and the whole is recognised later. */
+  function callEarly(c, r){
+    if(call!==c || c.rec!==r || !c.speech || r.early || !r.parts.length) return;
+    var ctrl=new AbortController(), blob=new Blob(r.parts.slice(), {type:r.mimeType||''});
+    r.early={ctrl:ctrl, p:uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob, signal:ctrl.signal})
+      .then(function(resp){ return resp.ok?resp.json():null; }).catch(function(){ return null; })};
+  }
+  function callEarlyDrop(r){ if(!r) return; r.earlyDue=false; if(r.early){ try{ r.early.ctrl.abort(); }catch(_){} r.early=null; } }
   function callRecStop(c, keep){ var r=c.rec; c.rec=null; if(r && r.state!=='inactive'){ r.keep=!!keep; try{ r.stop(); }catch(_){} } }
   function callListen(c){ if(call!==c) return; callSetState(c, 'listening'); callRecStart(c); }
   /* what the user said — or, live, is saying right now — on the dialog screen (the end of a long text stays in view) */
@@ -1784,7 +1847,7 @@
   var CALL_DROPS=[{a:[-6,-3], b:[4,3], per:2.4}, {a:[6,-3], b:[-5,3], per:2.7}, {a:[2,5], b:[-3,-5], per:2.1}];
   var CALL_VIZ_QUIET={amp:0.45, speed:0.6},  /* swing (share of the full path) and tempo in silence */
       CALL_VIZ_LOUD={amp:1.1, speed:4, scale:1.2}, /* ...and at full voice */
-      CALL_MIC_GAIN=8, CALL_OUT_GAIN=5;      /* loudness (RMS) → 0..1 for the microphone and for the answer */
+      CALL_MIC_SPAN=4, CALL_OUT_GAIN=5;      /* the microphone is at full swing this many voice lines above the line (so a quiet speaker moves the cloud too); the answer: loudness (RMS) → 0..1 */
   var CALL_CALM=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   function callVizInit(c){
     c.viz=[]; callEach('.callviz', function(svg){ c.viz.push({svg:svg, drops:[svg.querySelector('.x1'), svg.querySelector('.x2'), svg.querySelector('.x3')]}); });
@@ -1841,23 +1904,57 @@
     c.raf=requestAnimationFrame(function(t2){ callFrame(c, t2); });
     var dt=Math.min(100, ts-(c.frameAt||ts)); c.frameAt=ts;
     var rms=rmsOf(c.an, c.buf), shown=0; /* shown: how loud the answer is right now */
-    if(c.state==='listening'){
-      var loud=rms > Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE);
-      if(loud){ c.loudMs+=dt; c.quietMs=0; if(!c.speech && c.loudMs>=CALL_SPEECH_MS) c.speech=true; }
-      else {
-        c.quietMs+=dt; if(!c.speech){ c.loudMs=0; c.noise=c.noise*0.97+rms*0.03; } /* the room, as heard between utterances */
-        if(c.speech && c.quietMs>=CALL_SILENCE_MS){ callUtterance(c); }
-        else if(!c.speech && ts-c.recAt>CALL_RESTART_MS){ callRecStop(c, false); callRecStart(c); }
+    var gate=Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE), /* quieter than this is the room... */
+        vgate=Math.max(CALL_VOICE_LEVEL, c.noise*CALL_VOICE_OVER); /* ...unless it is a voice: a quiet speaker stays well below the first line */
+    if(c.state==='listening' && !c.muted){
+      var loud=rms>gate, pitched=callIsVoice(c), voice=pitched && rms>vgate;
+      if(ts<c.calUntil){ c.noise=c.noise*0.9+rms*0.1; } /* the first half a second only measures the room, hum and all */
+      else if(c.speech){ /* inside an utterance its consonants and breaths have no pitch: a pause is neither a voice nor a loud sound */
+        if(loud || voice){ c.quietMs=0; callEarlyDrop(c.rec); }
+        else {
+          var was=c.quietMs; c.quietMs+=dt;
+          if(was<CALL_EARLY_MS && c.quietMs>=CALL_EARLY_MS && c.rec && c.rec.state==='recording'){ c.rec.earlyDue=true; try{ c.rec.requestData(); }catch(_){ c.rec.earlyDue=false; } }
+          if(c.quietMs>=CALL_SILENCE_MS) callUtterance(c);
+        }
+      } else if(voice){
+        c.loudMs+=dt; if(c.loudMs>=CALL_SPEECH_MS){ c.speech=true; c.quietMs=0; }
+        c.noise=c.noise*0.999+rms*0.001; /* a hum that never stops has a pitch too: very slowly it becomes the room */
+      } else {
+        c.loudMs=Math.max(0, c.loudMs-dt); /* a gap between syllables does not start the count over */
+        if(pitched) c.noise=c.noise*0.999+rms*0.001; /* a voice too quiet to count is still not the room: it must not raise the line it has to cross */
+        else if(!loud) c.noise=c.noise*0.97+rms*0.03; /* the room, as heard between utterances */
+        else if(!c.loudMs) c.noise=c.noise*0.995+rms*0.005; /* a lasting noise that is not a voice slowly becomes the room too */
+        if(!loud && !c.loudMs && ts-c.recAt>CALL_RESTART_MS){ callRecStop(c, false); callRecStart(c); } /* only in quiet: a restart in the middle of a sound could cut off the first consonant of a phrase */
       }
       callLive(c, ts);
     } else if(c.state==='speaking'){
       shown=rmsOf(c.outAn, c.outBuf);
       if(callPrefs.barge && c.rec){ /* the user talks over the answer → it stops, and what they are saying is the next utterance */
-        if(rms > Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE)*CALL_BARGE_OVER){ c.bargeMs=(c.bargeMs||0)+dt; if(c.bargeMs>=CALL_BARGE_MS) callBarge(c); }
-        else { c.bargeMs=0; if(ts-c.recAt>CALL_RESTART_MS) callRecStart(c); }
+        if(rms>vgate*CALL_BARGE_OVER && callIsVoice(c)){ c.bargeMs=(c.bargeMs||0)+dt; if(c.bargeMs>=CALL_BARGE_MS) callBarge(c); }
+        else { c.bargeMs=Math.max(0, (c.bargeMs||0)-dt); if(!c.bargeMs && ts-c.recAt>CALL_RESTART_MS) callRecStart(c); }
       }
     }
-    callVizFrame(c, dt, c.state==='listening' ? Math.max(0, rms-Math.max(CALL_MIN_LEVEL, c.noise*1.5))*CALL_MIC_GAIN : shown*CALL_OUT_GAIN);
+    callVizFrame(c, dt, c.state==='listening' ? (c.muted ? 0 : Math.max(0, rms-vgate)/(vgate*CALL_MIC_SPAN)) : shown*CALL_OUT_GAIN);
+  }
+  /* The backend keeps the prompt it has just read, and reading ours (system prompt, tools, the
+     dialog so far) takes seconds when something else was asked in between. So the reading starts
+     with the dialog, not with the first utterance: a request with the same beginning, dropped as
+     soon as its answer starts to arrive — by then the prompt has been read. */
+  function callWarm(){
+    if(generating) return;
+    var msgs=outgoingMessages(viewHome.hidden===false);
+    if(!msgs.length || msgs[msgs.length-1].role!=='user') msgs.push({role:'user', content:'.'});
+    var body={model:'claw', stream:true, messages:msgs}; if(!callPrefs.reasoning) body.reasoning_effort='none';
+    var ctrl=new AbortController(), dec=new TextDecoder();
+    fetch('/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, body:JSON.stringify(body), signal:ctrl.signal})
+      .then(function(r){
+        if(!r.ok || !r.body) return;
+        var rd=r.body.getReader();
+        return (function pump(){ return rd.read().then(function(x){
+          if(x.done) return;
+          if(/"content":"[^"]/.test(dec.decode(x.value, {stream:true}))){ ctrl.abort(); return; }
+          return pump(); }); })();
+      }).catch(function(){});
   }
   function startCall(){
     if(call || generating || !callAvailable()) return;
@@ -1869,14 +1966,17 @@
       c.stream=stream;
       try{ c.ctx.resume(); }catch(_){}
       c.an=c.ctx.createAnalyser(); c.an.fftSize=512; c.buf=new Uint8Array(c.an.fftSize);
-      c.ctx.createMediaStreamSource(stream).connect(c.an); /* the microphone is only measured, never played back */
+      c.van=c.ctx.createAnalyser(); c.van.fftSize=2048; c.vbuf=new Float32Array(c.van.fftSize); /* a longer look, for the pitch */
+      var src=c.ctx.createMediaStreamSource(stream); src.connect(c.an); src.connect(c.van); /* the microphone is only measured, never played back */
       c.outAn=c.ctx.createAnalyser(); c.outAn.fftSize=512; c.outBuf=new Uint8Array(c.outAn.fftSize);
       c.outAn.connect(c.ctx.destination); /* the answer plays through this node, so its level can be shown */
-      callVizInit(c); c.feedN=-1; callFeed(c, ''); callHeardText('', false);
+      callVizInit(c); c.feedN=-1; callFeed(c, ''); callHeardText('', false); callPaintMute(c);
       callEach('.call-time', function(el){ el.textContent=recClock(0); });
       c.clock=setInterval(function(){ var txt=recClock(Date.now()-c.started); callEach('.call-time', function(el){ el.textContent=txt; }); }, 500);
       document.body.classList.remove('call-min'); document.body.classList.add('in-call'); /* the dialog opens on its own screen */
       document.querySelectorAll('.entry .send').forEach(paintSend);
+      c.calUntil=performance.now()+500;
+      callWarm();
       callListen(c);
       c.raf=requestAnimationFrame(function(ts){ callFrame(c, ts); });
     }).catch(function(err){
@@ -1885,11 +1985,15 @@
     });
   }
   /* an utterance was recorded: recognise it and send it as a message */
-  function callHeard(c, blob){
+  function callHeard(c, blob, early){
     if(!blob.size){ callListen(c); return; }
-    c.ctrl=new AbortController();
-    uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob, signal:c.ctrl.signal})
-      .then(function(resp){ if(!resp.ok){ return resp.text().then(function(m){ throw new Error(m||('HTTP '+resp.status)); }); } return resp.json(); })
+    function whole(){
+      c.ctrl=new AbortController();
+      return uiFetch('/ui/transcribe',{method:'POST', headers:{'Content-Type':blob.type||'application/octet-stream'}, body:blob, signal:c.ctrl.signal})
+        .then(function(resp){ if(!resp.ok){ return resp.text().then(function(m){ throw new Error(m||('HTTP '+resp.status)); }); } return resp.json(); });
+    }
+    /* recognised ahead, during the pause (callEarly): nothing was said since, so that text is the utterance */
+    (early ? early.p.then(function(j){ return (j && call===c) ? j : whole(); }) : whole())
       .then(function(j){
         if(call!==c) return;
         c.ctrl=null;
@@ -1972,7 +2076,7 @@
     c.bargeMs=0; callSetState(c, 'listening');
     if(c.rec){ c.speech=true; c.loudMs=CALL_SPEECH_MS; c.quietMs=0; } else { callRecStart(c); }
   }
-  /* the middle button: «I'm done speaking» while listening, «Interrupt» while the answer is coming */
+  /* a tap on the cloud: «I'm done speaking» while listening, «Interrupt» while the answer is coming */
   function callTap(){
     var c=call; if(!c) return;
     if(c.state==='listening'){ callUtterance(c); return; }
@@ -1985,18 +2089,20 @@
   function endCall(){
     var c=call; if(!c) return;
     call=null;
-    callSilence(c); /* the voice stops; an answer still being written is left to finish as text */
+    callSilence(c); /* the voice stops... */
+    if(generating){ var b=dlgSend(); if(b) stopGen(b); } /* ...and so does an answer still on its way: hanging up ends the exchange */
     if(c.ctrl){ try{ c.ctrl.abort(); }catch(_){} }
     callRecStop(c, false);
     if(c.clock) clearInterval(c.clock);
     if(c.raf) cancelAnimationFrame(c.raf);
     if(c.stream) c.stream.getTracks().forEach(function(tr){ tr.stop(); });
     try{ c.ctx.close(); }catch(_){}
-    document.body.classList.remove('in-call','call-min'); document.body.removeAttribute('data-call');
+    document.body.classList.remove('in-call','call-min','call-muted'); document.body.removeAttribute('data-call');
     document.querySelectorAll('.entry .send').forEach(paintSend);
     if(c.titleDue && c.titleDue===activeId) genTitle(); /* the title put off while the dialog was on */
   }
-  callEach('.call-tap', function(b){ b.addEventListener('click', callTap); });
+  callEach('.call-tap', function(b){ b.addEventListener('click', callTap); b.addEventListener('keydown', function(e){ if(e.key==='Enter' || e.key===' '){ e.preventDefault(); callTap(); } }); });
+  callEach('.call-mute', function(b){ b.addEventListener('click', callMute); });
   callEach('.call-end', function(b){ b.addEventListener('click', endCall); });
   callEach('.cs-min', function(b){ b.addEventListener('click', function(){ callFold(true); }); });
   callEach('.cc-max', function(b){ b.addEventListener('click', function(){ callFold(false); }); });
@@ -2371,23 +2477,25 @@
     if(!parts.length) parts.push({type:'text', text:''});
     return parts;
   }
-  function outgoingMessages(){
-    var sys=activePresetPrompt();
+  /* voice dialog: ask for a spoken-style answer. The note goes in front of every message said in a
+     dialog — in the outgoing copy only, the stored text stays clean — and stays there on later turns:
+     the backend keeps the prompt it has read, and a note that moved from message to message made it
+     read the last exchange again on every turn (0.4 s). The first message of a dialog carries the
+     full note, the rest a short one. Not a system message: that sits at the very start of the
+     prompt, and changing the start makes the backend re-read all of it. */
+  function voiceNoted(m, content){
+    return (m.voice && typeof content==='string') ? (m.voice===2 ? CALL_STYLE_NOTE : CALL_STYLE_SHORT)+'\n\n'+content : content;
+  }
+  function outgoingMessages(blank){ /* blank: as for a dialog not yet begun */
+    var sys=activePresetPrompt(), list=blank?[]:convo;
     /* index of the latest user message — only it (re)sends image bytes (see userContentForBackend) */
     var lastUserIdx=-1;
-    for(var i=convo.length-1;i>=0;i--){ if(convo[i].role==='user'){ lastUserIdx=i; break; } }
+    for(var i=list.length-1;i>=0;i--){ if(list[i].role==='user'){ lastUserIdx=i; break; } }
     /* reasoning blocks are display-only — drop them from resent history so context stays lean;
        user messages may carry attachments → expand to a content array (UI-only fields dropped) */
-    var hist=convo.map(function(m, idx){ return m.role==='assistant'
+    var hist=list.map(function(m, idx){ return m.role==='assistant'
       ? {role:m.role, content:stripReasoning(m.content)}
-      : {role:m.role, content:userContentForBackend(m, idx===lastUserIdx)}; });
-    /* voice dialog: ask for a spoken-style answer. The note rides on the latest user message of
-       the outgoing copy only (the stored dialog stays clean) — not a system message: that sits
-       at the very start of the prompt, and changing the start makes the backend re-read all of
-       it (seconds of silence) when a dialog switches between text and voice. */
-    if(call && lastUserIdx>=0 && typeof hist[lastUserIdx].content==='string'){
-      hist[lastUserIdx]={role:'user', content:CALL_STYLE_NOTE+'\n\n'+hist[lastUserIdx].content};
-    }
+      : {role:m.role, content:voiceNoted(m, userContentForBackend(m, idx===lastUserIdx))}; });
     return sys ? [{role:'system', content:sys}].concat(hist) : hist;
   }
 

@@ -470,17 +470,17 @@ body.in-call.call-min .callscreen{opacity:0; visibility:hidden; transform:scale(
 .cs-act svg{flex:none; width:15px; height:15px; color:var(--ok);}
 .cs-act.bad svg{color:var(--muted);}
 .cs-act span{min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-/* the controls: one bar — what the middle button does is written on it */
+/* the controls: one bar — the microphone and the end of the dialog (a tap on the cloud ends the utterance or cuts the answer off) */
 .cs-btns{flex:none; display:flex; align-items:center; gap:10px; padding:8px; background:var(--panel); border:1px solid var(--line); border-radius:var(--r-pill); box-shadow:0 14px 40px rgba(0,0,0,.4);}
-.cs-act-btn{height:52px; min-width:168px; padding:0 22px; border-radius:var(--r-pill); border:1px solid var(--line2); background:var(--s-ctrl); color:var(--text); font:inherit; font-size:15px; font-weight:600; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:background .15s, color .15s, border-color .15s, opacity .15s, transform .1s;}
-.cs-act-btn:hover{background:var(--s-ctrl-h);}
-.cs-act-btn svg{flex:none; width:18px; height:18px;}
-body[data-call="listening"] .cs-act-btn{background:var(--accent); border-color:var(--accent); color:var(--on-accent);}
-body[data-call="listening"] .cs-act-btn:hover{background:var(--accent); filter:brightness(.93);}
-.cc-btn .lbl{display:none;}
 .cs-hang{flex:none; width:52px; height:52px; border-radius:50%; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:filter .12s, transform .1s;}
-.cs-act-btn:active,.cs-hang:active,.cc-btn:active,.cc-hang:active{transform:scale(.96);}
-.call-tap:disabled{opacity:.45; cursor:default;}
+.cs-mute:active,.cs-hang:active,.cc-btn:active,.cc-hang:active{transform:scale(.96);}
+.cs-mute{flex:none; width:52px; height:52px; border-radius:50%; background:var(--s-ctrl); border:1px solid var(--line2); color:var(--text); cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background .15s, color .15s, border-color .15s, transform .1s;}
+.cs-mute:hover{background:var(--s-ctrl-h);}
+/* the microphone is off: the button is lit, the cloud fades and nothing is heard */
+.call-mute[aria-pressed="true"],.call-mute[aria-pressed="true"]:hover{background:var(--accent); border-color:var(--accent); color:var(--on-accent);}
+.call-tap{cursor:pointer; outline:none;}
+.callviz{transition:opacity .25s ease;}
+body.call-muted[data-call="listening"] .callviz{opacity:.35;}
 .cs-hang,.cc-hang{background:#c8363b; border:none; color:#fff;}
 .cs-hang:hover,.cc-hang:hover{filter:brightness(1.08);}
 .callcard{position:absolute; top:14px; right:58px; z-index:30; width:236px; box-sizing:border-box; background:var(--panel); border:1px solid var(--line2); border-radius:16px; padding:14px; display:flex; flex-direction:column; gap:12px; box-shadow:0 12px 36px rgba(0,0,0,.45);
