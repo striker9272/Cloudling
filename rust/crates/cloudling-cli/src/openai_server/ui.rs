@@ -952,7 +952,7 @@ pub(super) async fn ui_check_backend(Json(request): Json<CheckBackendRequest>) -
 /// (`/ui/model-info`, `/ui/check-backend`): their value is a fresh per-request probe, so a
 /// browser or proxy must never serve a stale copy — otherwise a `null` cached on the first
 /// load (backend not yet reachable, e.g. over VPN) sticks until a hard refresh.
-fn no_store_json(value: Value) -> Response {
+pub(super) fn no_store_json(value: Value) -> Response {
     let mut resp = Json(value).into_response();
     resp.headers_mut().insert(
         axum::http::header::CACHE_CONTROL,

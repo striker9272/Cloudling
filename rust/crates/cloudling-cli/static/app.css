@@ -37,14 +37,6 @@ html,body{height:100%;}
 .scrolldown:hover{background:#2a2a34;}
 .hero{display:flex; align-items:center; gap:20px; flex-wrap:wrap;}
 .hero .brand{display:inline-flex; align-items:center; gap:12px;}
-.hero .brand .cloud circle{fill:var(--load);}
-/* "living" home mark: the outer lobes drift gently so the goo-merged cloud undulates */
-.hero .brand .cloud .p1{animation:hero-p1 3.1s ease-in-out infinite;}
-.hero .brand .cloud .p2{animation:hero-p2 3.6s ease-in-out infinite;}
-.hero .brand .cloud .p3{animation:hero-p3 2.8s ease-in-out infinite;}
-@keyframes hero-p1{0%,100%{transform:translate(0,0)}50%{transform:translate(0,-1.3px)}}
-@keyframes hero-p2{0%,100%{transform:translate(0,0)}50%{transform:translate(-1.3px,.7px)}}
-@keyframes hero-p3{0%,100%{transform:translate(0,0)}50%{transform:translate(1.3px,.7px)}}
 .hero .title{font-family:var(--wordmark); font-size:40px; font-weight:400; letter-spacing:-0.01em; line-height:1;}
 /* home: center the hero+composer group vertically, biased slightly above center.
    :not([hidden]) so the id specificity doesn't override .view[hidden]{display:none}
@@ -202,6 +194,8 @@ body.open-right .drawer.right{transform:translateX(0);}
 .acts button:hover{background:var(--s-ctrl-h);}
 .acts button.primary{background:var(--accent); border-color:var(--accent); color:var(--on-accent);}
 .acts button.primary:hover{filter:brightness(.93);}
+/* a «Save» with nothing to save: greyed out and inert until its fields change */
+.acts button.asleep,.acts button.asleep:hover{background:var(--s-ctrl); border-color:var(--line); color:var(--faint); cursor:default; filter:none;}
 .fieldrow{position:relative;}
 .fieldrow input{padding-right:40px;}
 /* MCP server cards: connector-style row (icon tile + name + command subtitle + compact
@@ -431,18 +425,12 @@ body:not(.stt-on) .entry .mic{display:none;}
 /* voice dialog: with both speech servers the empty composer's round button is the cloud that
    starts it. While it is on, the dialog has a screen of its own — the living cloud, the state,
    what the agent is doing; «Show chat» folds that screen into a card floating over the chat. */
-.send.call svg{display:block;}
-.callcloud circle{fill:var(--on-accent);}
-.callcloud .x1{animation:call-rest1 3.1s ease-in-out infinite;}
-.callcloud .x2{animation:call-rest2 3.6s ease-in-out infinite;}
-.callcloud .x3{animation:call-rest3 2.8s ease-in-out infinite;}
-@keyframes call-rest1{0%,100%{transform:translate(0,-3px)}50%{transform:translate(0,-4.3px)}}
-@keyframes call-rest2{0%,100%{transform:translate(-6px,1px)}50%{transform:translate(-7.3px,1.7px)}}
-@keyframes call-rest3{0%,100%{transform:translate(6px,1px)}50%{transform:translate(7.3px,1.7px)}}
+/* the blob is wider than the round button it sits in: it must not shrink or catch the clicks around it */
+.send.call .blob{display:block; flex:none; pointer-events:none; color:var(--on-accent);}
 body.in-call .entry .mic{display:none;}
-/* the drops of this cloud are moved by script (app.js, callVizFrame) so they can follow a voice */
-.callviz{display:block; overflow:visible; transform-origin:50% 50%; will-change:transform;}
-.callviz circle{fill:var(--load);}
+/* the drops of this cloud are placed by script (app.js, callVizFrame) so they can follow a voice */
+.callviz{display:block; flex:none; transform-origin:50% 50%; will-change:transform;}
+.cc-viz .callviz{margin:0 -2px;} /* its canvas has room for the widest swing, a little more than the slot */
 .callscreen{position:absolute; inset:0; z-index:30; box-sizing:border-box; padding:22px 60px 34px; background:var(--bg); display:flex; flex-direction:column; align-items:center; overflow:hidden;
   opacity:0; visibility:hidden; transform-origin:calc(100% - 176px) 76px;
   transition:transform .36s cubic-bezier(.3,.7,.2,1), opacity .24s ease, visibility 0s linear .36s;}
@@ -574,12 +562,9 @@ details.tool[open]>summary.head::after{transform:rotate(180deg);}
 .code pre{margin:0; padding:13px; overflow:auto; font-family:var(--mono); font-size:12.5px; line-height:1.55;}
 
 /* ===== organic loaders (white) ===== */
+/* the living blob: a canvas drawn by app.js (LivingBlob) in the element's `color` */
+.blob{color:var(--load);}
 .cloud{display:inline-block; vertical-align:middle;}
-.cloud circle{fill:var(--load);}
-@keyframes cd1{0%,100%{transform:translate(-6px,-3px)}50%{transform:translate(4px,3px)}}
-@keyframes cd2{0%,100%{transform:translate(6px,-3px)}50%{transform:translate(-5px,3px)}}
-@keyframes cd3{0%,100%{transform:translate(2px,5px)}50%{transform:translate(-3px,-5px)}}
-.cloud .x1{animation:cd1 2.4s ease-in-out infinite;} .cloud .x2{animation:cd2 2.7s ease-in-out infinite;} .cloud .x3{animation:cd3 2.1s ease-in-out infinite;}
 .thinking{display:flex; align-items:center; gap:11px; color:var(--muted); font-size:14px;}
 .rip{position:relative; display:inline-block; width:18px; height:18px;}
 .rip span{position:absolute; inset:0; border:2px solid var(--load); border-radius:50%; animation:rip 1.6s ease-out infinite;}

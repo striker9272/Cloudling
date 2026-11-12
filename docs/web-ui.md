@@ -222,6 +222,10 @@ Cloudling asks for `pcm` (OpenAI's contract: 24 kHz unless the response states i
 audio is relayed chunk by chunk; one that returns a whole file per request still works — each
 sentence group then arrives whole.
 
+The arrow button in the URL field checks the connection with the values typed into the form,
+before they are saved: a short phrase is requested the same way and played back, so the
+address, key, model, voice and extra fields are all checked at once.
+
 ## Voice input
 
 With a speech-to-text server configured, the message field gets a **microphone** button next
@@ -241,6 +245,9 @@ Firefox, MP4/AAC in Safari); Cloudling does not decode or convert it.
 | `CLOUDLING_STT_API_KEY` | Bearer key, if the server needs one. |
 | `CLOUDLING_STT_MODEL` | `model` field (required by OpenAI itself, e.g. `whisper-1`); omitted when empty. |
 | `CLOUDLING_STT_EXTRA` | Extra form fields, as `key=value` pairs separated by commas, e.g. `language=ru`. If the server answers 400/422, the request is repeated without these fields. |
+
+The arrow button in the URL field checks the connection with the values typed into the form,
+before they are saved: half a second of silence is sent the way a recording is.
 
 **The microphone needs a secure context.** Browsers hand it out only on `https://` pages and
 on `localhost`. The desktop/tray app (which opens `localhost`) is not affected. A server
@@ -277,16 +284,26 @@ type (a typed message is answered aloud too); the card's arrows button unfolds i
   is a separate model request, and on a backend with a single prompt-cache slot it would make
   the next answer start several seconds later.
 
-Three switches in **Settings → Voice** (stored with the UI data, all on by default):
+Four switches in **Settings → Voice** (stored with the UI data, all on by default):
 **Model reasoning in a dialog** — off sends the standard `reasoning_effort: "none"` with the
 dialog's requests (the model server must understand it; answers start sooner but are simpler —
 though a backend that caches one prompt re-reads the whole prompt once when a chat switches
 between reasoning on and off, i.e. on the first spoken message and the first typed one after);
+**A phrase while thinking** — when the answer takes more than a couple of seconds to start (the model
+is reasoning), the dialog says one short ready-made line in the same voice, so the pause does not
+read as a dropped call; each line is synthesised once and kept by the server. The dialog opens
+with a short «Connecting…» while the first lines and the backend get ready.
 **Interrupt by voice** — off leaves only the button (useful with loudspeakers, where the model
 may hear itself); **Text while you speak** — the words appear on the dialog screen as you say
 them: the unfinished recording is sent to the same `POST /ui/transcribe` again and again (a
 recording cut short is still a valid one, so no streaming protocol is needed and any STT
 server will do; it costs that server more work, so switch it off on a weak one).
+
+While a voice dialog is on — and afterwards in a chat that has spoken messages — the requests
+carry one more system message telling the model that it hears and speaks in this conversation
+(a model that takes itself for a text assistant otherwise answers that it has no microphone).
+A backend that caches one prompt re-reads the whole prompt once when a chat first turns spoken;
+that happens during «Connecting…».
 `POST /v1/chat/completions` passes a client's `reasoning_effort` on to the
 backend for any client, not only the built-in UI.
 

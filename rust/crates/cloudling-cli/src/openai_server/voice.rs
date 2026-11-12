@@ -33,6 +33,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::ui::no_store_json;
 use super::OpenAiServerState;
 
 /// The first piece is kept short so the voice starts early, but not shorter than this: a very
@@ -72,17 +73,35 @@ pub(crate) struct TtsConfig {
 impl TtsConfig {
     /// `None` when `CLOUDLING_TTS_BASE_URL` is empty — voice output is off.
     pub(crate) fn from_env() -> Option<Self> {
-        let get = |key: &str| std::env::var(key).unwrap_or_default().trim().to_string();
-        let base_url = get("CLOUDLING_TTS_BASE_URL").trim_end_matches('/').to_string();
+        let get = |key: &str| std::env::var(key).unwrap_or_default();
+        Self::from_values(
+            &get("CLOUDLING_TTS_BASE_URL"),
+            &get("CLOUDLING_TTS_API_KEY"),
+            &get("CLOUDLING_TTS_MODEL"),
+            &get("CLOUDLING_TTS_VOICE"),
+            &get("CLOUDLING_TTS_EXTRA"),
+        )
+    }
+
+    /// The settings as given: read from the environment, or typed into the settings form for a
+    /// connection check. `None` when the base URL is empty.
+    fn from_values(
+        base_url: &str,
+        api_key: &str,
+        model: &str,
+        voice: &str,
+        extra: &str,
+    ) -> Option<Self> {
+        let base_url = base_url.trim().trim_end_matches('/').to_string();
         if base_url.is_empty() {
             return None;
         }
         Some(Self {
             base_url,
-            api_key: get("CLOUDLING_TTS_API_KEY"),
-            model: get("CLOUDLING_TTS_MODEL"),
-            voice: get("CLOUDLING_TTS_VOICE"),
-            extra: parse_extra(&get("CLOUDLING_TTS_EXTRA")),
+            api_key: api_key.trim().to_string(),
+            model: model.trim().to_string(),
+            voice: voice.trim().to_string(),
+            extra: parse_extra(extra),
         })
     }
 }
@@ -1106,17 +1125,28 @@ pub(crate) struct SttConfig {
 impl SttConfig {
     /// `None` when `CLOUDLING_STT_BASE_URL` is empty — voice input is off.
     pub(crate) fn from_env() -> Option<Self> {
-        let get = |key: &str| std::env::var(key).unwrap_or_default().trim().to_string();
-        let base_url = get("CLOUDLING_STT_BASE_URL").trim_end_matches('/').to_string();
+        let get = |key: &str| std::env::var(key).unwrap_or_default();
+        Self::from_values(
+            &get("CLOUDLING_STT_BASE_URL"),
+            &get("CLOUDLING_STT_API_KEY"),
+            &get("CLOUDLING_STT_MODEL"),
+            &get("CLOUDLING_STT_EXTRA"),
+        )
+    }
+
+    /// The settings as given: read from the environment, or typed into the settings form for a
+    /// connection check. `None` when the base URL is empty.
+    fn from_values(base_url: &str, api_key: &str, model: &str, extra: &str) -> Option<Self> {
+        let base_url = base_url.trim().trim_end_matches('/').to_string();
         if base_url.is_empty() {
             return None;
         }
         Some(Self {
             base_url,
-            api_key: get("CLOUDLING_STT_API_KEY"),
-            model: get("CLOUDLING_STT_MODEL"),
+            api_key: api_key.trim().to_string(),
+            model: model.trim().to_string(),
             // same `key=value` list as `CLOUDLING_TTS_EXTRA` (e.g. `language=ru`)
-            extra: parse_extra(&get("CLOUDLING_STT_EXTRA")),
+            extra: parse_extra(extra),
         })
     }
 
@@ -1324,9 +1354,288 @@ pub(super) async fn ui_transcribe(headers: HeaderMap, audio: Bytes) -> Response 
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Ready-made phrases: short lines synthesised once and kept
+// ---------------------------------------------------------------------------------------------
+
+/// A phrase is one short line: its longest text, the most audio it may take, and how many are kept.
+const PHRASE_MAX_CHARS: usize = 80;
+const PHRASE_MAX_BYTES: usize = 4 * 1024 * 1024;
+const PHRASE_MAX_KEPT: usize = 64;
+
+/// The phrases synthesised so far, for as long as the server runs.
+#[derive(Default)]
+struct PhraseCache {
+    /// The TTS settings the kept audio was made with; other settings empty the cache.
+    made_with: String,
+    /// phrase → (sample rate, 16-bit mono PCM)
+    audio: HashMap<String, (u32, Bytes)>,
+}
+
+fn phrase_cache() -> &'static tokio::sync::Mutex<PhraseCache> {
+    static CACHE: OnceLock<tokio::sync::Mutex<PhraseCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// How quiet (a share of full scale) the edges of a phrase are cut down to, and how much of the
+/// quiet is left on each side, seconds: a synthesiser pads a short line with silence, and a
+/// phrase that fills a pause must not add one of its own.
+const PHRASE_QUIET: f32 = 0.01;
+const PHRASE_LEAD_SECS: f32 = 0.02;
+const PHRASE_TAIL_SECS: f32 = 0.08;
+
+/// 16-bit mono PCM without the silence at its ends (a little is left, so nothing is clipped).
+fn trim_silence(pcm: &[u8], rate: u32) -> &[u8] {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let floor = (PHRASE_QUIET * f32::from(i16::MAX)) as u16;
+    let loud = |sample: &[u8]| i16::from_le_bytes([sample[0], sample[1]]).unsigned_abs() > floor;
+    let samples = pcm.len() / 2;
+    let Some(first) = pcm.chunks_exact(2).position(loud) else {
+        return pcm; // silence throughout: leave it as it came
+    };
+    let last = pcm.chunks_exact(2).rposition(loud).unwrap_or(first);
+    #[allow(
+        clippy::cast_possible_truncation,
+        clippy::cast_sign_loss,
+        clippy::cast_precision_loss
+    )]
+    let keep = |secs: f32| (rate as f32 * secs) as usize;
+    let from = first.saturating_sub(keep(PHRASE_LEAD_SECS));
+    let to = (last + 1 + keep(PHRASE_TAIL_SECS)).min(samples);
+    &pcm[from * 2..to * 2]
+}
+
+/// The whole of one speech response, in memory.
+async fn collect_audio(mut audio: TtsAudio) -> Result<Vec<u8>, String> {
+    let mut pcm = std::mem::take(&mut audio.pending);
+    loop {
+        match audio.response.chunk().await {
+            Ok(Some(bytes)) => {
+                if pcm.len() + bytes.len() > PHRASE_MAX_BYTES {
+                    return Err("TTS backend sent more audio than a phrase can take".into());
+                }
+                pcm.extend_from_slice(&bytes);
+            }
+            Ok(None) => {
+                pcm.truncate(pcm.len() & !1); // whole 16-bit samples only
+                return Ok(pcm);
+            }
+            Err(error) => return Err(format!("TTS backend stream failed: {error}")),
+        }
+    }
+}
+
+fn phrase_response(rate: u32, pcm: Bytes) -> Response {
+    Response::builder()
+        .header(
+            header::CONTENT_TYPE,
+            format!("audio/L16; rate={rate}; channels=1"),
+        )
+        .header(header::CACHE_CONTROL, "no-store")
+        .body(Body::from(pcm))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// `POST /ui/speak/phrase {text}` → a short line as speech, whole (`audio/L16; rate=…; channels=1`).
+/// For lines said again and again — the voice dialog fills the pause before an answer with one —
+/// so each is synthesised once and then served from memory to every client, until the server
+/// restarts or the TTS settings change. Phrases are made one at a time: a client asking for a
+/// handful does not crowd the TTS backend, and a phrase asked for twice is made once.
+pub(super) async fn ui_speak_phrase(Json(request): Json<SpeakRequest>) -> Response {
+    let Some(config) = TtsConfig::from_env() else {
+        return tts_not_configured();
+    };
+    let text = speakable_text(&request.text);
+    if text.is_empty() || text.chars().count() > PHRASE_MAX_CHARS {
+        return (StatusCode::BAD_REQUEST, "a phrase is one short line").into_response();
+    }
+    let made_with = format!("{config:?}");
+    let mut cache = phrase_cache().lock().await;
+    if cache.made_with != made_with {
+        cache.audio.clear();
+        cache.made_with = made_with;
+    }
+    if let Some((rate, pcm)) = cache.audio.get(&text) {
+        return phrase_response(*rate, pcm.clone());
+    }
+    let started = Instant::now();
+    let mut session = TtsSession::new(config, api::build_http_client_or_default());
+    let made = match session.request(&text).await {
+        Ok(audio) => {
+            let rate = audio.rate;
+            collect_audio(audio).await.map(|pcm| (rate, pcm))
+        }
+        Err(error) => Err(error),
+    };
+    let (rate, pcm) = match made {
+        Ok((rate, pcm)) => (rate, trim_silence(&pcm, rate).to_vec()),
+        Err(error) => {
+            eprintln!("cloudling openai-serve: phrase: {error}");
+            return (StatusCode::BAD_GATEWAY, error).into_response();
+        }
+    };
+    #[allow(clippy::cast_precision_loss)]
+    let secs = pcm.len() as f64 / 2.0 / f64::from(rate);
+    eprintln!(
+        "cloudling openai-serve: phrase: {} chars → {secs:.1}s audio at {rate} Hz in {} ms, kept",
+        text.chars().count(),
+        started.elapsed().as_millis()
+    );
+    if cache.audio.len() >= PHRASE_MAX_KEPT {
+        cache.audio.clear();
+    }
+    let pcm = Bytes::from(pcm);
+    cache.audio.insert(text, (rate, pcm.clone()));
+    phrase_response(rate, pcm)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Connection checks for the settings form
+// ---------------------------------------------------------------------------------------------
+
+/// The voice settings as currently typed into the settings form, before they are saved.
+#[derive(Deserialize)]
+pub(super) struct CheckVoiceRequest {
+    base_url: String,
+    #[serde(default)]
+    api_key: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    voice: String,
+    #[serde(default)]
+    extra: String,
+    /// The phrase to speak (speech check only).
+    #[serde(default)]
+    text: String,
+}
+
+fn is_http_url(url: &str) -> bool {
+    let url = url.trim();
+    url.starts_with("http://") || url.starts_with("https://")
+}
+
+/// `POST /ui/check-tts` — speak a short phrase through the TTS backend typed into the settings
+/// form. It is the very request `/ui/speak` makes, so the address, key, model, voice and extra
+/// fields are checked together and the result can be heard. Answers like `/ui/speak`: the audio
+/// stream, or a readable error. Gated behind the UI auth like the rest of `/ui/*`.
+pub(super) async fn ui_check_tts(Json(request): Json<CheckVoiceRequest>) -> Response {
+    let config = is_http_url(&request.base_url)
+        .then(|| {
+            TtsConfig::from_values(
+                &request.base_url,
+                &request.api_key,
+                &request.model,
+                &request.voice,
+                &request.extra,
+            )
+        })
+        .flatten();
+    let Some(config) = config else {
+        return (StatusCode::BAD_REQUEST, "invalid URL").into_response();
+    };
+    let mut feed = Feed::whole(&speakable_text(&request.text));
+    let Some(first) = feed.try_piece() else {
+        return (StatusCode::BAD_REQUEST, "nothing to speak").into_response();
+    };
+    speak_stream(config, feed, first, "check-tts").await
+}
+
+/// The silent recording `/ui/check-stt` sends: its length and sample rate.
+const STT_PROBE_SECS: f32 = 0.5;
+const STT_PROBE_RATE: u32 = 16_000;
+
+/// A 16-bit mono WAV file around raw PCM samples.
+fn wav_from_pcm(rate: u32, pcm: &[u8]) -> Vec<u8> {
+    let data_len = u32::try_from(pcm.len()).unwrap_or(u32::MAX);
+    let mut wav = Vec::with_capacity(44 + pcm.len());
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&data_len.saturating_add(36).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes()); // size of the format chunk
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&rate.to_le_bytes());
+    wav.extend_from_slice(&rate.saturating_mul(2).to_le_bytes()); // bytes per second
+    wav.extend_from_slice(&2u16.to_le_bytes()); // bytes per sample
+    wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    wav.extend_from_slice(pcm);
+    wav
+}
+
+/// `POST /ui/check-stt` — send half a second of silence to the STT backend typed into the
+/// settings form, the way `/ui/transcribe` sends a recording → `{"ok": true}` or
+/// `{"ok": false, "error": "…"}`. Any answer the backend gives without an error counts: silence
+/// has no words to recognise.
+pub(super) async fn ui_check_stt(Json(request): Json<CheckVoiceRequest>) -> Response {
+    let config = is_http_url(&request.base_url)
+        .then(|| {
+            SttConfig::from_values(
+                &request.base_url,
+                &request.api_key,
+                &request.model,
+                &request.extra,
+            )
+        })
+        .flatten();
+    let Some(config) = config else {
+        return no_store_json(serde_json::json!({ "ok": false, "error": "invalid URL" }));
+    };
+    let audio = wav_from_pcm(STT_PROBE_RATE, &silence(STT_PROBE_RATE, STT_PROBE_SECS));
+    let client = api::build_http_client_or_default();
+    match transcribe(&config, &client, "audio/wav", &audio).await {
+        Ok(_) => no_store_json(serde_json::json!({ "ok": true })),
+        Err(error) => {
+            eprintln!("cloudling openai-serve: check-stt: {error}");
+            no_store_json(serde_json::json!({ "ok": false, "error": error }))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn trim_silence_cuts_the_quiet_ends_and_keeps_a_margin() {
+        let rate = 1000; // 20 samples of lead, 80 of tail are kept
+        let mut pcm = vec![0u8; 2 * 1000];
+        for sample in 400..500 {
+            pcm[sample * 2..sample * 2 + 2].copy_from_slice(&8000i16.to_le_bytes());
+        }
+        let cut = trim_silence(&pcm, rate);
+        assert_eq!(cut.len() / 2, 20 + 100 + 80);
+        assert_eq!(&cut[..2], &[0, 0]);
+        assert_eq!(&cut[40..42], &8000i16.to_le_bytes());
+        // a phrase with no room at its ends, and one that is silence throughout
+        assert_eq!(trim_silence(&pcm[800..1000], rate).len(), 200);
+        assert_eq!(trim_silence(&[0u8; 64], rate).len(), 64);
+    }
+
+    #[test]
+    fn wav_from_pcm_writes_a_header_this_module_reads_back() {
+        let wav = wav_from_pcm(16_000, &silence(16_000, 0.5));
+        assert_eq!(wav.len(), 44 + 16_000);
+        assert_eq!(parse_wav_header(&wav).unwrap(), Some((16_000, 44)));
+    }
+
+    #[test]
+    fn voice_configs_are_built_from_form_values() {
+        let tts =
+            TtsConfig::from_values(" http://host:8020/v1/ ", " key ", "", "kora", "stream=true")
+                .unwrap();
+        assert_eq!(tts.base_url, "http://host:8020/v1");
+        assert_eq!(tts.api_key, "key");
+        assert_eq!(tts.voice, "kora");
+        assert_eq!(tts.extra.get("stream"), Some(&Value::Bool(true)));
+        assert!(TtsConfig::from_values("  ", "", "", "", "").is_none());
+        let stt = SttConfig::from_values("http://host:9876/v1", "", "m", "language=ru").unwrap();
+        assert_eq!(stt.form_fields(true).len(), 2);
+        assert!(SttConfig::from_values("", "", "", "").is_none());
+        assert!(is_http_url(" https://host/v1") && !is_http_url("host:8020"));
+    }
 
     fn pieces(text: &str) -> Vec<Piece> {
         let mut seg = Segmenter::new(FIRST_PIECE_MIN_CHARS, PIECE_MAX_CHARS);

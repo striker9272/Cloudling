@@ -25,7 +25,7 @@
       'settings.voice':'Voice','settings.ttsUrl':'Speech server URL','settings.ttsKey':'API key','settings.ttsModel':'Model','settings.ttsVoice':'Voice',
       'settings.ttsExtra':'Extra request fields',
       'settings.voiceOut':'Speech output','settings.voiceIn':'Speech input','settings.sttUrl':'Recognition server URL',
-      'settings.voiceCall':'Voice dialog','settings.callReasoning':'Model reasoning in a dialog','settings.callBarge':'Interrupt by voice','settings.callLive':'Text while you speak',
+      'settings.voiceCall':'Voice dialog','settings.callFill':'A phrase while thinking','settings.callReasoning':'Model reasoning in a dialog','settings.callBarge':'Interrupt by voice','settings.callLive':'Text while you speak',
       'settings.callNote':'The voice dialog starts from the cloud button at an empty message field (both servers above are needed). <b>Reasoning</b> off — answers start sooner, but are simpler; it is switched off with the standard <b>reasoning_effort: none</b>, which the model server must understand. <b>Interrupt by voice</b> — start talking and the answer stops; with loudspeakers the model may hear itself, then switch this off and use the button. <b>Text while you speak</b> — the phrase is recognised again and again as it grows and shown on the dialog screen; this loads the speech-recognition server more, so switch it off on a weak one.',
       'settings.voiceNote':'Any OpenAI-compatible servers: text-to-speech (<b>/audio/speech</b>) and speech-to-text (<b>/audio/transcriptions</b>). An empty URL turns that side off: no “Speak” under answers, no microphone at the message field. Extra fields: <b>key=value</b> pairs separated by commas, e.g. <b>stream=true, sample_rate=48000</b> or <b>language=ru</b>; if the server rejects them, the request is repeated without them. Browsers give the microphone only over HTTPS or on localhost.',
       'common.speak':'Speak','common.stopSpeak':'Stop speaking',
@@ -51,7 +51,7 @@
       'composer.attach':'Attach a file','composer.send':'Send','composer.stop':'Stop',
       'composer.mic':'Dictate','composer.micCancel':'Cancel recording','composer.micDone':'Done',
       'composer.call':'Voice dialog','call.listening':'Listening','call.transcribing':'Transcribing…','call.thinking':'Thinking','call.speaking':'Speaking','call.muted':'Microphone off','call.mutedNote':'Cloudling can’t hear you','call.mute':'Turn the microphone off','call.unmute':'Turn the microphone on','call.showChat':'Show chat','call.expand':'Expand','call.feed':'What Cloudling is doing',
-      'call.end':'End','call.endAria':'End the voice dialog','call.tapDone':'I’m done speaking','call.tapStop':'Interrupt','call.err':'Voice dialog: {msg}',
+      'call.connecting':'Connecting…','call.fillers':'One second.|Just a moment.|Okay, let me look.|Give me a moment.|Let me work that out.|Mm, one second.|Let me think.','call.end':'End','call.endAria':'End the voice dialog','call.tapDone':'I’m done speaking','call.tapStop':'Interrupt','call.err':'Voice dialog: {msg}',
       'mic.speak':'Speak…','mic.busy':'Transcribing…','mic.empty':'Didn’t catch that — nothing was recognised',
       'mic.insecure':'The microphone works only over HTTPS or on localhost','mic.denied':'No access to the microphone — allow it in the browser',
       'mic.unsupported':'This browser cannot record audio','mic.err':'Speech recognition failed: {msg}',
@@ -91,7 +91,7 @@
       'err.emptyBodyReason':'The turn finished with no answer text (reasoning only). Try regenerating.',
       'err.truncated':'The answer was cut off by the context limit — regenerate to get the full one.',
       'err.saveDialog':'Couldn’t save the chat','err.deleteDialog':'Couldn’t delete the chat',
-      'conn.ok':'Connected','conn.fail':'Couldn’t connect',
+      'conn.ok':'Connected','conn.fail':'Couldn’t connect','conn.probe':'Connection check',
       'att.tooBig':'File “{name}” is over 10 MB — skipped','att.readFail':'Couldn’t read “{name}”',
       'att.imageName':'image','att.pasteName':'pasted','att.fileFallback':'file','att.attachment':'Attachment','att.noName':'no name',
       'att.imageAbove':'[image “{name}” attached above]','att.fileInline':'File “{name}”:',
@@ -127,7 +127,7 @@
       'settings.voice':'Голос','settings.ttsUrl':'Адрес сервера речи','settings.ttsKey':'Ключ API','settings.ttsModel':'Модель','settings.ttsVoice':'Голос',
       'settings.ttsExtra':'Доп. поля запроса',
       'settings.voiceOut':'Озвучка','settings.voiceIn':'Распознавание речи','settings.sttUrl':'Адрес сервера распознавания',
-      'settings.voiceCall':'Голосовой диалог','settings.callReasoning':'Размышления модели в диалоге','settings.callBarge':'Перебивание голосом','settings.callLive':'Текст, пока вы говорите',
+      'settings.voiceCall':'Голосовой диалог','settings.callFill':'Фраза, пока думает','settings.callReasoning':'Размышления модели в диалоге','settings.callBarge':'Перебивание голосом','settings.callLive':'Текст, пока вы говорите',
       'settings.callNote':'Голосовой диалог запускается кнопкой-облаком при пустом поле ввода (нужны оба сервера выше). <b>Размышления</b> выключены — ответ начинается быстрее, но он проще; выключаются стандартным <b>reasoning_effort: none</b>, сервер модели должен его понимать. <b>Перебивание голосом</b> — заговорили, и ответ обрывается; с колонками модель может услышать саму себя, тогда выключите и перебивайте кнопкой. <b>Текст, пока вы говорите</b> — фраза распознаётся снова и снова по мере роста и показывается на экране диалога; сервер распознавания при этом нагружается сильнее, на слабом — выключите.',
       'settings.voiceNote':'Любые OpenAI-совместимые серверы: синтеза речи (<b>/audio/speech</b>) и распознавания (<b>/audio/transcriptions</b>). Пустой адрес выключает свою половину: нет «Озвучить» под ответами, нет микрофона у поля ввода. Доп. поля: пары <b>ключ=значение</b> через запятую, напр. <b>stream=true, sample_rate=48000</b> или <b>language=ru</b>; если сервер их не принимает, запрос повторяется без них. Браузеры дают микрофон только по HTTPS или на localhost.',
       'common.speak':'Озвучить','common.stopSpeak':'Остановить озвучку',
@@ -153,7 +153,7 @@
       'composer.attach':'Прикрепить файл','composer.send':'Отправить','composer.stop':'Остановить',
       'composer.mic':'Диктовать','composer.micCancel':'Отменить запись','composer.micDone':'Готово',
       'composer.call':'Голосовой диалог','call.listening':'Слушаю','call.transcribing':'Распознаю…','call.thinking':'Думаю','call.speaking':'Говорю','call.muted':'Микрофон выключен','call.mutedNote':'Cloudling вас не слышит','call.mute':'Выключить микрофон','call.unmute':'Включить микрофон','call.showChat':'Показать чат','call.expand':'Развернуть','call.feed':'Что делает Cloudling',
-      'call.end':'Завершить','call.endAria':'Завершить голосовой диалог','call.tapDone':'Я всё сказал','call.tapStop':'Перебить','call.err':'Голосовой диалог: {msg}',
+      'call.connecting':'Подключение…','call.fillers':'Секунду.|Сейчас.|Так, смотрю.|Минутку, прикину.|Сейчас разберусь.|Угу, секунду.|Дай подумать.','call.end':'Завершить','call.endAria':'Завершить голосовой диалог','call.tapDone':'Я всё сказал','call.tapStop':'Перебить','call.err':'Голосовой диалог: {msg}',
       'mic.speak':'Говорите…','mic.busy':'Распознаю…','mic.empty':'Не расслышал — ничего не распознано',
       'mic.insecure':'Микрофон доступен только по HTTPS или на localhost','mic.denied':'Нет доступа к микрофону — разрешите его в браузере',
       'mic.unsupported':'Этот браузер не умеет записывать звук','mic.err':'Не удалось распознать: {msg}',
@@ -193,7 +193,7 @@
       'err.emptyBodyReason':'Ход завершился без текста ответа (только рассуждение). Попробуйте перегенерировать.',
       'err.truncated':'Ответ оборван по лимиту контекста — перегенерируйте, чтобы получить полный.',
       'err.saveDialog':'Не удалось сохранить диалог','err.deleteDialog':'Не удалось удалить диалог',
-      'conn.ok':'Подключено','conn.fail':'Не удалось подключиться',
+      'conn.ok':'Подключено','conn.fail':'Не удалось подключиться','conn.probe':'Проверка связи',
       'att.tooBig':'Файл «{name}» больше 10 МБ — пропущен','att.readFail':'Не удалось прочитать «{name}»',
       'att.imageName':'изображение','att.pasteName':'вставка','att.fileFallback':'файл','att.attachment':'Вложение','att.noName':'без имени',
       'att.imageAbove':'[изображение «{name}» приложено выше]','att.fileInline':'Файл «{name}»:',
@@ -262,16 +262,153 @@
     send:'<svg width="22" height="22" viewBox="0 0 24 24" style="overflow:visible"><path fill="#16161a" stroke="#16161a" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" d="M12 6.4 L19.2 15.2 L12 13.9 L4.8 15.2 Z"/><path fill="none" stroke="#16161a" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" d="M10 19.6 H14"/></svg>',
     speak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>',
     stopSpeak:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>',
-    /* the voice-dialog button: the same living cloud as the splash and «thinking» (drops fused by
-       the `goo` filter), at rest — gathered and barely breathing (motion in app.css, `.callcloud`) */
-    callCloud:'<svg class="callcloud" viewBox="0 0 40 28" width="30" height="21" aria-hidden="true"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="5"/></g></svg>',
+    /* the voice-dialog button: the same living blob as the splash and «thinking», drifting the
+       same way but three times slower */
+    callCloud:'<canvas class="blob callcloud" data-blob="churn" data-slow="3" data-w="45" style="width:45px;height:31.5px" aria-hidden="true"></canvas>',
     callDone:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>',
     callMic:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/></svg>',
     callMicOff:'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/><path d="M4 3l16 18"/></svg>',
     warn:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 4l-8 14a2 2 0 0 0 1.7 3h16a2 2 0 0 0 1.7-3l-8-14a2 2 0 0 0-3.4 0z"/></svg>',
     doc:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>'
   };
-  function cloud(w){ var h=Math.round(w*0.7); return '<svg class="cloud" viewBox="0 0 40 28" width="'+w+'" height="'+h+'"><g filter="url(#goo)"><circle cx="20" cy="14" r="6"/><circle class="x1" cx="20" cy="14" r="5"/><circle class="x2" cx="20" cy="14" r="5"/><circle class="x3" cx="20" cy="14" r="4"/></g></svg>'; }
+  function cloud(w){ return '<canvas class="blob cloud" data-blob="churn" data-w="'+w+'" style="width:'+w+'px;height:'+(w*0.7)+'px" aria-hidden="true"></canvas>'; }
+  /* ---------- the living blob ----------
+     The cloud of drops that fuse into one shape: the splash, «thinking», the home mark, the
+     voice-dialog button and the dialog's own cloud. Drawn by hand on a <canvas class="blob">,
+     the way an SVG blur + alpha-threshold filter does it: the drops are laid on a small grid, the
+     grid is blurred, and the canvas shows where the blur is above a threshold. Not left to such a
+     filter because browsers disagree on it: Firefox places the filtered picture with sub-pixel
+     errors, so a slow drift came out in jerks.
+     Markup: data-blob (kind), data-w (CSS width, px); optional data-vb (view box, user units),
+     data-slow (slow the drift down this many times), data-driven (drops are placed by the
+     caller: set `offsets`, call draw()). The colour is the element's CSS `color`. */
+  var BLOB_THRESH=0.45,   /* where the blur is cut (the edge of the shape) */
+      BLOB_MAX_PX=40000,  /* a big blob is drawn a little coarser than the screen rather than cost more than this many pixels a frame */
+      BLOB_GRID=[2,4];    /* cells per user unit of the grid the blur is computed on: at least, at most */
+  /* drops: radius, resting centre, and for a moving drop the two ends of its path (offsets from
+     the centre) with the period of the round trip, seconds; sigma — the blur that fuses them */
+  var BLOB_KINDS={
+    churn:{sigma:2.8, drops:[{r:6, at:[20,14]}, {r:5, at:[20,14], a:[-6,-3], b:[4,3], per:2.4}, {r:5, at:[20,14], a:[6,-3], b:[-5,3], per:2.7}, {r:4, at:[20,14], a:[2,5], b:[-3,-5], per:2.1}]},
+    home:{sigma:1.7, drops:[{r:6, at:[20,14]}, {r:5, at:[20,11], a:[0,0], b:[0,-1.3], per:3.1}, {r:5, at:[14,15], a:[0,0], b:[-1.3,0.7], per:3.6}, {r:5, at:[26,15], a:[0,0], b:[1.3,0.7], per:2.8}]}
+  };
+  /* Gaussian blur as three box blurs: the widths (in cells) whose combined spread is sigma */
+  function blobBoxes(sigma){
+    var wl=Math.floor(Math.sqrt(4*sigma*sigma+1)); if(wl%2===0) wl--;
+    var m=Math.round((12*sigma*sigma-3*wl*wl-12*wl-9)/(-4*wl-4));
+    return [0,1,2].map(function(i){ return i<m?wl:wl+2; });
+  }
+  /* one box blur along rows (step 1) or columns (step w) of a w×h field, src → dst; beyond the field is empty */
+  function blobBox(src, dst, w, h, size, vertical){
+    var rad=(size-1)/2, lines=vertical?w:h, len=vertical?h:w, stride=vertical?w:1, inv=1/size;
+    for(var l=0;l<lines;l++){
+      var base=vertical?l:l*w, sum=0, i;
+      for(i=0;i<rad && i<len;i++) sum+=src[base+i*stride];
+      for(i=0;i<len;i++){
+        var add=i+rad, drop=i-rad-1;
+        if(add<len) sum+=src[base+add*stride];
+        if(drop>=0) sum-=src[base+drop*stride];
+        dst[base+i*stride]=sum*inv;
+      }
+    }
+  }
+  /* CSS `ease-in-out`, cubic-bezier(.42,0,.58,1), as a table: the drift keeps its familiar pace */
+  var BLOB_EASE=(function(){
+    var out=new Float32Array(201);
+    for(var i=0;i<=200;i++){
+      var x=i/200, lo=0, hi=1, t=x;
+      for(var k=0;k<30;k++){ t=(lo+hi)/2; var bx=3*(1-t)*(1-t)*t*0.42+3*(1-t)*t*t*0.58+t*t*t; if(bx<x) lo=t; else hi=t; }
+      out[i]=3*(1-t)*t*t+t*t*t;
+    }
+    return out;
+  })();
+  function blobEase(p){ var q=Math.max(0, Math.min(1, p))*200, j=Math.min(199, q|0); return BLOB_EASE[j]+(BLOB_EASE[j+1]-BLOB_EASE[j])*(q-j); }
+  function LivingBlob(cv){
+    var ds=cv.dataset, vb=(ds.vb||'0 0 40 28').split(/\s+/).map(Number);
+    this.cv=cv; this.kind=BLOB_KINDS[ds.blob]||BLOB_KINDS.churn; this.vb=vb;
+    this.w=parseFloat(ds.w)||40; this.slow=parseFloat(ds.slow)||1; this.driven=!!ds.driven;
+    this.offsets=null; /* driven: [[dx,dy], …] for the moving drops, in their order */
+    this.ctx=cv.getContext('2d'); this.fit();
+  }
+  /* size the canvas for the screen (called again when the window or its zoom changes) */
+  LivingBlob.prototype.fit=function(){
+    var vb=this.vb, w=this.w, h=w*vb[3]/vb[2], dpr=window.devicePixelRatio||1;
+    var k=Math.min(dpr, Math.sqrt(BLOB_MAX_PX/(w*h)));
+    var W=Math.max(1, Math.round(w*k)), H=Math.max(1, Math.round(h*k)), cv=this.cv;
+    cv.width=W; cv.height=H; cv.style.width=w+'px'; cv.style.height=h+'px';
+    this.W=W; this.H=H; this.unit=vb[2]/W; /* user units per canvas pixel */
+    this.gain=Math.min(20, Math.max(3, 2.5*this.kind.sigma/this.unit)); /* an edge about one pixel wide */
+    var g=Math.max(BLOB_GRID[0], Math.min(BLOB_GRID[1], 1/this.unit));
+    this.g=g; this.gw=Math.ceil(vb[2]*g); this.gh=Math.ceil(vb[3]*g);
+    this.f1=new Float32Array(this.gw*this.gh); this.f2=new Float32Array(this.gw*this.gh);
+    this.boxes=blobBoxes(this.kind.sigma*g);
+    /* where each canvas column and row falls on the grid: the two cells around it and the share of the second */
+    var ends=function(count, cells){
+      var idx=new Int32Array(count*2), share=new Float32Array(count), step=cells/count;
+      for(var p=0;p<count;p++){ var f=(p+0.5)*step-0.5, c=Math.floor(f); idx[p*2]=Math.max(0, Math.min(cells-1, c)); idx[p*2+1]=Math.max(0, Math.min(cells-1, c+1)); share[p]=f-c; }
+      return [idx, share];
+    };
+    var cols=ends(W, this.gw), rows=ends(H, this.gh); this.ci=cols[0]; this.cw=cols[1]; this.ri=rows[0]; this.rw=rows[1];
+    this.img=this.ctx.createImageData(W, H);
+    var m=/(\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(getComputedStyle(cv).color)||[0,233,235,239], px=this.img.data;
+    for(var i=0;i<W*H;i++){ px[i*4]=+m[1]; px[i*4+1]=+m[2]; px[i*4+2]=+m[3]; }
+  };
+  /* t — seconds on the page clock; a driven blob ignores it and uses `offsets` */
+  LivingBlob.prototype.draw=function(t){
+    var kind=this.kind, n=kind.drops.length, cx=[], cy=[], rr=[], moving=0, self=this;
+    var g=this.g, gw=this.gw, gh=this.gh, x0=this.vb[0], y0=this.vb[1], f1=this.f1, f2=this.f2, x, y, k;
+    kind.drops.forEach(function(d, i){
+      var ox=0, oy=0;
+      if(d.per){
+        if(self.driven){ var o=self.offsets && self.offsets[moving]; ox=o?o[0]:d.a[0]; oy=o?o[1]:d.a[1]; }
+        else { var per=d.per*self.slow, ph=(t%per)/per, e=ph<0.5?blobEase(ph*2):blobEase(2-ph*2); ox=d.a[0]+(d.b[0]-d.a[0])*e; oy=d.a[1]+(d.b[1]-d.a[1])*e; }
+        moving++;
+      }
+      cx[i]=(d.at[0]+ox-x0)*g; cy[i]=(d.at[1]+oy-y0)*g; rr[i]=d.r*g; /* in grid cells */
+    });
+    /* the drops on the grid: how much of each cell they cover */
+    f1.fill(0);
+    for(k=0;k<n;k++){
+      var r=rr[k], xa=Math.max(0, Math.floor(cx[k]-r-1)), xb=Math.min(gw-1, Math.ceil(cx[k]+r+1)), ya=Math.max(0, Math.floor(cy[k]-r-1)), yb=Math.min(gh-1, Math.ceil(cy[k]+r+1));
+      for(y=ya;y<=yb;y++){ var dy=y+0.5-cy[k];
+        for(x=xa;x<=xb;x++){ var dx=x+0.5-cx[k], c=r-Math.sqrt(dx*dx+dy*dy)+0.5;
+          if(c>0){ if(c>1) c=1; if(c>f1[y*gw+x]) f1[y*gw+x]=c; } } }
+    }
+    /* blur: three box passes each way, f1 ↔ f2, ending in f1 */
+    var bx=this.boxes;
+    blobBox(f1, f2, gw, gh, bx[0], false); blobBox(f2, f1, gw, gh, bx[1], false); blobBox(f1, f2, gw, gh, bx[2], false);
+    blobBox(f2, f1, gw, gh, bx[0], true);  blobBox(f1, f2, gw, gh, bx[1], true);  blobBox(f2, f1, gw, gh, bx[2], true);
+    /* the canvas: the blur read between grid cells, cut at the threshold */
+    var W=this.W, H=this.H, gain=this.gain, px=this.img.data, ci=this.ci, cw=this.cw, ri=this.ri, rw=this.rw, o=3;
+    for(y=0;y<H;y++){
+      var ra=ri[y*2]*gw, rb=ri[y*2+1]*gw, wy=rw[y];
+      for(x=0;x<W;x++, o+=4){
+        var i0=ci[x*2], i1=ci[x*2+1], wx=cw[x];
+        var top=f1[ra+i0]+(f1[ra+i1]-f1[ra+i0])*wx, bot=f1[rb+i0]+(f1[rb+i1]-f1[rb+i0])*wx;
+        var al=(top+(bot-top)*wy-BLOB_THRESH)*gain+0.5;
+        px[o]=al<=0?0:(al>=1?255:(al*255)|0);
+      }
+    }
+    this.ctx.putImageData(this.img, 0, 0);
+  };
+  /* Every <canvas class="blob"> on the page gets a LivingBlob; one loop draws those that are seen
+     and stops when none is. Any change on the page (a blob added, a screen shown) starts it again
+     and keeps it looking for a moment — a screen that fades in is not seen on its first frame. */
+  var blobs=[], blobRaf=0, blobUntil=0, BLOB_LOOK_MS=1000;
+  /* shown, and not faded out (the option names are given both ways: browsers renamed them) */
+  function blobSeen(cv){ return cv.checkVisibility ? cv.checkVisibility({opacityProperty:true, visibilityProperty:true, checkOpacity:true, checkVisibilityCSS:true}) : cv.offsetParent!==null; }
+  function blobTick(now){
+    blobRaf=0;
+    document.querySelectorAll('canvas.blob').forEach(function(cv){ if(!cv._blob){ cv._blob=new LivingBlob(cv); blobs.push(cv._blob); } });
+    blobs=blobs.filter(function(b){ return b.cv.isConnected; });
+    var live=0;
+    blobs.forEach(function(b){ if(!b.driven && blobSeen(b.cv)){ live++; b.draw(now/1000); } });
+    if(live || now<blobUntil) blobRaf=requestAnimationFrame(blobTick);
+  }
+  function blobKick(){ blobUntil=performance.now()+BLOB_LOOK_MS; if(!blobRaf) blobRaf=requestAnimationFrame(blobTick); }
+  new MutationObserver(blobKick).observe(document.documentElement, {childList:true, subtree:true, attributes:true, attributeFilter:['class','hidden','style']});
+  document.addEventListener('visibilitychange', blobKick);
+  window.addEventListener('resize', function(){ blobs.forEach(function(b){ b.fit(); if(b.driven) b.draw(0); }); blobKick(); });
+  blobKick();
   var RIP='<span class="rip"><span></span><span></span></span>';
   var SKELETON='<div class="sk"><div class="b bub" style="animation-delay:0s"></div><div class="b line l1" style="animation-delay:.2s"></div><div class="b line l2" style="animation-delay:.5s"></div><div class="b code" style="animation-delay:.8s"></div><div class="b line l3" style="animation-delay:1.1s"></div></div>';
 
@@ -732,7 +869,8 @@
     var empty=!(ta.value||'').trim() && !(atts && atts.children.length);
     var asCall=empty && !call && callAvailable();
     btn.classList.toggle('call', asCall); btn.classList.toggle('off', empty && !asCall);
-    btn.innerHTML=asCall?IC.callCloud:IC.send;
+    if(!asCall) btn.innerHTML=IC.send;
+    else if(!btn.querySelector('.callcloud')) btn.innerHTML=IC.callCloud; /* already there: leave it, or its drift would jump back to the start */
     var l=t(asCall?'composer.call':'composer.send'); btn.title=l; btn.setAttribute('aria-label', l);
   }
   function setSend(btn, stop){ if(stop){ btn.classList.add('stop'); btn.classList.remove('off','call'); btn.innerHTML='<span class="sq"></span>'; btn.title=t('composer.stop'); } else { btn.classList.remove('stop'); paintSend(btn); } }
@@ -1651,9 +1789,9 @@
      false. `out` is the node to play into (default: the speakers), `nodes` collects the
      scheduled sources so the caller can cut them off. Resolves with the ctx time at which the
      scheduled audio ends. */
-  function playPcm(r, ctx, alive, out, nodes){
+  function playPcm(r, ctx, alive, out, nodes, after){ /* after — nothing plays before this moment of the context's clock */
     var m=(r.headers.get('content-type')||'').match(/rate=(\d+)/), rate=m?parseInt(m[1],10):24000;
-    var reader=r.body.getReader(), next=0, carry=null;
+    var reader=r.body.getReader(), next=after||0, carry=null;
     function pump(){
       return reader.read().then(function(res){
         if(!alive()){ try{ reader.cancel(); }catch(_){} return next; } /* stopped meanwhile */
@@ -1725,12 +1863,13 @@
       CALL_LIVE_MS=600,      /* pause between two recognitions of an unfinished utterance */
       CALL_LIVE_QUIET_MS=350, /* none once the speaker has been quiet this long: the final one is about to start */
       CALL_LIVE_MAX_MS=45000; /* ...and none for an utterance longer than this (each pass re-reads all of it) */
-  var CALL_STYLE_NOTE='[Voice conversation: this message was dictated, and your reply text will be read aloud by a speech synthesizer. Just answer in plain text as usual - no tool is needed to deliver the reply. Answer the way people talk: short and to the point, usually one to three sentences, in the user\'s language. No lists, headings, tables, code or other markup; write numbers and units out in words. Give details only when asked.]';
+  var CALL_STYLE_NOTE='[Voice conversation: this message was dictated, and your reply text will be read aloud by a speech synthesizer. Just answer in plain text as usual - no tool is needed to deliver the reply. Answer the way people talk: short and to the point, usually one to three sentences, in the user\'s language. No lists, headings, tables, code or other markup; write numbers and units out in words. Give details only when asked. Before you call a tool, first say one short line about what you are going to do.]';
   var CALL_STYLE_SHORT='[Voice conversation: dictated, the reply is read aloud. Answer briefly in plain spoken text - no markup, no tool to deliver it.]';
   /* dialog preferences (ui_kv, all default ON): let the model reason before answering; let the
-     user's voice interrupt the answer; show the words while they are being said */
-  var callPrefs={reasoning:true, barge:true, live:true};
-  [['callReason','call_reasoning','reasoning'],['callBarge','call_barge','barge'],['callLive','call_live','live']].forEach(function(p){
+     user's voice interrupt the answer; show the words while they are being said; say a ready-made
+     phrase when the answer takes a while */
+  var callPrefs={reasoning:true, barge:true, live:true, fill:true};
+  [['callReason','call_reasoning','reasoning'],['callBarge','call_barge','barge'],['callLive','call_live','live'],['callFill','call_fill','fill']].forEach(function(p){
     var sel=document.getElementById(p[0]); if(!sel) return;
     uiFetch('/ui/kv/'+p[1]).then(function(r){ return r.ok?r.json():null; }).then(function(d){
       if(d && d.value==='false'){ sel.checked=false; callPrefs[p[2]]=false; }
@@ -1840,17 +1979,17 @@
       .then(function(){ c.liveBusy=false; c.liveAt=performance.now(); });
   }
   function callUtterance(c){ if(call!==c || c.state!=='listening' || !c.speech) return; callSetState(c, 'transcribing'); callRecStop(c, true); }
-  /* The living cloud of the dialog: the drops of the «thinking» cloud, moved by script so that
-     they can follow a voice. Quiet — gathered and slow; the louder the voice (the user's while
+  /* The living cloud of the dialog: the drops of the «thinking» cloud, placed by this script so
+     that they can follow a voice. Quiet — gathered and slow; the louder the voice (the user's while
      listening, the answer's while speaking), the faster and wider the drops swing and the bigger
      the cloud. Thinking is the familiar steady churn (same paths and periods as `.cloud`). */
-  var CALL_DROPS=[{a:[-6,-3], b:[4,3], per:2.4}, {a:[6,-3], b:[-5,3], per:2.7}, {a:[2,5], b:[-3,-5], per:2.1}];
+  var CALL_DROPS=BLOB_KINDS.churn.drops.filter(function(d){ return d.per; }); /* the moving drops: path ends and period */
   var CALL_VIZ_QUIET={amp:0.45, speed:0.6},  /* swing (share of the full path) and tempo in silence */
       CALL_VIZ_LOUD={amp:1.1, speed:4, scale:1.2}, /* ...and at full voice */
       CALL_MIC_SPAN=4, CALL_OUT_GAIN=5;      /* the microphone is at full swing this many voice lines above the line (so a quiet speaker moves the cloud too); the answer: loudness (RMS) → 0..1 */
   var CALL_CALM=!!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
   function callVizInit(c){
-    c.viz=[]; callEach('.callviz', function(svg){ c.viz.push({svg:svg, drops:[svg.querySelector('.x1'), svg.querySelector('.x2'), svg.querySelector('.x3')]}); });
+    c.viz=[]; callEach('canvas.callviz', function(cv){ if(!cv._blob){ cv._blob=new LivingBlob(cv); blobs.push(cv._blob); } c.viz.push(cv._blob); });
     c.vz={lv:0, amp:CALL_VIZ_QUIET.amp, speed:CALL_VIZ_QUIET.speed, scale:1, ph:[0,0,0]};
   }
   function callVizFrame(c, dt, level){
@@ -1869,10 +2008,10 @@
     var pos=CALL_DROPS.map(function(d, i){
       v.ph[i]+=dt/1000*v.speed*2*Math.PI/d.per;
       var w=Math.cos(v.ph[i])*v.amp;
-      return 'translate('+((d.a[0]+d.b[0])/2+(d.a[0]-d.b[0])/2*w).toFixed(2)+' '+((d.a[1]+d.b[1])/2+(d.a[1]-d.b[1])/2*w).toFixed(2)+')';
+      return [(d.a[0]+d.b[0])/2+(d.a[0]-d.b[0])/2*w, (d.a[1]+d.b[1])/2+(d.a[1]-d.b[1])/2*w];
     });
     var sc='scale('+v.scale.toFixed(3)+')';
-    c.viz.forEach(function(z){ z.svg.style.transform=sc; z.drops.forEach(function(el, i){ if(el) el.setAttribute('transform', pos[i]); }); });
+    c.viz.forEach(function(b){ if(b.cv.style.transform!==sc) b.cv.style.transform=sc; if(blobSeen(b.cv)){ b.offsets=pos; b.draw(); } }); /* the screen or the card: only the one in view */
   }
   /* «What the agent is doing»: the tools the answer has called so far, the latest few */
   var CALL_FEED_MAX=4, CALL_FEED_HINT=['query','command','url','file_path','path','pattern','description','prompt'];
@@ -1906,10 +2045,11 @@
     var rms=rmsOf(c.an, c.buf), shown=0; /* shown: how loud the answer is right now */
     var gate=Math.max(CALL_MIN_LEVEL, c.noise*CALL_OVER_NOISE), /* quieter than this is the room... */
         vgate=Math.max(CALL_VOICE_LEVEL, c.noise*CALL_VOICE_OVER); /* ...unless it is a voice: a quiet speaker stays well below the first line */
-    if(c.state==='listening' && !c.muted){
+    if(c.state==='connecting'){ /* the room is measured, hum and all, while the dialog connects: before «Listening» invites the user to speak — and never from a voice */
+      if(!callIsVoice(c)) c.noise=c.noise*0.9+rms*0.1;
+    } else if(c.state==='listening' && !c.muted){
       var loud=rms>gate, pitched=callIsVoice(c), voice=pitched && rms>vgate;
-      if(ts<c.calUntil){ c.noise=c.noise*0.9+rms*0.1; } /* the first half a second only measures the room, hum and all */
-      else if(c.speech){ /* inside an utterance its consonants and breaths have no pitch: a pause is neither a voice nor a loud sound */
+      if(c.speech){ /* inside an utterance its consonants and breaths have no pitch: a pause is neither a voice nor a loud sound */
         if(loud || voice){ c.quietMs=0; callEarlyDrop(c.rec); }
         else {
           var was=c.quietMs; c.quietMs+=dt;
@@ -1939,14 +2079,15 @@
   /* The backend keeps the prompt it has just read, and reading ours (system prompt, tools, the
      dialog so far) takes seconds when something else was asked in between. So the reading starts
      with the dialog, not with the first utterance: a request with the same beginning, dropped as
-     soon as its answer starts to arrive — by then the prompt has been read. */
+     soon as its answer starts to arrive — by then the prompt has been read. Returns a promise
+     that settles when that happened (or could not). */
   function callWarm(){
-    if(generating) return;
+    if(generating) return Promise.resolve();
     var msgs=outgoingMessages(viewHome.hidden===false);
     if(!msgs.length || msgs[msgs.length-1].role!=='user') msgs.push({role:'user', content:'.'});
     var body={model:'claw', stream:true, messages:msgs}; if(!callPrefs.reasoning) body.reasoning_effort='none';
     var ctrl=new AbortController(), dec=new TextDecoder();
-    fetch('/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, body:JSON.stringify(body), signal:ctrl.signal})
+    return fetch('/v1/chat/completions', {method:'POST', headers:{'Content-Type':'application/json','X-Cloudling-UI':'1'}, body:JSON.stringify(body), signal:ctrl.signal})
       .then(function(r){
         if(!r.ok || !r.body) return;
         var rd=r.body.getReader();
@@ -1956,11 +2097,71 @@
           return pump(); }); })();
       }).catch(function(){});
   }
+  /* Ready-made phrases for the pause before an answer. With reasoning on, the model thinks for
+     a while before its first word; when that pause gets long the dialog says one short line in
+     the same voice («One second.»), so the silence does not read as a dropped call. The lines are
+     fixed (call.fillers, in the language of what the user last said): asking the model for one
+     would put a request of its own before every answer. Each is synthesised once — the server keeps the audio
+     (/ui/speak/phrase), this page keeps what it has fetched — and plays at once from memory.
+     A phrase is never part of the chat or of what the model is sent. */
+  var CALL_FILL_MS=2500,    /* no answer heard this long after the question went out → a phrase. An ordinary answer starts to sound within about 0.6–1.7 s (text 0.35–0.7 s, then speech 0.2–1 s), so this is a pause that is clearly not one */
+      CALL_FILL_READY=2,    /* the dialog starts once this many phrases are at hand... */
+      CALL_CONNECT_MS=3000, /* ...and the prompt has been read — or after this long, whichever is first. A prompt read from its start (the first voice dialog of a chat) takes the backend longer than this; the reading then goes on while the user speaks, as callWarm intends */
+      CALL_CONNECT_MIN_MS=500, /* but not sooner than this: the room is measured meanwhile (callFrame) */
+      CALL_FILL_GAP=0.15,   /* seconds of quiet between a phrase and the answer that follows it */
+      CALL_FILL_RETRY_MS=500, CALL_FILL_FAILS=3;
+  var fillPcm={}; /* phrase → {rate, f32} */
+  /* the phrases of the dialog's language: that of the last utterance, the interface's until one is heard */
+  function fillPhrases(c){ var d=I18N[c.fillLang]||I18N.en; return (d['call.fillers']||I18N.en['call.fillers']).split('|').map(function(p){ return p.trim(); }).filter(function(p){ return p; }); }
+  function fillReady(c){ return fillPhrases(c).filter(function(p){ return fillPcm[p]; }); }
+  function fillLangOf(text){ return /[Ѐ-ӿ]/.test(text) ? 'ru' : (/[A-Za-z]/.test(text) ? 'en' : ''); }
+  function fillFetch(text, signal){
+    return uiFetch('/ui/speak/phrase',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:text}), signal:signal})
+      .then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        var m=(r.headers.get('content-type')||'').match(/rate=(\d+)/), rate=m?parseInt(m[1],10):24000;
+        return r.arrayBuffer().then(function(ab){
+          var i16=new Int16Array(ab.slice(0, ab.byteLength-(ab.byteLength%2))), f32=new Float32Array(i16.length);
+          for(var i=0;i<i16.length;i++) f32[i]=i16[i]/32768;
+          fillPcm[text]={rate:rate, f32:f32};
+        });
+      });
+  }
+  /* fetch the phrases still missing, one at a time, and only while the dialog is waiting for the
+     user: the speech server takes one request at a time, and an answer must not queue behind a phrase */
+  function fillPump(c){
+    if(call!==c || !callPrefs.fill || c.fillBusy) return;
+    var todo=fillPhrases(c).filter(function(p){ return !fillPcm[p]; });
+    if(!todo.length || (c.fillFails||0)>=CALL_FILL_FAILS){ c.fillDone=true; return; }
+    c.fillBusy=true;
+    function again(){ c.fillBusy=false; fillPump(c); }
+    if(c.state!=='connecting' && c.state!=='listening'){ c.fillTimer=setTimeout(again, CALL_FILL_RETRY_MS); return; }
+    c.fillCtrl=new AbortController();
+    fillFetch(todo[0], c.fillCtrl.signal).then(function(){ c.fillCtrl=null; again(); }, function(err){
+      c.fillCtrl=null; if(!(err && err.name==='AbortError')) c.fillFails=(c.fillFails||0)+1;
+      c.fillTimer=setTimeout(again, CALL_FILL_RETRY_MS);
+    });
+  }
+  function fillHold(c){ if(c.fillCtrl){ try{ c.fillCtrl.abort(); }catch(_){} } } /* the speech server is needed for an answer */
+  /* the answer `spk` is taking a while: say one phrase (not the one said last), as interruptible as the answer itself */
+  function callFill(c, spk){
+    if(call!==c || c.spk!==spk || spk.started || c.state!=='thinking' || !callPrefs.fill) return;
+    var have=fillReady(c).filter(function(p){ return p!==c.fillLast; }); if(!have.length) return;
+    var text=have[Math.floor(Math.random()*have.length)], pcm=fillPcm[text]; c.fillLast=text;
+    var buf=c.ctx.createBuffer(1, pcm.f32.length, pcm.rate); buf.copyToChannel(pcm.f32, 0);
+    var src=c.ctx.createBufferSource(), at=c.ctx.currentTime+0.05; src.buffer=buf; src.connect(c.outAn); src.start(at);
+    spk.nodes.push(src); spk.fillEnd=at+buf.duration; /* the answer, if it comes meanwhile, waits for the phrase to end */
+    callSetState(c, 'speaking'); c.bargeMs=0; if(callPrefs.barge) callRecStart(c);
+    spk.fillOver=setTimeout(function(){
+      spk.fillOver=null;
+      if(call===c && c.spk===spk && !spk.started && c.state==='speaking'){ callRecStop(c, false); callSetState(c, 'thinking'); } /* said, and the answer is still not here */
+    }, (0.05+buf.duration)*1000);
+  }
   function startCall(){
     if(call || generating || !callAvailable()) return;
     var Ctx=window.AudioContext||window.webkitAudioContext; if(!Ctx) return;
     stopSpeech();
-    var c={state:'', noise:0.004, started:Date.now(), ctx:new Ctx()}; call=c; /* the context is created on the click: autoplay policy */
+    var c={state:'', noise:0.004, started:Date.now(), ctx:new Ctx(), fillLang:LANG}; call=c; /* the context is created on the click: autoplay policy */
     navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true, autoGainControl:true}}).then(function(stream){
       if(call!==c){ stream.getTracks().forEach(function(tr){ tr.stop(); }); return; }
       c.stream=stream;
@@ -1975,9 +2176,17 @@
       c.clock=setInterval(function(){ var txt=recClock(Date.now()-c.started); callEach('.call-time', function(el){ el.textContent=txt; }); }, 500);
       document.body.classList.remove('call-min'); document.body.classList.add('in-call'); /* the dialog opens on its own screen */
       document.querySelectorAll('.entry .send').forEach(paintSend);
-      c.calUntil=performance.now()+500;
-      callWarm();
-      callListen(c);
+      /* connecting: the backend reads the prompt and the first phrases are fetched; then the dialog starts */
+      callSetState(c, 'connecting');
+      var began=performance.now();
+      callWarm().then(function(){ c.warmed=true; });
+      fillPump(c);
+      (function wait(){
+        if(call!==c) return;
+        var phrases=!callPrefs.fill || c.fillDone || fillReady(c).length>=CALL_FILL_READY, waited=performance.now()-began;
+        if((c.warmed && phrases && waited>=CALL_CONNECT_MIN_MS) || waited>=CALL_CONNECT_MS){ callListen(c); return; }
+        setTimeout(wait, 100);
+      })();
       c.raf=requestAnimationFrame(function(ts){ callFrame(c, ts); });
     }).catch(function(err){
       if(call===c) endCall();
@@ -2011,6 +2220,8 @@
     c.feedN=-1; callFeed(c, '');
     var spk={id:'c'+Date.now().toString(36)+Math.random().toString(36).slice(2,8), ctrl:new AbortController(), nodes:[], text:'', sent:-1, over:false, audioOver:false};
     c.spk=spk; callSetState(c, 'thinking');
+    fillHold(c);
+    spk.fillTimer=setTimeout(function(){ spk.fillTimer=null; callFill(c, spk); }, CALL_FILL_MS);
     function live(){ return call===c && c.spk===spk; }
     function push(done, tries){
       if(!live()) return;
@@ -2031,11 +2242,12 @@
     uiFetch('/ui/speak/live',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:spk.id}), signal:spk.ctrl.signal})
       .then(function(r){
         if(!live()) return;
+        spk.started=true; if(spk.fillTimer){ clearTimeout(spk.fillTimer); spk.fillTimer=null; } /* the answer is here: no phrase is needed any more */
         if(r.status===204){ spk.audioOver=true; next(); return; } /* nothing to say in this answer */
         if(!r.ok || !r.body){ return r.text().then(function(m){ throw new Error(m||('HTTP '+r.status)); }); }
         callSetState(c, 'speaking');
         c.bargeMs=0; if(callPrefs.barge) callRecStart(c); /* listen under the answer, ready to be interrupted */
-        return playPcm(r, c.ctx, live, c.outAn, spk.nodes).then(function(end){
+        return playPcm(r, c.ctx, live, c.outAn, spk.nodes, spk.fillEnd ? spk.fillEnd+CALL_FILL_GAP : 0).then(function(end){
           if(!live()) return;
           setTimeout(function(){ spk.audioOver=true; next(); }, Math.max(0, end-c.ctx.currentTime)*1000+150);
         });
@@ -2049,6 +2261,8 @@
   /* send what was said */
   function callSay(c, said){
     callHeardText(said, false);
+    var lang=fillLangOf(said);
+    if(lang && I18N[lang] && lang!==c.fillLang){ c.fillLang=lang; c.fillDone=false; c.fillFails=0; fillPump(c); } /* the phrases follow the language spoken */
     callAnswer(c);
     var b=(viewHome.hidden===false) ? document.querySelector('#view-home .send') : dlgSend();
     sendFlow(said, b);
@@ -2063,7 +2277,8 @@
   /* cut the answer off — both its voice and its writing */
   function callSilence(c){
     var spk=c.spk; c.spk=null;
-    if(spk){ if(spk.timer) clearTimeout(spk.timer); try{ spk.ctrl.abort(); }catch(_){}
+    if(spk){ if(spk.timer) clearTimeout(spk.timer); if(spk.fillTimer) clearTimeout(spk.fillTimer); if(spk.fillOver) clearTimeout(spk.fillOver);
+      try{ spk.ctrl.abort(); }catch(_){}
       spk.nodes.forEach(function(n){ try{ n.stop(); }catch(_){} }); }
     genHook=null;
   }
@@ -2092,6 +2307,7 @@
     callSilence(c); /* the voice stops... */
     if(generating){ var b=dlgSend(); if(b) stopGen(b); } /* ...and so does an answer still on its way: hanging up ends the exchange */
     if(c.ctrl){ try{ c.ctrl.abort(); }catch(_){} }
+    fillHold(c); if(c.fillTimer) clearTimeout(c.fillTimer);
     callRecStop(c, false);
     if(c.clock) clearInterval(c.clock);
     if(c.raf) cancelAnimationFrame(c.raf);
@@ -2107,6 +2323,44 @@
   callEach('.cs-min', function(b){ b.addEventListener('click', function(){ callFold(true); }); });
   callEach('.cc-max', function(b){ b.addEventListener('click', function(){ callFold(false); }); });
 
+  /* ---------- «Save» buttons sleep until there is something to save ----------
+     Each button keeps a signature of its own fields as last loaded or saved. While the form
+     matches it, the button is greyed out and does nothing; an edit wakes it, undoing the edit
+     puts it back to sleep. Switches that apply at once are in no signature, so they never wake it. */
+  function keyedSig(id){
+    var out=[]; document.getElementById(id).closest('details.acc').querySelectorAll('[data-key]').forEach(function(el){ out.push(el.getAttribute('data-key')+'='+(el.value||'')); });
+    return out.join('\n');
+  }
+  var saveSigs={
+    saveRestart:function(){ return keyedSig('saveRestart'); },
+    voiceSave:function(){ return keyedSig('voiceSave'); },
+    mcpSave:function(){
+      var out=[]; document.querySelectorAll('#mcpList .mcpsrv').forEach(function(d){
+        out.push(['.m-name','.m-cmd','.m-args','.m-framing','.m-timeout'].map(function(q){ return d.querySelector(q).value||''; }).concat(d.querySelector('.m-enabled').checked?'on':'off').join('\u0001'));
+      });
+      return out.join('\n');
+    },
+    accessSave:function(){ return ['accessPreset','accessFolder','cfgTrusted','cfgAllow','cfgDeny'].map(function(id){ return document.getElementById(id).value||''; }).join('\u0001'); }
+  };
+  var savedSigs={}; /* button id → signature as last loaded or saved; absent until the first load */
+  function refreshSaves(){
+    Object.keys(savedSigs).forEach(function(id){
+      var b=document.getElementById(id), asleep=(saveSigs[id]()===savedSigs[id]);
+      b.classList.toggle('asleep', asleep);
+      if(asleep) b.setAttribute('aria-disabled','true'); else b.removeAttribute('aria-disabled');
+    });
+  }
+  function settleSaves(ids){ ids.forEach(function(id){ savedSigs[id]=saveSigs[id](); }); refreshSaves(); }
+  (function(){
+    var dr=document.querySelector('.drawer.right');
+    dr.addEventListener('input', refreshSaves);
+    dr.addEventListener('change', refreshSaves);
+    dr.addEventListener('click', function(ev){
+      if(ev.target.closest && ev.target.closest('button.asleep')){ ev.stopPropagation(); ev.preventDefault(); return; } /* nothing to save */
+      setTimeout(refreshSaves, 0); /* a server card added or removed */
+    }, true);
+  })();
+
   function settingsFields(){ return document.querySelectorAll('.drawer.right [data-key]'); }
   function loadSettings(){
     return uiFetch('/ui/settings').then(function(r){ return r.ok?r.json():null; }).then(function(s){
@@ -2116,6 +2370,7 @@
       document.body.classList.toggle('stt-on', !!(s.CLOUDLING_STT_BASE_URL||'').trim()); /* the microphone shows only with an STT server */
       document.querySelectorAll('.entry .send').forEach(paintSend); /* the voice-dialog cloud needs both */
       var sr=document.getElementById('saveRestart'); if(sr) sr.disabled=(s._can_save===false);
+      settleSaves(['saveRestart','voiceSave']);
     }).catch(function(){});
   }
   function engineUrlValid(){ var u=document.querySelector('.drawer.right [data-key="OPENAI_BASE_URL"]'); return /^https?:\/\/.+/i.test((u&&u.value||'').trim()); }
@@ -2254,7 +2509,7 @@
     btn.disabled=true;
     uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mcpServers:out, mcpServersDisabled:outDisabled})})
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.disabled=false; mcpStatus(true,t('settings.savedNextMsg')); })
+      .then(function(){ btn.disabled=false; settleSaves(['mcpSave']); mcpStatus(true,t('settings.savedNextMsg')); })
       .catch(function(e){ btn.disabled=false; mcpStatus(false,t('settings.saveErr',{msg:((e&&e.message)||'')})); });
   });
 
@@ -2304,6 +2559,7 @@
       mcpServers=toRow(ms,true).concat(toRow(md,false));
       renderMcp();
       updateAccessNote();
+      settleSaves(['mcpSave','accessSave']);
     }).catch(function(){});
   }
   function accessMsg(ok,text){ var m=document.getElementById('accessMsg'); m.hidden=false; m.className='savemsg'+(ok?'':' err'); m.textContent=text; if(ok) setTimeout(function(){ m.hidden=true; }, 2600); }
@@ -2324,7 +2580,7 @@
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
       .then(function(){ return uiFetch('/ui/config/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cBody)}); })
       .then(function(r){ if(!r.ok){ return r.text().then(function(t){ throw new Error(t||('HTTP '+r.status)); }); } return r.json(); })
-      .then(function(){ btn.disabled=false; accessMsg(true,t('settings.savedNextMsg')); })
+      .then(function(){ btn.disabled=false; settleSaves(['accessSave','saveRestart','voiceSave']); /* the env fields went along */ accessMsg(true,t('settings.savedNextMsg')); })
       .catch(function(err){ btn.disabled=false; accessMsg(false,t('settings.saveErr',{msg:((err&&err.message)||'')})); });
   });
 
@@ -2370,7 +2626,7 @@
     openBtn.addEventListener('click', function(){ scrim.hidden=false; browseLoad((document.getElementById('accessFolder').value||'').trim()); });
     document.getElementById('browseCancel').addEventListener('click', function(){ scrim.hidden=true; });
     scrim.addEventListener('click', function(e){ if(e.target===scrim) scrim.hidden=true; });
-    document.getElementById('browsePick').addEventListener('click', function(){ document.getElementById('accessFolder').value=browseCur; scrim.hidden=true; });
+    document.getElementById('browsePick').addEventListener('click', function(){ document.getElementById('accessFolder').value=browseCur; scrim.hidden=true; refreshSaves(); });
   })();
   loadConfig();
 
@@ -2385,30 +2641,54 @@
     });
   })();
 
-  /* ---------- backend connection check (like OWUI) ----------
-     Real probe via the server (POST /ui/check-backend → GET <base>/models): the browser
-     can't reach the backend directly (CORS / server-only network). Uses the values
-     currently typed into the form, before saving. */
+  /* ---------- connection checks (like OWUI) ----------
+     Real probes via the server: the browser can't reach the backends directly (CORS /
+     server-only network). They use the values currently typed into the form, before saving.
+     One look for all three: the arrow spins while the probe runs, then a status pill under the field. */
   function setConnDot(state){ document.querySelectorAll('.entry .model .dot').forEach(function(d){ d.style.background = state==='err' ? '#d97b7b' : (state==='ok' ? '#5fa97e' : '#8a8b91'); }); }
-  document.getElementById('checkBackend').addEventListener('click', function(){
-    var btn=this, st=document.getElementById('checkStatus');
-    var url=(btn.closest('.fieldrow').querySelector('input').value||'').trim();
-    var keyEl=document.querySelector('input[data-key="OPENAI_API_KEY"]');
-    var key=keyEl?(keyEl.value||'').trim():'';
-    btn.classList.add('spin'); st.hidden=true;
-    uiFetch('/ui/check-backend',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({base_url:url, api_key:key})})
-      .then(function(r){ return r.ok?r.json():null; })
-      .catch(function(){ return null; })
-      .then(function(d){
+  function fieldVal(key){ var el=document.querySelector('.drawer.right [data-key="'+key+'"]'); return el?(el.value||'').trim():''; }
+  function checkPost(path, body){ return uiFetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); }
+  /* probe() → promise of {ok, error}; done(ok) — optional follow-up */
+  function wireCheck(btnId, statusId, probe, done){
+    document.getElementById(btnId).addEventListener('click', function(){
+      var btn=this, st=document.getElementById(statusId);
+      if(btn.classList.contains('spin')) return; /* already checking */
+      btn.classList.add('spin'); st.hidden=true;
+      probe().catch(function(){ return null; }).then(function(d){
         btn.classList.remove('spin'); st.hidden=false;
-        if(d && d.ok){
-          st.className='cstatus ok'; st.innerHTML='<span class="d"></span><span>'+t('conn.ok')+'</span>'; setConnDot('ok');
-          if(!configured){ configured=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; }
-        } else {
-          var why=(d&&d.error)?(' — '+esc(String(d.error)).slice(0,120)):'';
-          st.className='cstatus err'; st.innerHTML='<span class="d"></span><span>'+t('conn.fail')+why+'</span>'; setConnDot('err');
-        }
+        var ok=!!(d && d.ok), why=(!ok && d && d.error)?(' — '+esc(String(d.error)).slice(0,120)):'';
+        st.className='cstatus '+(ok?'ok':'err'); st.innerHTML='<span class="d"></span><span>'+t(ok?'conn.ok':'conn.fail')+why+'</span>';
+        if(done) done(ok);
       });
+    });
+  }
+  /* engine: GET <base>/models */
+  wireCheck('checkBackend','checkStatus', function(){
+    return checkPost('/ui/check-backend',{base_url:fieldVal('OPENAI_BASE_URL'), api_key:fieldVal('OPENAI_API_KEY')}).then(function(r){ return r.ok?r.json():null; });
+  }, function(ok){
+    setConnDot(ok?'ok':'err');
+    if(ok && !configured){ configured=true; document.getElementById('view-setup').hidden=true; viewHome.hidden=false; }
+  });
+  /* speech: a short phrase is really spoken through the server in the form, so the address, key,
+     model, voice and extra fields are all heard to work */
+  wireCheck('checkTts','checkTtsStatus', function(){
+    stopSpeech();
+    var Ctx=window.AudioContext||window.webkitAudioContext, ctx=Ctx?new Ctx():null; /* created on the click: autoplay policy */
+    function shut(){ if(ctx){ try{ ctx.close(); }catch(_){} } }
+    return checkPost('/ui/check-tts',{base_url:fieldVal('CLOUDLING_TTS_BASE_URL'), api_key:fieldVal('CLOUDLING_TTS_API_KEY'), model:fieldVal('CLOUDLING_TTS_MODEL'),
+        voice:fieldVal('CLOUDLING_TTS_VOICE'), extra:fieldVal('CLOUDLING_TTS_EXTRA'), text:t('conn.probe')})
+      .then(function(r){
+        if(!r.ok || !r.body){ shut(); return r.text().then(function(m){ return {ok:false, error:m||('HTTP '+r.status)}; }); }
+        if(!ctx){ try{ r.body.cancel(); }catch(_){} return {ok:true}; }
+        /* the server answered with audio — that is the check; the phrase plays out on its own */
+        playPcm(r, ctx, function(){ return true; }).then(function(end){ setTimeout(shut, Math.max(0, end-ctx.currentTime)*1000+300); }).catch(shut);
+        return {ok:true};
+      }, function(err){ shut(); throw err; });
+  });
+  /* recognition: the server sends half a second of silence the way a recording is sent */
+  wireCheck('checkStt','checkSttStatus', function(){
+    return checkPost('/ui/check-stt',{base_url:fieldVal('CLOUDLING_STT_BASE_URL'), api_key:fieldVal('CLOUDLING_STT_API_KEY'), model:fieldVal('CLOUDLING_STT_MODEL'),
+        extra:fieldVal('CLOUDLING_STT_EXTRA')}).then(function(r){ return r.ok?r.json():null; });
   });
 
   /* ---------- dialog list: search filter + empty states ---------- */
@@ -2486,8 +2766,16 @@
   function voiceNoted(m, content){
     return (m.voice && typeof content==='string') ? (m.voice===2 ? CALL_STYLE_NOTE : CALL_STYLE_SHORT)+'\n\n'+content : content;
   }
+  /* What the model is told about itself for a chat that is (or was) spoken. The note in a
+     message says how to answer; it does not change what the model takes itself to be — a text
+     assistant, by its system prompt — so asked to talk to someone it would answer that it has no
+     microphone. That belief only gives way at the system level. A system message does join the
+     start of the prompt, so the backend reads the whole prompt once more when a chat first turns
+     spoken; the text never changes after that, and that reading falls into «Connecting…». */
+  var CALL_SYSTEM_NOTE='This conversation is a live voice call. In it you have ears and a voice: the app you run in has connected a microphone and a speaker to you. You hear everything said near the microphone - the user, other people, other voice assistants - and everyone near the speaker hears you. So you can hold a spoken conversation with anyone or anything that talks, including another AI assistant in voice mode placed next to you. Do not tell anyone that you cannot hear or speak, or that words have to be passed to you as text: whatever is said near the microphone, you hear.';
   function outgoingMessages(blank){ /* blank: as for a dialog not yet begun */
     var sys=activePresetPrompt(), list=blank?[]:convo;
+    var spoken=!!call || list.some(function(m){ return m.voice; }); /* a voice dialog is on, or the chat has messages said in one */
     /* index of the latest user message — only it (re)sends image bytes (see userContentForBackend) */
     var lastUserIdx=-1;
     for(var i=list.length-1;i>=0;i--){ if(list[i].role==='user'){ lastUserIdx=i; break; } }
@@ -2496,7 +2784,8 @@
     var hist=list.map(function(m, idx){ return m.role==='assistant'
       ? {role:m.role, content:stripReasoning(m.content)}
       : {role:m.role, content:voiceNoted(m, userContentForBackend(m, idx===lastUserIdx))}; });
-    return sys ? [{role:'system', content:sys}].concat(hist) : hist;
+    var head=[]; if(sys) head.push({role:'system', content:sys}); if(spoken) head.push({role:'system', content:CALL_SYSTEM_NOTE});
+    return head.concat(hist);
   }
 
   function updateChip(){ var nm=t('preset.none');

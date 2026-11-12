@@ -28,7 +28,10 @@ use ui::{
     ui_kv_get, ui_kv_put, ui_model_info, ui_preset_delete, ui_preset_put, ui_presets_list,
     ui_settings_get, ui_settings_save_restart, ui_summarize, ui_title,
 };
-use voice::{ui_speak, ui_speak_live, ui_speak_push, ui_transcribe, MAX_TRANSCRIBE_BYTES};
+use voice::{
+    ui_check_stt, ui_check_tts, ui_speak, ui_speak_live, ui_speak_phrase, ui_speak_push,
+    ui_transcribe, MAX_TRANSCRIBE_BYTES,
+};
 
 pub(crate) struct OpenAiServerState {
     // Engine model, served id, and permission mode are mutable behind locks so the UI
@@ -345,6 +348,8 @@ async fn serve(
             .route("/ui/config", get(ui_config_get))
             .route("/ui/config/save", post(ui_config_save))
             .route("/ui/check-backend", post(ui_check_backend))
+            .route("/ui/check-tts", post(ui_check_tts))
+            .route("/ui/check-stt", post(ui_check_stt))
             .route("/ui/model-info", get(ui_model_info))
             .route("/ui/browse", get(ui_browse))
             .route("/ui/answer", post(ui_answer))
@@ -353,6 +358,7 @@ async fn serve(
             .route("/ui/speak", post(ui_speak))
             .route("/ui/speak/live", post(ui_speak_live))
             .route("/ui/speak/push", post(ui_speak_push))
+            .route("/ui/speak/phrase", post(ui_speak_phrase))
             // a recording is larger than the default request-body limit allows
             .route(
                 "/ui/transcribe",
